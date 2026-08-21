@@ -1,0 +1,346 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>숏츠 스튜디오 — 브라우저에서 바로 만드는 세로 영상</title>
+<meta name="description" content="영상과 이미지를 올려 9:16 숏츠·릴스를 만드는 웹 편집기. 트림, 자막, 텍스트, 배경음악까지 브라우저 안에서 처리하고 MP4로 내보냅니다.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Do+Hyeon&family=Gugi&family=Jua&family=Nanum+Gothic:wght@400;700;800&family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;700;900&family=Noto+Serif+KR:wght@600;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<header>
+  <h1>🎬 숏츠 스튜디오</h1>
+  <span class="sub">세로 영상(9:16) 편집 · 파일은 내 브라우저 밖으로 나가지 않습니다</span>
+  <div class="header-actions">
+    <span id="engineBadge" class="badge">엔진 확인 중…</span>
+    <button id="btnExportTop" class="btn primary" disabled>MP4 내보내기</button>
+  </div>
+</header>
+
+<main>
+  <!-- 왼쪽: 소재 -->
+  <aside class="panel left">
+    <h2 class="ph">소재</h2>
+    <div id="dropzone" class="dropzone">
+      <div id="dropIdle">
+        <p><strong>클릭</strong> 또는 <strong>드래그</strong>로 추가</p>
+        <p class="hint">영상(MP4/MOV/WebM/MKV) · 이미지(JPG/PNG/WebP)</p>
+      </div>
+      <p id="dropStatus" class="loading" hidden></p>
+      <input type="file" id="file" accept="video/*,image/*" multiple hidden>
+    </div>
+    <ul id="clipList" class="clip-list"></ul>
+    <div class="total-row">
+      <span>총 길이</span>
+      <strong id="totalDur">0.0초</strong>
+    </div>
+    <p id="lenWarn" class="warn" hidden>⚠️ 60초가 넘습니다. 숏츠·릴스는 60초 이하를 권장해요.</p>
+    <button id="clearAll" class="btn ghost small" hidden>전체 비우기</button>
+  </aside>
+
+  <!-- 가운데: 미리보기 + 타임라인 -->
+  <section class="stage">
+    <div class="canvas-wrap" id="canvasWrap">
+      <canvas id="canvas" width="1080" height="1920"></canvas>
+      <p id="emptyMsg" class="empty-msg">영상이나 이미지를 추가하면 미리보기가 나타납니다</p>
+      <div id="dragHint" class="drag-hint" hidden>드래그: 위치 이동 · 휠: 확대/축소</div>
+    </div>
+
+    <div class="transport">
+      <button id="btnPlay" class="btn icon" disabled>▶</button>
+      <button id="btnPrevF" class="btn icon small" title="이전 프레임" disabled>◀|</button>
+      <button id="btnNextF" class="btn icon small" title="다음 프레임" disabled>|▶</button>
+      <span class="time"><span id="tNow">0:00.0</span> / <span id="tAll">0:00.0</span></span>
+      <label class="chk"><input type="checkbox" id="safeArea"> 안전영역</label>
+      <label class="chk"><input type="checkbox" id="loopPlay" checked> 반복</label>
+    </div>
+
+    <input type="range" id="scrub" class="scrub" min="0" max="1000" value="0" step="1" disabled>
+
+    <div class="timeline" id="timeline">
+      <div class="tl-row" id="tlClips"></div>
+      <div class="tl-row thin" id="tlOverlays"></div>
+      <div class="tl-row thin" id="tlCaptions"></div>
+      <div class="tl-playhead" id="tlPlayhead"></div>
+    </div>
+    <div class="tl-legend"><span class="k k1"></span>클립<span class="k k2"></span>텍스트<span class="k k3"></span>자막</div>
+  </section>
+
+  <!-- 오른쪽: 속성 -->
+  <aside class="panel right">
+    <nav class="tabs">
+      <button class="tab active" data-tab="clip">클립</button>
+      <button class="tab" data-tab="text">텍스트</button>
+      <button class="tab" data-tab="cap">자막</button>
+      <button class="tab" data-tab="audio">오디오</button>
+      <button class="tab" data-tab="out">내보내기</button>
+    </nav>
+
+    <!-- 클립 -->
+    <div class="tabpane active" data-pane="clip">
+      <p class="none" id="clipNone">타임라인이나 왼쪽 목록에서 클립을 선택하세요.</p>
+      <div id="clipProps" hidden>
+        <h3 id="clipName" class="pname">클립</h3>
+
+        <div class="fieldset" id="trimBox">
+          <h4>트림</h4>
+          <label class="row">시작 <input type="number" id="trimStart" step="0.05" min="0"> 초
+            <button class="btn ghost tiny" id="trimStartHere" title="현재 재생 위치를 시작점으로">현재</button>
+          </label>
+          <label class="row">끝 <input type="number" id="trimEnd" step="0.05" min="0"> 초
+            <button class="btn ghost tiny" id="trimEndHere" title="현재 재생 위치를 끝점으로">현재</button>
+          </label>
+          <p class="hint" id="srcDurHint"></p>
+        </div>
+
+        <div class="fieldset" id="imgDurBox" hidden>
+          <h4>표시 시간</h4>
+          <label class="row"><input type="range" id="imgDur" min="0.5" max="15" step="0.1" value="3"><output id="imgDurOut">3.0초</output></label>
+          <label class="row">움직임
+            <select id="ken">
+              <option value="none">없음</option>
+              <option value="in">천천히 확대</option>
+              <option value="out">천천히 축소</option>
+              <option value="left">왼쪽으로 팬</option>
+              <option value="right">오른쪽으로 팬</option>
+            </select>
+          </label>
+        </div>
+
+        <div class="fieldset">
+          <h4>화면 채우기</h4>
+          <label class="row">맞춤
+            <select id="fit">
+              <option value="cover">꽉 채우기 (잘림)</option>
+              <option value="contain">전체 보이기 (여백)</option>
+            </select>
+          </label>
+          <label class="row">여백 배경
+            <select id="clipBg">
+              <option value="blur">흐린 원본</option>
+              <option value="black">검정</option>
+              <option value="white">흰색</option>
+            </select>
+          </label>
+          <label class="row">확대 <input type="range" id="scale" min="0.3" max="3" step="0.01" value="1"><output id="scaleOut">100%</output></label>
+          <label class="row">가로 <input type="range" id="offX" min="-0.5" max="0.5" step="0.005" value="0"></label>
+          <label class="row">세로 <input type="range" id="offY" min="-0.5" max="0.5" step="0.005" value="0"></label>
+          <button class="btn ghost small block" id="resetTransform">위치·확대 초기화</button>
+        </div>
+
+        <div class="fieldset">
+          <h4>페이드</h4>
+          <label class="row">인 <input type="range" id="fadeIn" min="0" max="2" step="0.05" value="0"><output id="fadeInOut">0.0초</output></label>
+          <label class="row">아웃 <input type="range" id="fadeOut" min="0" max="2" step="0.05" value="0"><output id="fadeOutOut">0.0초</output></label>
+        </div>
+
+        <div class="fieldset" id="clipAudioBox">
+          <h4>이 클립의 소리</h4>
+          <label class="row"><input type="checkbox" id="clipMuted"> 음소거</label>
+          <label class="row">볼륨 <input type="range" id="clipVol" min="0" max="1.5" step="0.01" value="1"><output id="clipVolOut">100%</output></label>
+        </div>
+      </div>
+    </div>
+
+    <!-- 텍스트 -->
+    <div class="tabpane" data-pane="text">
+      <button class="btn primary small block" id="addOverlay">+ 텍스트 추가 (현재 위치)</button>
+      <ul id="ovList" class="mini-list"></ul>
+      <div id="ovProps" hidden>
+        <div class="fieldset">
+          <h4>내용</h4>
+          <textarea id="ovText" rows="3" placeholder="훅 문구를 입력하세요"></textarea>
+        </div>
+        <div class="fieldset">
+          <h4>구간</h4>
+          <label class="row">시작 <input type="number" id="ovStart" step="0.1" min="0"> 초 <button class="btn ghost tiny" id="ovStartHere">현재</button></label>
+          <label class="row">끝 <input type="number" id="ovEnd" step="0.1" min="0"> 초 <button class="btn ghost tiny" id="ovEndHere">현재</button></label>
+        </div>
+        <div class="fieldset">
+          <h4>스타일</h4>
+          <label class="row">폰트 <select id="ovFont" class="fontsel"></select></label>
+          <label class="row">크기 <input type="range" id="ovSize" min="24" max="160" step="1" value="72"><output id="ovSizeOut">72</output></label>
+          <label class="row">색 <input type="color" id="ovColor" value="#ffffff">
+            선 <input type="color" id="ovStroke" value="#000000">
+            <input type="range" id="ovStrokeW" min="0" max="20" step="1" value="8" class="mini-range">
+          </label>
+          <label class="row">배경
+            <select id="ovBox">
+              <option value="none">없음</option>
+              <option value="dark">검정 반투명</option>
+              <option value="accent">포인트 컬러</option>
+              <option value="white">흰색</option>
+            </select>
+          </label>
+          <label class="row">정렬
+            <select id="ovAlign"><option value="center">가운데</option><option value="left">왼쪽</option><option value="right">오른쪽</option></select>
+          </label>
+        </div>
+        <div class="fieldset">
+          <h4>위치 · 효과</h4>
+          <div class="pos-grid" id="ovPos">
+            <button data-y="0.12">상단</button><button data-y="0.5">중앙</button><button data-y="0.82">하단</button>
+          </div>
+          <label class="row">세로 <input type="range" id="ovY" min="0.04" max="0.96" step="0.005" value="0.15"></label>
+          <label class="row">가로 <input type="range" id="ovX" min="0.02" max="0.98" step="0.005" value="0.5"></label>
+          <label class="row">등장
+            <select id="ovAnim">
+              <option value="none">없음</option>
+              <option value="fade">페이드</option>
+              <option value="up">아래에서 올라오기</option>
+              <option value="pop">팝</option>
+            </select>
+          </label>
+        </div>
+        <button class="btn ghost small block danger" id="delOverlay">이 텍스트 삭제</button>
+      </div>
+    </div>
+
+    <!-- 자막 -->
+    <div class="tabpane" data-pane="cap">
+      <div class="cap-actions">
+        <button class="btn primary small" id="addCap">+ 현재 위치에 자막</button>
+        <button class="btn ghost small" id="importSrt">SRT 가져오기</button>
+        <button class="btn ghost small" id="exportSrt">SRT 저장</button>
+        <input type="file" id="srtFile" accept=".srt,.vtt,text/plain" hidden>
+      </div>
+      <button class="btn ghost small block" id="autoCap" disabled title="음성 인식 서버 연결이 필요합니다 (추후 지원)">🎙 자동 자막 (준비 중)</button>
+
+      <ul id="capList" class="cap-list"></ul>
+
+      <div class="fieldset">
+        <h4>자막 스타일 (전체 공통)</h4>
+        <label class="row">폰트 <select id="capFont" class="fontsel"></select></label>
+        <label class="row">크기 <input type="range" id="capSize" min="24" max="120" step="1" value="58"><output id="capSizeOut">58</output></label>
+        <label class="row">색 <input type="color" id="capColor" value="#ffffff">
+          선 <input type="color" id="capStroke" value="#000000">
+          <input type="range" id="capStrokeW" min="0" max="20" step="1" value="9" class="mini-range">
+        </label>
+        <label class="row">배경
+          <select id="capBox">
+            <option value="none">없음</option>
+            <option value="dark">검정 반투명</option>
+            <option value="accent">포인트 컬러</option>
+            <option value="white">흰색</option>
+          </select>
+        </label>
+        <label class="row">아래 여백 <input type="range" id="capBottom" min="0.05" max="0.6" step="0.005" value="0.18"></label>
+      </div>
+    </div>
+
+    <!-- 오디오 -->
+    <div class="tabpane" data-pane="audio">
+      <div class="fieldset">
+        <h4>원본 소리</h4>
+        <label class="row">전체 볼륨 <input type="range" id="origVol" min="0" max="1.5" step="0.01" value="1"><output id="origVolOut">100%</output></label>
+        <p class="hint">클립별 볼륨은 [클립] 탭에서 따로 조절합니다.</p>
+      </div>
+      <div class="fieldset">
+        <h4>배경음악</h4>
+        <div id="bgmDrop" class="dropzone small">
+          <p>MP3 / WAV / M4A 추가</p>
+          <input type="file" id="bgmFile" accept="audio/*" hidden>
+        </div>
+        <div id="bgmProps" hidden>
+          <p class="pname" id="bgmName"></p>
+          <label class="row">볼륨 <input type="range" id="bgmVol" min="0" max="1.5" step="0.01" value="0.35"><output id="bgmVolOut">35%</output></label>
+          <label class="row">시작 지점 <input type="number" id="bgmOffset" step="0.5" min="0" value="0"> 초</label>
+          <label class="row">페이드 인 <input type="range" id="bgmFadeIn" min="0" max="5" step="0.1" value="0.5"><output id="bgmFadeInOut">0.5초</output></label>
+          <label class="row">페이드 아웃 <input type="range" id="bgmFadeOut" min="0" max="5" step="0.1" value="1"><output id="bgmFadeOutOut">1.0초</output></label>
+          <label class="row"><input type="checkbox" id="bgmLoop" checked> 영상 길이에 맞춰 반복</label>
+          <button class="btn ghost small block danger" id="delBgm">배경음악 제거</button>
+        </div>
+        <p class="hint">⚠️ 저작권이 있는 음원은 플랫폼에서 제한될 수 있습니다.</p>
+      </div>
+    </div>
+
+    <!-- 내보내기 -->
+    <div class="tabpane" data-pane="out">
+      <div class="fieldset">
+        <h4>출력 설정</h4>
+        <label class="row">해상도
+          <select id="outRes">
+            <option value="1080x1920">1080 × 1920 (권장)</option>
+            <option value="720x1280">720 × 1280 (가벼움)</option>
+            <option value="1440x2560">1440 × 2560</option>
+          </select>
+        </label>
+        <label class="row">프레임
+          <select id="outFps"><option value="30">30 fps</option><option value="24">24 fps</option><option value="60">60 fps</option></select>
+        </label>
+        <label class="row">화질
+          <select id="outQ">
+            <option value="high">높음 (권장)</option>
+            <option value="very-high">매우 높음</option>
+            <option value="medium">보통</option>
+          </select>
+        </label>
+        <label class="row">파일명 <input type="text" id="outName" value="shorts"></label>
+      </div>
+      <button class="btn primary block" id="btnExport" disabled>MP4 내보내기</button>
+      <div id="progWrap" hidden>
+        <div class="prog"><div id="progBar"></div></div>
+        <p class="hint" id="progText">준비 중…</p>
+        <button class="btn ghost small block" id="cancelExport">취소</button>
+      </div>
+      <div id="resultBox" hidden class="result">
+        <p>✅ 완성됐습니다.</p>
+        <video id="resultVideo" controls playsinline></video>
+        <a id="dlLink" class="btn primary block" download>다운로드</a>
+      </div>
+      <p class="hint" id="engineHint"></p>
+
+      <!-- 유튜브 업로드 -->
+      <div class="fieldset" id="ytBox">
+        <h4>유튜브 숏츠 업로드</h4>
+
+        <div id="ytSetup">
+          <label class="row">클라이언트 ID
+            <input type="text" id="ytClientId" placeholder="....apps.googleusercontent.com">
+          </label>
+          <p class="hint">
+            구글 클라우드 콘솔 → API 및 서비스 → 사용자 인증 정보 →
+            <strong>OAuth 클라이언트 ID(웹 애플리케이션)</strong> 를 만들고,
+            <strong>승인된 자바스크립트 원본</strong>에 이 사이트 주소를 등록하세요.
+            YouTube Data API v3 도 사용 설정해야 합니다. 입력한 ID 는 이 브라우저에만 저장됩니다.
+          </p>
+          <button class="btn ghost small block" id="ytSignIn">구글 계정 연결</button>
+        </div>
+
+        <div id="ytForm" hidden>
+          <p class="pname" id="ytAccount"></p>
+          <label class="row">제목 <input type="text" id="ytTitle" maxlength="100" placeholder="영상 제목"></label>
+          <textarea id="ytDesc" rows="3" placeholder="설명 (선택) — #Shorts 태그를 넣어두면 도움이 됩니다"></textarea>
+          <label class="row">공개 범위
+            <select id="ytPrivacy">
+              <option value="private">비공개</option>
+              <option value="unlisted">일부 공개</option>
+              <option value="public">공개</option>
+            </select>
+          </label>
+          <label class="row"><input type="checkbox" id="ytKids"> 아동용 콘텐츠입니다</label>
+          <p class="warn" id="ytPreflight" hidden></p>
+          <button class="btn primary block" id="ytUpload" disabled>유튜브에 업로드</button>
+          <div class="prog" id="ytProg" hidden><div id="ytProgBar"></div></div>
+          <p class="hint" id="ytStatus"></p>
+          <a id="ytLink" class="btn ghost small block" target="_blank" rel="noopener" hidden>유튜브에서 보기</a>
+          <button class="btn ghost small block" id="ytSignOut">계정 연결 해제</button>
+        </div>
+
+        <p class="warn">
+          ⚠️ 감사(compliance audit)를 통과하지 않은 API 프로젝트로 올린 영상은 유튜브가 <strong>비공개로 잠급니다.</strong>
+          나중에 공개로 바꿀 수도 없습니다. 공개 발행까지 하려면 구글에 감사를 신청해야 하고,
+          신청서에는 이 앱의 OAuth 흐름 데모 영상이 필요합니다.
+        </p>
+      </div>
+    </div>
+  </aside>
+</main>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

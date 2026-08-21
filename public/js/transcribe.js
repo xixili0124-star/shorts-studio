@@ -1,8 +1,7 @@
 // 자동 자막(음성 인식) 연결 지점.
 //
-// 지금은 100% 정적 사이트라 음성 인식을 붙이지 않았다.
-// 나중에 Cloudflare Workers 같은 곳에 STT 엔드포인트를 만들고
-// ENDPOINT 만 채우면 나머지 UI(자막 목록/스타일/타임라인)는 그대로 쓸 수 있다.
+// 정적 사이트는 API 키를 숨길 수 없어서 음성 인식을 직접 못 부른다.
+// Cloudflare Workers AI(Whisper)를 부르는 워커가 그 사이에 서 있다.
 //
 // 서버 쪽 계약(약속):
 //   POST {ENDPOINT}  multipart/form-data { audio: File(webm/wav), lang: 'ko' }
@@ -10,7 +9,8 @@
 
 import { uid } from './util.js';
 
-export const ENDPOINT = '';           // 예: 'https://stt.example.workers.dev/transcribe'
+// 서버 코드는 stt-worker/ 에 있다. 배포: 그 폴더에서 npx wrangler deploy
+export const ENDPOINT = 'https://shorts-studio-stt.xixili0124.workers.dev';
 export const isAvailable = () => Boolean(ENDPOINT);
 
 /**

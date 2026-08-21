@@ -1,0 +1,14 @@
+{
+  // 자동 자막 서버. Workers AI 의 Whisper 를 부른다.
+  // 배포: npx wrangler deploy   (이 폴더에서)
+  "name": "shorts-studio-stt",
+  "main": "src/index.js",
+  "compatibility_date": "2026-06-01",
+  "workers_dev": true,
+  "ai": {
+    "binding": "AI"
+  },
+  "observability": {
+    "enabled": true
+  }
+}

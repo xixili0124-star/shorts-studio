@@ -208,7 +208,8 @@
         <button class="btn ghost small" id="exportSrt">SRT 저장</button>
         <input type="file" id="srtFile" accept=".srt,.vtt,text/plain" hidden>
       </div>
-      <button class="btn ghost small block" id="autoCap" disabled title="음성 인식 서버 연결이 필요합니다 (추후 지원)">🎙 자동 자막 (준비 중)</button>
+        <button class="btn ghost small block" id="autoCap">🎙 자동 자막 만들기</button>
+        <p class="hint" id="capStatus">영상 속 말소리를 알아듣고 자막을 자동으로 채웁니다. 처리는 Cloudflare 서버에서 이뤄집니다.</p>
 
       <ul id="capList" class="cap-list"></ul>
 

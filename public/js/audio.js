@@ -15,9 +15,12 @@ export async function decodeAudioFile(file) {
   }
 }
 
-export function hasAnyAudio() {
-  if (project.audio.bgm?.buffer) return true;
+export function hasClipAudio() {
   return project.clips.some(c => c.type === 'video' && !c.muted && (c.volume ?? 1) > 0);
+}
+
+export function hasAnyAudio() {
+  return Boolean(project.audio.bgm?.buffer) || hasClipAudio();
 }
 
 /** 영상 클립에서 트림 구간만큼의 오디오를 뽑아 AudioBuffer 로 만든다 */
@@ -69,9 +72,10 @@ export async function extractClipAudio(clip, signal) {
  * 타임라인 전체 오디오 믹스.
  * @returns {Promise<AudioBuffer|null>}
  */
-export async function mixTimeline({ onProgress, signal } = {}) {
+export async function mixTimeline({ onProgress, signal, includeBgm = true } = {}) {
   const total = totalDuration();
-  if (total <= 0 || !hasAnyAudio()) return null;
+  const wanted = includeBgm ? hasAnyAudio() : hasClipAudio();
+  if (total <= 0 || !wanted) return null;
 
   const length = Math.ceil(total * RATE);
   const ctx = new OfflineAudioContext(2, length, RATE);
@@ -101,7 +105,8 @@ export async function mixTimeline({ onProgress, signal } = {}) {
   }
 
   // 2) 배경음악
-  const bgm = project.audio.bgm;
+  // 음성 인식에 넘길 때는 빼고 부른다. 노래가 섞이면 알아듣는 정확도가 떨어진다.
+  const bgm = includeBgm ? project.audio.bgm : null;
   if (bgm?.buffer) {
     onProgress?.(0.95, '배경음악 합치는 중…');
     const node = ctx.createBufferSource();

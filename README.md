@@ -18,6 +18,7 @@
 - **내보내기** — 1080×1920 / 720×1280 / 1440×2560, 24·30·60fps, MP4(H.264+AAC)
   - 소리가 없어도 무음 AAC 트랙을 넣습니다. 트랙이 아예 없으면 인스타 릴스 처리가 실패합니다.
   - moov 를 파일 앞으로(faststart) 보냅니다. 뒤에 있으면 릴스 컨테이너가 ERROR 로 떨어집니다.
+- **자동 자막** — 말소리를 알아듣고 자막을 자동으로 채움 (Cloudflare Workers AI · Whisper)
 - **유튜브 숏츠 바로 업로드** — 편집기에서 구글 계정 연결 후 업로드 (아래 주의사항 참고)
 - 안전영역 가이드 (플랫폼 UI에 가려지는 영역 표시)
 
@@ -44,17 +45,34 @@ MPEG-TS 처럼 브라우저가 컨테이너를 모르는 파일, 인덱스(moov)
 디코더 모드에서는 미리보기 소리가 나오지 않지만(완성본에는 정상적으로 들어감) 편집·내보내기는 동일합니다.
 그마저도 안 되면 **코덱 이름을 찍어서** 왜 안 되는지 알려줍니다.
 
-## 자동 자막을 붙이려면
+## 자동 자막
 
-`js/transcribe.js` 의 `ENDPOINT` 만 채우면 됩니다. UI(자막 목록·스타일·타임라인)는 이미 다 붙어 있습니다.
+[자막] 탭의 **자동 자막 만들기** 를 누르면 영상 속 말소리를 알아듣고 자막을 채운다.
+14초 영상 기준 4초쯤 걸린다.
 
+- 배경음악은 빼고 보낸다. 노래가 섞이면 알아듣는 정확도가 떨어진다.
+- 음소거한 클립은 인식 대상에서 빠진다.
+- 결과는 그냥 자막 목록이라, 틀린 부분은 손으로 고치거나 SRT 로 빼서 고칠 수 있다.
+
+### 서버 (stt-worker/)
+
+정적 사이트는 API 키를 숨길 수 없어서 음성 인식을 직접 못 부른다.
+`stt-worker/` 가 그 사이에 서서 Cloudflare Workers AI 의 Whisper 를 대신 호출한다.
+AI 바인딩을 쓰므로 코드에 넣을 키가 없다.
+
+```bash
+cd stt-worker && npx wrangler deploy
 ```
-POST {ENDPOINT}   multipart/form-data { audio: File(wav), lang: 'ko' }
-200  →  { segments: [{ start: 초, end: 초, text: "..." }] }
-```
 
-Cloudflare Workers + Whisper 계열 API 를 붙이면 [자막] 탭의 `🎙 자동 자막` 버튼이 자동으로 활성화됩니다.
-지금은 서버가 없으므로 비활성 상태입니다.
+주소는 https://shorts-studio-stt.xixili0124.workers.dev 이고,
+클라이언트 쪽 주소는 `public/js/transcribe.js` 의 `ENDPOINT` 에 있다.
+CORS 는 배포 주소와 localhost 만 허용한다 (`stt-worker/src/index.js` 의 `ALLOWED_ORIGINS`).
+
+**비용**: `@cf/openai/whisper-large-v3-turbo` 는 오디오 1분당 46.63 뉴런이고
+무료 한도가 하루 10,000 뉴런이다. 하루 3.5시간 분량까지 공짜라, 1분짜리 숏츠면 200개까지 무료다.
+
+**모델 응답을 그대로 쓰지 않는다.** Whisper 가 주는 문장은 자막으로 쓰기엔 길 때가 많아서,
+단어 단위 시각을 이용해 20자 / 4초 / 문장부호 기준으로 다시 끊는다 (`chunkSegments`).
 
 ## 유튜브 숏츠 업로드
 
@@ -154,6 +172,9 @@ Git 저장소를 연결하고, Build command 는 비우고 Output directory 를 
 ## 파일 구조
 
 ```
+stt-worker/                  자동 자막 서버 (Cloudflare Worker)
+  src/index.js
+  wrangler.jsonc
 public/
   index.html
   style.css
@@ -168,6 +189,6 @@ public/
     media.js       파일 → 클립
     youtube.js     유튜브 업로드 (OAuth + 재개 가능 업로드)
     srt.js         자막 파일 입출력
-    transcribe.js  자동 자막 연결 지점 (미연결)
+    transcribe.js  자동 자막 (워커 호출 + WAV 인코딩)
     util.js
 ```

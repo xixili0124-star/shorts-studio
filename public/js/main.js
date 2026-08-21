@@ -8,9 +8,9 @@ import { createClip, disposeClip } from './media.js';
 import { loadFonts } from './render.js';
 import { Player } from './player.js';
 import { parseSrt, buildSrt } from './srt.js';
-import { decodeAudioFile } from './audio.js';
+import { decodeAudioFile, mixTimeline, hasClipAudio } from './audio.js';
 import { detectEngine, exportVideo } from './exporter.js';
-import { isAvailable as sttAvailable } from './transcribe.js';
+import { isAvailable as sttAvailable, transcribe } from './transcribe.js';
 import * as yt from './youtube.js';
 
 const el = new Proxy({}, { get: (_, id) => document.getElementById(id) });
@@ -630,6 +630,8 @@ function wireCaptionPanel() {
   el.capBox.addEventListener('change', upd(() => { s.box = el.capBox.value; }));
   el.capBottom.addEventListener('input', upd(() => { s.bottom = Number(el.capBottom.value); }));
 
+  el.autoCap.addEventListener('click', doAutoCaption);
+
   el.importSrt.addEventListener('click', () => el.srtFile.click());
   el.srtFile.addEventListener('change', async () => {
     const f = el.srtFile.files?.[0];
@@ -651,6 +653,64 @@ function wireCaptionPanel() {
     download(new Blob([buildSrt(project.captions)], { type: 'text/plain;charset=utf-8' }),
       `${project.fileName || 'shorts'}.srt`);
   });
+}
+
+// ── 자동 자막 ──────────────────────────────────────────
+let autoCapCtrl = null;
+const AUTO_CAP_LABEL = '\u{1F399} 자동 자막 만들기';
+
+async function doAutoCaption() {
+  if (autoCapCtrl) { autoCapCtrl.abort(); return; }   // 두 번째 클릭은 취소
+  if (!project.clips.length) return alert('먼저 영상이나 이미지를 추가하세요.');
+  if (!hasClipAudio()) {
+    return alert('말소리가 담긴 영상이 있어야 합니다.\n\n'
+      + '배경음악만으로는 자막을 만들 수 없고, 음소거된 클립도 인식 대상에서 빠집니다.');
+  }
+  if (project.captions.length
+      && !confirm(`이미 있는 자막 ${project.captions.length}개를 지우고 새로 만듭니다. 계속할까요?`)) {
+    return;
+  }
+
+  player.pause();
+  autoCapCtrl = new AbortController();
+  el.autoCap.textContent = '취소';
+  setCapStatus('소리 모으는 중…');
+
+  try {
+    // 배경음악은 빼고 보낸다. 노래가 섞이면 알아듣는 정확도가 떨어진다.
+    const mixed = await mixTimeline({
+      includeBgm: false,
+      signal: autoCapCtrl.signal,
+      onProgress: (_, msg) => setCapStatus(msg || '소리 모으는 중…'),
+    });
+    if (!mixed) throw new Error('소리를 찾지 못했습니다.');
+
+    setCapStatus(`음성 인식 중… (${mixed.duration.toFixed(0)}초 분량, 보통 몇 초 걸립니다)`);
+    const caps = await transcribe(mixed, { lang: 'ko', signal: autoCapCtrl.signal });
+
+    if (!caps.length) {
+      setCapStatus('말소리를 찾지 못했습니다. 볼륨이 너무 작지는 않은지 확인해 보세요.');
+      return;
+    }
+    project.captions = caps;
+    sel.capId = null;
+    renderCaptionList();
+    softRefresh();
+    setCapStatus(`자막 ${caps.length}개를 만들었습니다. 목록에서 눌러 고칠 수 있습니다.`);
+  } catch (e) {
+    if (e?.name === 'AbortError') setCapStatus('취소했습니다.');
+    else {
+      console.error(e);
+      setCapStatus(`실패: ${e.message}`);
+    }
+  } finally {
+    autoCapCtrl = null;
+    el.autoCap.textContent = AUTO_CAP_LABEL;
+  }
+}
+
+function setCapStatus(msg) {
+  el.capStatus.textContent = msg;
 }
 
 // ── 오디오 패널 ────────────────────────────────────────

@@ -179,7 +179,7 @@ main {
   overflow: hidden;
 }
 .tl-row { position: relative; height: 30px; margin-bottom: 3px; }
-.tl-row.thin { height: 14px; }
+.tl-row.thin { height: 18px; }
 .tl-row:last-of-type { margin-bottom: 0; }
 .tl-block {
   position: absolute; top: 0; bottom: 0;
@@ -191,6 +191,23 @@ main {
   cursor: pointer;
   border: 1px solid transparent;
 }
+.tl-block.movable {
+  cursor: grab; user-select: none; touch-action: none;
+  /* 손잡이 둘(16px)이 블록을 다 덮으면 가운데를 잡을 자리가 없다 */
+  min-width: 30px;
+}
+.tl-block.dragging { cursor: grabbing; filter: brightness(1.25); }
+
+/* 양 끝 손잡이 — 평소엔 숨어 있다가 블록에 마우스를 올리면 나타난다 */
+.tl-block .grip {
+  position: absolute; top: 0; bottom: 0; width: 8px;
+  background: currentColor; opacity: 0;
+  cursor: ew-resize; transition: opacity .12s;
+}
+.tl-block .grip.l { left: 0; border-radius: 5px 0 0 5px; }
+.tl-block .grip.r { right: 0; border-radius: 0 5px 5px 0; }
+.tl-block:hover .grip, .tl-block.dragging .grip, .tl-block.sel .grip { opacity: .7; }
+
 .tl-clip { background: #3a4560; color: #cfd8ff; }
 .tl-clip.sel { border-color: var(--accent); background: #4a577a; }
 .tl-ov { background: rgba(74,158,255,.35); color: #cfe4ff; }

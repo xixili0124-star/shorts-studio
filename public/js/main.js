@@ -215,16 +215,106 @@ function renderTimeline() {
   });
 
   for (const o of project.overlays) {
-    const b = block(o.start, o.end - o.start, total, `tl-block tl-ov${o.id === sel.ovId ? ' sel' : ''}`, o.text.split('\n')[0]);
-    b.addEventListener('click', () => { sel.ovId = o.id; switchTab('text'); player.seek(o.start + 0.05); renderOverlayList(); renderOverlayPanel(); renderTimeline(); });
+    const b = block(o.start, o.end - o.start, total, `tl-block movable tl-ov${o.id === sel.ovId ? ' sel' : ''}`, o.text.split('\n')[0]);
+    b.addEventListener('click', () => {
+      if (b._dragged) { b._dragged = false; return; }
+      sel.ovId = o.id; switchTab('text'); player.seek(o.start + 0.05);
+      renderOverlayList(); renderOverlayPanel(); renderTimeline();
+    });
+    attachBlockDrag(b, o, 'ov');
     el.tlOverlays.appendChild(b);
   }
 
   for (const c of project.captions) {
-    const b = block(c.start, c.end - c.start, total, `tl-block tl-cap${c.id === sel.capId ? ' sel' : ''}`, c.text.split('\n')[0]);
-    b.addEventListener('click', () => { sel.capId = c.id; switchTab('cap'); player.seek(c.start + 0.05); renderCaptionList(); renderTimeline(); });
+    const b = block(c.start, c.end - c.start, total, `tl-block movable tl-cap${c.id === sel.capId ? ' sel' : ''}`, c.text.split('\n')[0]);
+    b.addEventListener('click', () => {
+      if (b._dragged) { b._dragged = false; return; }
+      sel.capId = c.id; switchTab('cap'); player.seek(c.start + 0.05);
+      renderCaptionList(); renderTimeline();
+    });
+    attachBlockDrag(b, c, 'cap');
     el.tlCaptions.appendChild(b);
   }
+}
+
+/**
+ * 타임라인 블록을 손으로 끌 수 있게 한다.
+ *   양 끝 손잡이 -> 시작·끝 지점 조정
+ *   가운데      -> 길이는 그대로 두고 통째로 이동
+ *
+ * 끄는 동안에는 타임라인을 다시 그리지 않는다. 다시 그리면 지금 잡고 있는
+ * 엘리먼트가 사라져서 드래그가 끊긴다. 위치만 직접 바꾸고, 목록·패널은 놓을 때 맞춘다.
+ */
+const MIN_BLOCK_SEC = 0.2;
+
+function attachBlockDrag(node, item, kind) {
+  let mode = null, startX = 0, orig = null, moved = false, raf = 0;
+
+  node.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    mode = e.target.classList.contains('l') ? 'start'
+      : e.target.classList.contains('r') ? 'end'
+        : 'move';
+    startX = e.clientX;
+    orig = { start: item.start, end: item.end };
+    moved = false;
+    // 캡처가 안 되는 상황(합성 이벤트 등)에서도 드래그 자체는 계속돼야 한다
+    try { node.setPointerCapture(e.pointerId); } catch { /* noop */ }
+    node.classList.add('dragging');
+    e.preventDefault();
+  });
+
+  node.addEventListener('pointermove', e => {
+    if (!mode) return;
+    const total = totalDuration() || 1;
+    const width = node.parentElement?.getBoundingClientRect().width || 1;
+    const dx = e.clientX - startX;
+    if (Math.abs(dx) > 3) moved = true;
+    const dt = (dx / width) * total;
+
+    if (mode === 'move') {
+      const len = orig.end - orig.start;
+      const s = clamp(orig.start + dt, 0, Math.max(0, total - len));
+      item.start = s;
+      item.end = s + len;
+    } else if (mode === 'start') {
+      item.start = clamp(orig.start + dt, 0, orig.end - MIN_BLOCK_SEC);
+    } else {
+      item.end = clamp(orig.end + dt, orig.start + MIN_BLOCK_SEC, total);
+    }
+
+    node.style.left = `${(item.start / total) * 100}%`;
+    node.style.width = `${Math.max(0.8, ((item.end - item.start) / total) * 100)}%`;
+    node.title = `${fmtTime(item.start)} ~ ${fmtTime(item.end)}`;
+    if (!raf) raf = requestAnimationFrame(() => { raf = 0; player.invalidate(); });
+  });
+
+  const finish = e => {
+    if (!mode) return;
+    mode = null;
+    node.classList.remove('dragging');
+    try { node.releasePointerCapture(e.pointerId); } catch { /* noop */ }
+    if (!moved) return;
+
+    node._dragged = true;   // 이어서 오는 click 은 선택이 아니라 드래그의 꼬리다
+    // 끌던 것을 선택 상태로 만든다 (타임라인은 다시 그리지 않고 표시만 바꾼다)
+    for (const sib of node.parentElement.children) sib.classList.remove('sel');
+    node.classList.add('sel');
+
+    if (kind === 'cap') {
+      sel.capId = item.id;
+      sortCaptions();
+      renderCaptionList();
+    } else {
+      sel.ovId = item.id;
+      renderOverlayList();
+      renderOverlayPanel();
+    }
+    player.invalidate();
+  };
+
+  node.addEventListener('pointerup', finish);
+  node.addEventListener('pointercancel', finish);
 }
 
 function block(start, dur, total, cls, label) {
@@ -234,6 +324,14 @@ function block(start, dur, total, cls, label) {
   d.style.width = `${Math.max(0.8, (dur / total) * 100)}%`;
   d.textContent = label;
   d.title = `${fmtTime(start)} ~ ${fmtTime(start + dur)}`;
+  if (cls.includes('movable')) {
+    // 양 끝 손잡이. textContent 를 먼저 넣고 붙여야 지워지지 않는다.
+    for (const side of ['l', 'r']) {
+      const grip = document.createElement('span');
+      grip.className = `grip ${side}`;
+      d.appendChild(grip);
+    }
+  }
   return d;
 }
 

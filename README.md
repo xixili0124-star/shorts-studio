@@ -1,5 +1,7 @@
 # 숏츠 스튜디오
 
+**https://shorts-studio-75p.pages.dev**
+
 세로 영상(9:16) 숏츠·릴스를 **브라우저 안에서만** 만드는 웹 편집기입니다.
 영상·이미지·음악 파일이 서버로 전송되지 않고, 인코딩까지 전부 사용자 PC에서 처리합니다.
 [썸네일 스튜디오](../naver-thumbnail-studio)와 같은 구조(빌드 없는 정적 사이트 + Cloudflare Pages)입니다.
@@ -109,20 +111,36 @@ python main.py publish-video 내려받은파일.mp4 --caption "캡션"
 npx serve public
 ```
 
-## 배포 (GitHub + Cloudflare Pages)
+## 배포
 
-1. 저장소 생성 후 푸시
+Cloudflare Pages 에 직접 업로드하는 방식으로 올라가 있다. 빌드 단계가 없으므로 이걸로 충분하다.
 
-   ```bash
-   git init && git add -A && git commit -m "숏츠 스튜디오"
-   git remote add origin https://github.com/<아이디>/shorts-studio.git
-   git push -u origin main
-   ```
+```bash
+npx wrangler pages deploy public --project-name shorts-studio --branch main
+```
 
-2. Cloudflare 대시보드 → **Workers & Pages** → **Create** → **Pages** → **Connect to Git**
-   - 프레임워크 **None**, Build command **비워두기**, Output directory **`public`**
+프로젝트 이름은 `shorts-studio`, 주소는 https://shorts-studio-75p.pages.dev 다.
 
-3. 이후에는 `git push` 만 하면 자동 재배포됩니다.
+### GitHub 에 연결하려면 (선택)
+
+푸시할 때마다 자동 배포되게 하려면 저장소를 만들어 연결한다.
+
+```bash
+git remote add origin https://github.com/xixili0124-star/shorts-studio.git
+git push -u origin main
+```
+
+그다음 Cloudflare 대시보드 > Workers & Pages > shorts-studio > Settings > Builds 에서
+Git 저장소를 연결하고, Build command 는 비우고 Output directory 를 `public` 으로 둔다.
+
+**주의**: Git 연결로 바꾸면 위의 직접 업로드(`wrangler pages deploy`)와 섞어 쓰지 않는 게 좋다.
+둘을 번갈아 쓰면 어느 쪽이 마지막 배포인지 헷갈린다.
+
+### 유튜브 OAuth 원본 등록
+
+배포 주소가 생겼으므로 구글 클라우드 콘솔의 OAuth 클라이언트 설정에서
+**승인된 자바스크립트 원본**에 `https://shorts-studio-75p.pages.dev` 를 추가해야
+배포된 사이트에서도 유튜브 업로드가 된다. (로컬 주소와 둘 다 등록해두면 된다)
 
 ## 알아둘 점
 

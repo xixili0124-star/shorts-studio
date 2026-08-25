@@ -40,7 +40,70 @@ export const project = {
     originalVolume: 1,
     bgm: null, // { name, file, buffer(AudioBuffer), volume, offset, fadeIn, fadeOut, loop }
   },
+
+  // 템플릿 — 영상을 화면 가운데 밴드에 넣고 위아래를 단색으로 채우는 구성.
+  // 한국 숏츠에서 흔한 "상단 훅 문구 + 영상 + 하단 댓글" 형식이다.
+  template: {
+    mode: 'none',          // 'none' | 'band'
+    bg: '#000000',
+    videoTop: 0.24,        // 영상 밴드가 시작하는 높이 비율
+    videoHeight: 0.44,     // 영상 밴드 높이 비율
+
+    hook: {
+      on: true,
+      text: '주의) 절대 밖에서\n스피커로 보지 마시오',
+      font: '"Black Han Sans"',
+      size: 92,
+      color: '#ffffff',
+      accent: '#ffe14d',   // *별표* 로 감싼 부분에 칠할 색
+      y: 0.10,             // 문구 블록의 세로 중심
+    },
+
+    comment: {
+      on: true,
+      name: '착한카피바라182',
+      text: '와 진짜… 어떻게 저런 말을 할 수가 있지?',
+      likes: '5.4천',
+      time: '6시간 전',
+      y: 0.76,             // 카드 상단 위치
+      theme: 'dark',       // 'dark' | 'light'
+    },
+
+    credit: {
+      on: false,
+      text: '',
+      size: 40,
+      color: '#9aa3b2',
+      y: 0.94,
+    },
+  },
 };
+
+/** 템플릿이 켜져 있으면 영상이 들어갈 사각형을, 아니면 null 을 준다 */
+export function videoBand(W, H) {
+  const t = project.template;
+  if (t.mode !== 'band') return null;
+  return {
+    x: 0,
+    y: H * t.videoTop,
+    w: W,
+    h: H * t.videoHeight,
+  };
+}
+
+/** *별표* 로 감싼 조각을 강조색으로 칠하기 위해 잘라 놓는다 */
+export function splitAccent(text) {
+  const out = [];
+  for (const part of String(text).split(/(\*[^*\n]+\*)/g)) {
+    if (!part) continue;
+    if (part.startsWith('*') && part.endsWith('*') && part.length > 2) {
+      out.push({ text: part.slice(1, -1), accent: true });
+    } else {
+      out.push({ text: part, accent: false });
+    }
+  }
+  return out;
+}
 
 /** 현재 선택 상태 */
 export const sel = { clipId: null, ovId: null, capId: null };

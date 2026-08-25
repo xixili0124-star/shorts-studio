@@ -38,6 +38,7 @@ async function init() {
   wireCaptionPanel();
   wireAudioPanel();
   wireExportPanel();
+  wireTemplatePanel();
   wireYouTubePanel();
   wireKeyboard();
 
@@ -125,6 +126,7 @@ function renderAll() {
   renderCaptionList();
   renderCaptionStyle();
   renderAudioPanel();
+  renderTemplatePanel();
 
   const has = project.clips.length > 0;
   const total = totalDuration();
@@ -937,6 +939,89 @@ async function doExport() {
 function setProgress(p, msg) {
   el.progBar.style.width = `${Math.round(clamp(p, 0, 1) * 100)}%`;
   if (msg) el.progText.textContent = msg;
+}
+
+
+// ── 템플릿 패널 ────────────────────────────────────────
+function renderTemplatePanel() {
+  const t = project.template;
+  el.tplMode.value = t.mode;
+  el.tplProps.hidden = t.mode === 'none';
+  el.tplBg.value = t.bg;
+  el.tplTop.value = t.videoTop;
+  el.tplTopOut.textContent = pct(t.videoTop);
+  el.tplHeight.value = t.videoHeight;
+  el.tplHeightOut.textContent = pct(t.videoHeight);
+
+  el.tplHookOn.checked = t.hook.on;
+  el.tplHookText.value = t.hook.text;
+  el.tplHookFont.value = t.hook.font;
+  el.tplHookSize.value = t.hook.size;
+  el.tplHookSizeOut.textContent = t.hook.size;
+  el.tplHookColor.value = t.hook.color;
+  el.tplHookAccent.value = t.hook.accent;
+  el.tplHookY.value = t.hook.y;
+
+  el.tplCmtOn.checked = t.comment.on;
+  el.tplCmtName.value = t.comment.name;
+  el.tplCmtText.value = t.comment.text;
+  el.tplCmtLikes.value = t.comment.likes;
+  el.tplCmtTime.value = t.comment.time;
+  el.tplCmtTheme.value = t.comment.theme;
+  el.tplCmtY.value = t.comment.y;
+
+  el.tplCreditOn.checked = t.credit.on;
+  el.tplCreditText.value = t.credit.text;
+  el.tplCreditY.value = t.credit.y;
+}
+
+function wireTemplatePanel() {
+  const t = project.template;
+  const upd = fn => () => { fn(); player.invalidate(); };
+
+  el.tplMode.addEventListener('change', () => {
+    t.mode = el.tplMode.value;
+    el.tplProps.hidden = t.mode === 'none';
+    // 밴드 안에서는 영상이 띠를 꽉 채우는 편이 자연스럽다
+    if (t.mode === 'band') {
+      for (const c of project.clips) if (c.fit === 'contain') c.fit = 'cover';
+      renderClipPanel();
+    }
+    player.invalidate();
+  });
+
+  el.tplBg.addEventListener('input', upd(() => { t.bg = el.tplBg.value; }));
+  el.tplTop.addEventListener('input', upd(() => {
+    t.videoTop = Number(el.tplTop.value);
+    el.tplTopOut.textContent = pct(t.videoTop);
+  }));
+  el.tplHeight.addEventListener('input', upd(() => {
+    t.videoHeight = Number(el.tplHeight.value);
+    el.tplHeightOut.textContent = pct(t.videoHeight);
+  }));
+
+  el.tplHookOn.addEventListener('change', upd(() => { t.hook.on = el.tplHookOn.checked; }));
+  el.tplHookText.addEventListener('input', upd(() => { t.hook.text = el.tplHookText.value; }));
+  el.tplHookFont.addEventListener('change', upd(() => { t.hook.font = el.tplHookFont.value; }));
+  el.tplHookSize.addEventListener('input', upd(() => {
+    t.hook.size = Number(el.tplHookSize.value);
+    el.tplHookSizeOut.textContent = t.hook.size;
+  }));
+  el.tplHookColor.addEventListener('input', upd(() => { t.hook.color = el.tplHookColor.value; }));
+  el.tplHookAccent.addEventListener('input', upd(() => { t.hook.accent = el.tplHookAccent.value; }));
+  el.tplHookY.addEventListener('input', upd(() => { t.hook.y = Number(el.tplHookY.value); }));
+
+  el.tplCmtOn.addEventListener('change', upd(() => { t.comment.on = el.tplCmtOn.checked; }));
+  el.tplCmtName.addEventListener('input', upd(() => { t.comment.name = el.tplCmtName.value; }));
+  el.tplCmtText.addEventListener('input', upd(() => { t.comment.text = el.tplCmtText.value; }));
+  el.tplCmtLikes.addEventListener('input', upd(() => { t.comment.likes = el.tplCmtLikes.value; }));
+  el.tplCmtTime.addEventListener('input', upd(() => { t.comment.time = el.tplCmtTime.value; }));
+  el.tplCmtTheme.addEventListener('change', upd(() => { t.comment.theme = el.tplCmtTheme.value; }));
+  el.tplCmtY.addEventListener('input', upd(() => { t.comment.y = Number(el.tplCmtY.value); }));
+
+  el.tplCreditOn.addEventListener('change', upd(() => { t.credit.on = el.tplCreditOn.checked; }));
+  el.tplCreditText.addEventListener('input', upd(() => { t.credit.text = el.tplCreditText.value; }));
+  el.tplCreditY.addEventListener('input', upd(() => { t.credit.y = Number(el.tplCreditY.value); }));
 }
 
 // ── 유튜브 업로드 ──────────────────────────────────────

@@ -75,6 +75,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="clip">클립</button>
       <button class="tab" data-tab="text">텍스트</button>
+      <button class="tab" data-tab="tpl">템플릿</button>
       <button class="tab" data-tab="cap">자막</button>
       <button class="tab" data-tab="audio">오디오</button>
       <button class="tab" data-tab="out">내보내기</button>
@@ -197,6 +198,60 @@
           </label>
         </div>
         <button class="btn ghost small block danger" id="delOverlay">이 텍스트 삭제</button>
+      </div>
+    </div>
+
+
+    <!-- 템플릿 -->
+    <div class="tabpane" data-pane="tpl">
+      <div class="fieldset">
+        <h4>구성</h4>
+        <label class="row">형식
+          <select id="tplMode">
+            <option value="none">없음 (영상이 꽉 참)</option>
+            <option value="band">상단문구 + 영상밴드 + 댓글</option>
+          </select>
+        </label>
+        <p class="hint">영상을 화면 가운데 띠 안에 넣고 위아래를 단색으로 채웁니다.
+          한국 숏츠에서 흔한 반응형 구성이에요.</p>
+      </div>
+
+      <div id="tplProps" hidden>
+        <div class="fieldset">
+          <h4>배경 · 영상 위치</h4>
+          <label class="row">배경색 <input type="color" id="tplBg" value="#000000"></label>
+          <label class="row">영상 위 <input type="range" id="tplTop" min="0" max="0.6" step="0.005" value="0.24"><output id="tplTopOut">24%</output></label>
+          <label class="row">영상 높이 <input type="range" id="tplHeight" min="0.2" max="0.8" step="0.005" value="0.44"><output id="tplHeightOut">44%</output></label>
+        </div>
+
+        <div class="fieldset">
+          <h4><label class="chk"><input type="checkbox" id="tplHookOn" checked> 상단 훅 문구</label></h4>
+          <textarea id="tplHookText" rows="2" placeholder="주의) 절대 밖에서&#10;스피커로 보지 마시오"></textarea>
+          <p class="hint">별표로 감싸면 강조색이 됩니다 — <code>교도소 아버지와 *절연한 이유*</code></p>
+          <label class="row">폰트 <select id="tplHookFont" class="fontsel"></select></label>
+          <label class="row">크기 <input type="range" id="tplHookSize" min="40" max="140" step="1" value="92"><output id="tplHookSizeOut">92</output></label>
+          <label class="row">글자색 <input type="color" id="tplHookColor" value="#ffffff">
+            강조색 <input type="color" id="tplHookAccent" value="#ffe14d"></label>
+          <label class="row">세로 위치 <input type="range" id="tplHookY" min="0.02" max="0.5" step="0.005" value="0.10"></label>
+        </div>
+
+        <div class="fieldset">
+          <h4><label class="chk"><input type="checkbox" id="tplCmtOn" checked> 하단 댓글 카드</label></h4>
+          <label class="row">이름 <input type="text" id="tplCmtName" placeholder="닉네임"></label>
+          <textarea id="tplCmtText" rows="2" placeholder="댓글 내용"></textarea>
+          <label class="row">좋아요 <input type="text" id="tplCmtLikes" placeholder="5.4천" style="width:80px">
+            시간 <input type="text" id="tplCmtTime" placeholder="6시간 전" style="width:90px"></label>
+          <label class="row">테마
+            <select id="tplCmtTheme"><option value="dark">어둡게</option><option value="light">밝게</option></select>
+          </label>
+          <label class="row">세로 위치 <input type="range" id="tplCmtY" min="0.5" max="0.92" step="0.005" value="0.76"></label>
+        </div>
+
+        <div class="fieldset">
+          <h4><label class="chk"><input type="checkbox" id="tplCreditOn"> 하단 크레딧</label></h4>
+          <label class="row">문구 <input type="text" id="tplCreditText" placeholder="채널명 / 출처"></label>
+          <label class="row">세로 위치 <input type="range" id="tplCreditY" min="0.6" max="0.98" step="0.005" value="0.94"></label>
+        </div>
       </div>
     </div>
 

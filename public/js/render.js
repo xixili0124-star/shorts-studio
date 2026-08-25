@@ -3,6 +3,7 @@
 //   미리보기 → <video> 엘리먼트 / 내보내기 → 디코딩된 VideoSample
 import {
   project, clipAt, activeOverlays, activeCaption, FONTS, ACCENT,
+  videoBand, splitAccent,
 } from './state.js';
 
 const REF_H = 1920; // 스타일 수치의 기준 높이 (해상도가 달라져도 같은 비율로 보이게)
@@ -11,17 +12,31 @@ export function renderFrame(ctx, t, opts = {}) {
   const W = ctx.canvas.width, H = ctx.canvas.height;
   const k = H / REF_H;
 
+  const tpl = project.template;
+  const band = videoBand(W, H);
+
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;
   ctx.filter = 'none';
-  ctx.fillStyle = '#000';
+  ctx.fillStyle = band ? tpl.bg : '#000';
   ctx.fillRect(0, 0, W, H);
 
   const at = clipAt(t);
   if (at?.clip) {
     const src = opts.source ? opts.source(at.clip, at.local) : null;
     if (src?.img && src.w > 0 && src.h > 0) {
-      drawClipLayer(ctx, W, H, at, src);
+      if (band) {
+        // 영상은 밴드 안에만 그린다. 밖으로 삐져나가면 잘라낸다.
+        ctx.save();
+        ctx.beginPath();
+        ctx.rect(band.x, band.y, band.w, band.h);
+        ctx.clip();
+        ctx.translate(band.x, band.y);
+        drawClipLayer(ctx, band.w, band.h, at, src);
+        ctx.restore();
+      } else {
+        drawClipLayer(ctx, W, H, at, src);
+      }
     }
     const f = fadeAlpha(at.clip, at.local, at.duration);
     if (f > 0) {
@@ -29,6 +44,8 @@ export function renderFrame(ctx, t, opts = {}) {
       ctx.fillRect(0, 0, W, H);
     }
   }
+
+  if (band) drawTemplate(ctx, W, H, tpl, k);
 
   for (const o of activeOverlays(t)) drawOverlay(ctx, W, H, o, t, k);
 
@@ -264,6 +281,158 @@ function roundRect(ctx, x, y, w, h, r) {
   ctx.arcTo(x, y + h, x, y, r);
   ctx.arcTo(x, y, x + w, y, r);
   ctx.closePath();
+}
+
+
+// ── 템플릿 (밴드 레이아웃 장식) ─────────────────────────
+function drawTemplate(ctx, W, H, tpl, k) {
+  if (tpl.hook?.on) drawHook(ctx, W, H, tpl.hook, k);
+  if (tpl.comment?.on) drawCommentCard(ctx, W, H, tpl.comment, k);
+  if (tpl.credit?.on && tpl.credit.text.trim()) {
+    ctx.save();
+    ctx.font = `700 ${tpl.credit.size * k}px "Noto Sans KR", sans-serif`;
+    ctx.fillStyle = tpl.credit.color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(tpl.credit.text, W / 2, H * tpl.credit.y);
+    ctx.restore();
+  }
+}
+
+/**
+ * 상단 훅 문구. *별표* 로 감싼 조각만 강조색으로 칠한다.
+ * 한 줄 안에서 색이 바뀌므로 조각별 폭을 재서 가운데 정렬을 직접 계산한다.
+ */
+function drawHook(ctx, W, H, hook, k) {
+  const size = hook.size * k;
+  const weight = (FONTS.find(f => f.css === hook.font)?.weight) ?? 700;
+  ctx.save();
+  ctx.font = `${weight} ${size}px ${hook.font}, "Noto Sans KR", sans-serif`;
+  ctx.textBaseline = 'alphabetic';
+
+  const lineH = size * 1.22;
+  const maxW = W * 0.92;
+
+  // 줄바꿈은 사용자가 넣은 그대로 존중하되, 넘치는 줄만 다시 접는다
+  const lines = [];
+  for (const raw of String(hook.text).split('\n')) {
+    const pieces = splitAccent(raw);
+    let cur = [];
+    let curW = 0;
+    for (const piece of pieces) {
+      for (const word of piece.text.split(/(\s+)/)) {
+        if (!word) continue;
+        const wWidth = ctx.measureText(word).width;
+        if (curW + wWidth > maxW && cur.length) {
+          lines.push(cur);
+          cur = [];
+          curW = 0;
+          if (!word.trim()) continue;   // 줄 첫머리 공백은 버린다
+        }
+        cur.push({ text: word, accent: piece.accent, w: wWidth });
+        curW += wWidth;
+      }
+    }
+    lines.push(cur);
+  }
+
+  const total = lines.length * lineH;
+  let top = H * hook.y - total / 2;
+
+  for (const line of lines) {
+    const lineW = line.reduce((a, p) => a + p.w, 0);
+    let x = (W - lineW) / 2;
+    const baseline = top + size * 0.92;
+    for (const piece of line) {
+      ctx.fillStyle = piece.accent ? hook.accent : hook.color;
+      ctx.textAlign = 'left';
+      ctx.fillText(piece.text, x, baseline);
+      x += piece.w;
+    }
+    top += lineH;
+  }
+  ctx.restore();
+}
+
+/**
+ * 하단 댓글 카드. 실제 플랫폼 UI 를 그대로 베끼지 않고
+ * 아바타 + 이름 + 내용 + 좋아요 정도만 있는 일반적인 모양으로 그린다.
+ */
+function drawCommentCard(ctx, W, H, c, k) {
+  const pad = 34 * k;
+  const cardW = W - pad * 2;
+  const x = pad;
+  const nameSize = 30 * k;
+  const textSize = 38 * k;
+  const avatar = 54 * k;
+
+  ctx.save();
+  ctx.font = `400 ${textSize}px "Noto Sans KR", sans-serif`;
+  const bodyLines = wrapLines(ctx, c.text, cardW - avatar - pad * 2.4);
+
+  const innerPad = 26 * k;
+  const cardH = innerPad * 2 + nameSize * 1.5 + bodyLines.length * textSize * 1.42 + 34 * k;
+  const y = H * c.y;
+
+  const dark = c.theme !== 'light';
+  ctx.fillStyle = dark ? 'rgba(24,26,31,.94)' : 'rgba(255,255,255,.96)';
+  roundRect(ctx, x, y, cardW, cardH, 22 * k);
+  ctx.fill();
+
+  const fg = dark ? '#f1f3f7' : '#16181d';
+  const sub = dark ? '#98a0b0' : '#6b7280';
+
+  // 아바타 — 이름 첫 글자를 원 안에 넣는다
+  const ax = x + innerPad + avatar / 2;
+  const ay = y + innerPad + avatar / 2;
+  ctx.beginPath();
+  ctx.arc(ax, ay, avatar / 2, 0, Math.PI * 2);
+  ctx.fillStyle = avatarColor(c.name);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.font = `700 ${avatar * 0.5}px "Noto Sans KR", sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillText((c.name || '?').trim().charAt(0), ax, ay + avatar * 0.02);
+
+  const tx = x + innerPad + avatar + innerPad * 0.7;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'alphabetic';
+
+  // 이름 + 시간
+  ctx.font = `700 ${nameSize}px "Noto Sans KR", sans-serif`;
+  ctx.fillStyle = sub;
+  const nameText = `@${(c.name || '').replace(/^@/, '')}`;
+  ctx.fillText(nameText, tx, y + innerPad + nameSize);
+  if (c.time) {
+    const nw = ctx.measureText(nameText).width;
+    ctx.font = `400 ${nameSize}px "Noto Sans KR", sans-serif`;
+    ctx.fillText(c.time, tx + nw + 14 * k, y + innerPad + nameSize);
+  }
+
+  // 본문
+  ctx.font = `400 ${textSize}px "Noto Sans KR", sans-serif`;
+  ctx.fillStyle = fg;
+  let by = y + innerPad + nameSize * 1.5 + textSize;
+  for (const line of bodyLines) {
+    ctx.fillText(line, tx, by);
+    by += textSize * 1.42;
+  }
+
+  // 좋아요
+  if (c.likes) {
+    ctx.font = `400 ${nameSize}px "Noto Sans KR", sans-serif`;
+    ctx.fillStyle = sub;
+    ctx.fillText(`\u2665 ${c.likes}`, tx, by + 6 * k);
+  }
+  ctx.restore();
+}
+
+function avatarColor(name) {
+  const palette = ['#e05a5a', '#4a9eff', '#3aa76d', '#c77dff', '#f0a04b', '#2bb3a3'];
+  let h = 0;
+  for (const ch of String(name)) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return palette[h % palette.length];
 }
 
 // ── 안전영역 가이드 (미리보기 전용) ────────────────────

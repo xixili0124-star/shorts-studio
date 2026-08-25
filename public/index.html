@@ -75,6 +75,7 @@
     <nav class="tabs">
       <button class="tab active" data-tab="clip">클립</button>
       <button class="tab" data-tab="text">텍스트</button>
+      <button class="tab" data-tab="shop">쇼핑</button>
       <button class="tab" data-tab="tpl">템플릿</button>
       <button class="tab" data-tab="cap">자막</button>
       <button class="tab" data-tab="audio">오디오</button>
@@ -201,6 +202,49 @@
       </div>
     </div>
 
+
+
+    <!-- 쇼핑 쇼츠 -->
+    <div class="tabpane" data-pane="shop">
+      <div class="fieldset">
+        <h4>상품 정보</h4>
+        <label class="row">상품명 <input type="text" id="shopName" placeholder="예: 무선 핸디 선풍기"></label>
+        <label class="row">가격 <input type="text" id="shopPrice" placeholder="12,900원">
+          정가 <input type="text" id="shopWas" placeholder="19,900원"></label>
+        <textarea id="shopFeatures" rows="4" placeholder="특징을 한 줄에 하나씩&#10;3단계 풍량 조절&#10;최대 8시간 연속 사용&#10;목걸이형 겸용"></textarea>
+        <p class="hint">한 줄이 한 장면이 됩니다. 3~5줄을 권합니다.</p>
+      </div>
+
+      <div class="fieldset">
+        <h4>상품 이미지</h4>
+        <div id="shopDrop" class="dropzone small">
+          <div id="shopDropIdle">
+            <p>이미지 여러 장 추가</p>
+            <p class="hint">파트너스가 제공하는 이미지만 쓰세요</p>
+          </div>
+          <p id="shopDropStatus" class="loading" hidden></p>
+          <input type="file" id="shopFiles" accept="image/*" multiple hidden>
+        </div>
+        <p class="hint" id="shopFileList">아직 없음</p>
+      </div>
+
+      <div class="fieldset">
+        <h4>구성</h4>
+        <label class="row">장면당 <input type="range" id="shopPerScene" min="1.5" max="4" step="0.1" value="2.5"><output id="shopPerSceneOut">2.5초</output></label>
+        <label class="row">마무리 문구 <input type="text" id="shopCta" value="링크는 설명란에"></label>
+        <button class="btn primary block" id="shopBuild">자동으로 구성하기</button>
+        <p class="hint" id="shopStatus">지금 타임라인을 덮어씁니다.</p>
+      </div>
+
+      <div class="fieldset">
+        <h4>설명란 문구</h4>
+        <label class="row">구매 링크 <input type="text" id="shopLink" placeholder="https://link.coupang.com/..."></label>
+        <textarea id="shopCaption" rows="7" readonly></textarea>
+        <button class="btn ghost small block" id="shopCopy">복사하기</button>
+        <p class="warn">공정위 지침상 대가성 문구는 <strong>생략할 수 없습니다.</strong>
+          영상 안에도 함께 넣는 것을 권합니다.</p>
+      </div>
+    </div>
 
     <!-- 템플릿 -->
     <div class="tabpane" data-pane="tpl">

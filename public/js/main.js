@@ -12,6 +12,7 @@ import { decodeAudioFile, mixTimeline, hasClipAudio, findUncaptioned } from './a
 import { detectEngine, exportVideo } from './exporter.js';
 import { isAvailable as sttAvailable, transcribe } from './transcribe.js';
 import * as yt from './youtube.js';
+import { planScenes, buildOverlays, buildCaption } from './shopping.js';
 
 const el = new Proxy({}, { get: (_, id) => document.getElementById(id) });
 
@@ -41,6 +42,7 @@ async function init() {
   wireAudioPanel();
   wireExportPanel();
   wireTemplatePanel();
+  wireShoppingPanel();
   wireYouTubePanel();
   wireKeyboard();
 
@@ -1059,6 +1061,131 @@ function wireTemplatePanel() {
   el.tplCreditOn.addEventListener('change', upd(() => { t.credit.on = el.tplCreditOn.checked; }));
   el.tplCreditText.addEventListener('input', upd(() => { t.credit.text = el.tplCreditText.value; }));
   el.tplCreditY.addEventListener('input', upd(() => { t.credit.y = Number(el.tplCreditY.value); }));
+}
+
+
+// ── 쇼핑 쇼츠 자동 구성 ────────────────────────────────
+let shopImages = [];   // 사용자가 넣은 상품 이미지 File 들
+
+function wireShoppingPanel() {
+  wireDropzone(el.shopDrop, el.shopFiles, files => {
+    shopImages = shopImages.concat(files.filter(f => f.type.startsWith('image/')));
+    el.shopFileList.textContent = shopImages.length
+      ? `${shopImages.length}장: ${shopImages.map(f => f.name).join(', ')}`
+      : '아직 없음';
+    updateShopCaption();
+  });
+
+  el.shopPerScene.addEventListener('input', () => {
+    el.shopPerSceneOut.textContent = `${Number(el.shopPerScene.value).toFixed(1)}초`;
+  });
+
+  for (const id of ['shopName', 'shopPrice', 'shopWas', 'shopFeatures', 'shopLink']) {
+    el[id].addEventListener('input', updateShopCaption);
+  }
+
+  el.shopBuild.addEventListener('click', buildShoppingShort);
+
+  el.shopCopy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(el.shopCaption.value);
+      el.shopCopy.textContent = '복사됨';
+      setTimeout(() => { el.shopCopy.textContent = '복사하기'; }, 1500);
+    } catch {
+      el.shopCaption.select();
+      alert('직접 복사해 주세요 (Ctrl+C)');
+    }
+  });
+
+  updateShopCaption();
+}
+
+function shopInput() {
+  return {
+    name: el.shopName.value.trim(),
+    price: el.shopPrice.value.trim(),
+    was: el.shopWas.value.trim(),
+    features: el.shopFeatures.value.split('\n'),
+    link: el.shopLink.value.trim(),
+    cta: el.shopCta.value.trim(),
+  };
+}
+
+function updateShopCaption() {
+  el.shopCaption.value = buildCaption(shopInput());
+}
+
+async function buildShoppingShort() {
+  const input = shopInput();
+  const feats = input.features.filter(f => f.trim());
+
+  if (!shopImages.length) return alert('상품 이미지를 먼저 넣어 주세요.');
+  if (!feats.length) return alert('특징을 한 줄에 하나씩 적어 주세요.');
+  if (project.clips.length && !confirm('지금 타임라인을 지우고 새로 구성합니다. 계속할까요?')) return;
+
+  el.shopBuild.disabled = true;
+  el.shopStatus.textContent = '이미지 불러오는 중…';
+  player.pause();
+
+  try {
+    const perScene = Number(el.shopPerScene.value);
+    const { scenes } = planScenes({
+      features: feats,
+      imageCount: shopImages.length,
+      perScene,
+    });
+
+    // 장면 순서대로 이미지를 만든다. 같은 이미지를 여러 장면이 쓰면 그만큼 클립을 만든다.
+    project.clips.forEach(disposeClip);
+    project.clips = [];
+
+    for (let i = 0; i < scenes.length; i++) {
+      const sc = scenes[i];
+      el.shopStatus.textContent = `장면 만드는 중… (${i + 1}/${scenes.length})`;
+      const file = shopImages[Math.min(sc.imageIndex, shopImages.length - 1)];
+      const clip = await createClip(file);
+      clip.imgDuration = sc.end - sc.start;
+      clip.ken = i % 2 === 0 ? 'in' : 'out';   // 번갈아 주면 덜 단조롭다
+      clip.fit = 'cover';
+      project.clips.push(clip);
+    }
+
+    // 상단 상품명은 영상 내내 고정이라 템플릿 훅에 둔다
+    const t = project.template;
+    t.mode = 'band';
+    t.bg = '#0d0f14';
+    t.videoTop = 0.22;
+    t.videoHeight = 0.44;
+    t.hook.on = true;
+    t.hook.text = input.name || '상품 소개';
+    t.hook.size = 78;
+    t.hook.y = 0.11;
+    t.comment.on = false;    // 쇼핑에서는 댓글 카드 자리에 특징이 들어간다
+    t.credit.on = false;
+
+    // 특징·가격·CTA 는 시간별로 바뀌므로 오버레이로
+    project.overlays = buildOverlays({
+      scenes,
+      price: input.price,
+      was: input.was,
+      cta: input.cta,
+    });
+    project.captions = [];
+    sel.clipId = project.clips[0]?.id ?? null;
+    sel.ovId = null;
+    sel.capId = null;
+
+    renderAll();
+    player.seek(0);
+    el.shopStatus.textContent =
+      `완성했습니다 — ${scenes.length}장면 ${totalDuration().toFixed(1)}초. `
+      + '각 요소는 [클립]·[텍스트] 탭에서 손볼 수 있습니다.';
+  } catch (e) {
+    console.error(e);
+    el.shopStatus.textContent = `실패: ${e.message}`;
+  } finally {
+    el.shopBuild.disabled = false;
+  }
 }
 
 // ── 유튜브 업로드 ──────────────────────────────────────

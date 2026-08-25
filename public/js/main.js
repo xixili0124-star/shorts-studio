@@ -45,6 +45,7 @@ async function init() {
   wireShoppingPanel();
   wireYouTubePanel();
   wireKeyboard();
+  wirePaste();
 
   // 페이지 전체가 드롭 영역
   ['dragover', 'drop'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
@@ -379,6 +380,43 @@ function wireKeyboard() {
     if (e.code === 'Space') { e.preventDefault(); player.toggle(); onTick(player.time); }
     else if (e.code === 'ArrowLeft') { e.preventDefault(); player.step(-1); }
     else if (e.code === 'ArrowRight') { e.preventDefault(); player.step(1); }
+  });
+}
+
+
+/**
+ * 클립보드 이미지 붙여넣기.
+ *
+ * 상품 이미지를 쓰려면 지금까지는 "이미지 저장 -> 폴더 찾기 -> 끌어다 놓기" 를 거쳐야 했다.
+ * 브라우저에서 이미지를 복사해 바로 Ctrl+V 로 넣을 수 있으면 그 단계가 통째로 빠진다.
+ *
+ * 붙여넣는 곳은 지금 열려 있는 탭으로 정한다. [쇼핑] 탭이면 상품 이미지로, 아니면 일반 소재로.
+ */
+function wirePaste() {
+  document.addEventListener('paste', async e => {
+    const tag = document.activeElement?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;   // 글자 붙여넣는 중이면 건드리지 않는다
+
+    const files = [];
+    for (const item of e.clipboardData?.items || []) {
+      if (item.kind !== 'file' || !item.type.startsWith('image/')) continue;
+      const f = item.getAsFile();
+      if (!f) continue;
+      // 클립보드 이미지는 이름이 없거나 다 똑같아서 구분되게 붙여 준다
+      const ext = (f.type.split('/')[1] || 'png').replace('jpeg', 'jpg');
+      files.push(new File([f], `붙여넣기-${new Date().toTimeString().slice(0, 8).replace(/:/g, '')}.${ext}`, { type: f.type }));
+    }
+    if (!files.length) return;
+    e.preventDefault();
+
+    const onShopTab = document.querySelector('.tabpane[data-pane="shop"]')?.classList.contains('active');
+    if (onShopTab) {
+      shopImages = shopImages.concat(files);
+      el.shopFileList.textContent = `${shopImages.length}장: ${shopImages.map(f => f.name).join(', ')}`;
+      el.shopStatus.textContent = `이미지 ${files.length}장을 붙여넣었습니다.`;
+    } else {
+      await addFiles(files);
+    }
   });
 }
 

@@ -9,7 +9,7 @@ export class Player {
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.time = 0;
     this.playing = false;
-    this.loop = true;
+    this.loop = false;   // 편집 중에는 한 번만 재생되는 편이 낫다. 위 [반복] 으로 켤 수 있다.
     this.safeArea = false;
     this.onTick = onTick || (() => {});
     this._raf = null;

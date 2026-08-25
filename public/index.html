@@ -28,7 +28,7 @@
     <div id="dropzone" class="dropzone">
       <div id="dropIdle">
         <p><strong>클릭</strong> 또는 <strong>드래그</strong>로 추가</p>
-        <p class="hint">영상(MP4/MOV/WebM/MKV) · 이미지(JPG/PNG/WebP)</p>
+        <p class="hint">영상(MP4/MOV/WebM/MKV) · 이미지(JPG/PNG/WebP) · <strong>Ctrl+V</strong> 로 붙여넣기</p>
       </div>
       <p id="dropStatus" class="loading" hidden></p>
       <input type="file" id="file" accept="video/*,image/*" multiple hidden>
@@ -56,7 +56,7 @@
       <button id="btnNextF" class="btn icon small" title="다음 프레임" disabled>|▶</button>
       <span class="time"><span id="tNow">0:00.0</span> / <span id="tAll">0:00.0</span></span>
       <label class="chk"><input type="checkbox" id="safeArea"> 안전영역</label>
-      <label class="chk"><input type="checkbox" id="loopPlay" checked> 반복</label>
+      <label class="chk"><input type="checkbox" id="loopPlay"> 반복</label>
     </div>
 
     <input type="range" id="scrub" class="scrub" min="0" max="1000" value="0" step="1" disabled>
@@ -219,8 +219,9 @@
         <h4>상품 이미지</h4>
         <div id="shopDrop" class="dropzone small">
           <div id="shopDropIdle">
-            <p>이미지 여러 장 추가</p>
-            <p class="hint">파트너스가 제공하는 이미지만 쓰세요</p>
+            <p>이미지 여러 장 추가 · <strong>Ctrl+V</strong></p>
+            <p class="hint">브라우저에서 이미지를 복사해 바로 붙여넣을 수 있습니다.
+              파트너스가 제공하는 이미지만 쓰세요.</p>
           </div>
           <p id="shopDropStatus" class="loading" hidden></p>
           <input type="file" id="shopFiles" accept="image/*" multiple hidden>

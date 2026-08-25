@@ -34,6 +34,8 @@ export async function transcribe(audioBuffer, { lang = 'ko', signal } = {}) {
     start: Number(s.start) || 0,
     end: Math.max(Number(s.end) || 0, (Number(s.start) || 0) + 0.4),
     text: String(s.text || '').trim(),
+    // 0~1. 낮으면 모델이 알아듣기 애매해한 구간이라 사람이 확인하는 게 좋다.
+    conf: Number.isFinite(Number(s.conf)) ? Number(s.conf) : 1,
   })).filter(s => s.text);
 }
 

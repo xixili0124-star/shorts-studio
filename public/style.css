@@ -213,6 +213,13 @@ main {
 .tl-ov { background: rgba(74,158,255,.35); color: #cfe4ff; }
 .tl-ov.sel { border-color: var(--blue); }
 .tl-cap { background: rgba(255,182,72,.3); color: #ffdda6; }
+/* 소리는 있는데 자막이 없는 구간 */
+.tl-gap {
+  background: repeating-linear-gradient(45deg,
+    rgba(255,59,92,.45) 0 6px, rgba(255,59,92,.18) 6px 12px);
+  border: 1px solid rgba(255,59,92,.6);
+  color: #ffd4dc;
+}
 .tl-cap.sel { border-color: var(--amber); }
 .tl-playhead {
   position: absolute; top: 0; bottom: 0; width: 2px;
@@ -284,6 +291,10 @@ textarea { width: 100%; resize: vertical; line-height: 1.5; }
 .cap-list textarea { min-height: 46px; }
 .cap-actions { display: flex; gap: 4px; }
 .cap-actions .btn { flex: 1; }
+.shaky {
+  flex: 0 0 auto; font-size: 10px; padding: 2px 6px; border-radius: 4px;
+  background: rgba(255,182,72,.18); color: var(--amber); border: 1px solid rgba(255,182,72,.4);
+}
 .del-x { background: none; border: none; color: var(--muted); cursor: pointer; font-size: 12px; }
 .del-x:hover { color: #ff8b8b; }
 

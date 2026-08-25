@@ -20,6 +20,10 @@ const ALLOWED_ORIGINS = [
   'http://localhost:5179',
   'http://localhost:3000',
   'http://localhost:8788',
+  // 같은 로컬 서버라도 주소를 이렇게 치는 경우가 있다
+  'http://127.0.0.1:5179',
+  'http://127.0.0.1:3000',
+  'http://127.0.0.1:8788',
 ];
 // Pages 미리보기 배포는 주소가 매번 달라진다
 const ALLOWED_SUFFIX = '.shorts-studio-75p.pages.dev';
@@ -33,11 +37,12 @@ export default {
     if (request.method !== 'POST') return json({ error: 'POST 로만 받습니다.' }, 405, cors);
     if (origin && !isAllowed(origin)) return json({ error: '허용되지 않은 출처입니다.' }, 403, cors);
 
-    let file, lang, debug;
+    let file, lang, debug, hint;
     try {
       const form = await request.formData();
       file = form.get('audio');
       lang = String(form.get('lang') || 'ko').slice(0, 8);
+      hint = String(form.get('hint') || '').slice(0, 400);
       debug = form.get('debug') === '1' || new URL(request.url).searchParams.get('debug') === '1';
     } catch {
       return json({ error: '요청을 읽지 못했습니다. multipart/form-data 로 보내세요.' }, 400, cors);
@@ -59,6 +64,8 @@ export default {
         language: lang,
         task: 'transcribe',
         vad_filter: true,
+        // 채널에서 자주 쓰는 단어를 미리 알려주면 그쪽으로 알아듣는다
+        ...(hint ? { initial_prompt: hint } : {}),
         // 무음 구간에서 같은 말을 반복해 뱉는 현상을 줄인다
         condition_on_previous_text: false,
       });
@@ -85,14 +92,15 @@ function toSegments(result) {
   if (Array.isArray(segs) && segs.length) {
     const out = [];
     for (const s of segs) {
+      const conf = confidenceOf(s);
       // 단어 단위 시각이 있으면 그게 제일 정확하다
       if (Array.isArray(s.words) && s.words.length) {
-        out.push({ words: s.words.map(w => ({
+        out.push({ conf, words: s.words.map(w => ({
           text: String(w.word ?? w.text ?? '').trim(),
           start: num(w.start), end: num(w.end),
         })).filter(w => w.text) });
       } else if (s.text) {
-        out.push({ start: num(s.start), end: num(s.end), text: String(s.text).trim() });
+        out.push({ conf, start: num(s.start), end: num(s.end), text: String(s.text).trim() });
       }
     }
     if (out.length) return out;
@@ -112,6 +120,28 @@ function toSegments(result) {
   return [];
 }
 
+/**
+ * Whisper 가 구간마다 주는 지표를 0~1 신뢰도로 바꾼다.
+ *
+ * avg_logprob  0 에 가까울수록 확신. -0.1 쯤이면 또렷하고 -1.0 이면 웅얼거린 구간이다.
+ * no_speech_prob  이게 높으면 애초에 말이 아니었을 수 있다 (숨소리, 배경음).
+ *
+ * 말이 흐려지는 구간은 이 둘이 같이 나빠지므로, 낮은 쪽을 신뢰도로 삼는다.
+ */
+function confidenceOf(s) {
+  const lp = Number(s?.avg_logprob);
+  const ns = Number(s?.no_speech_prob);
+  let c = 1;
+  if (Number.isFinite(lp)) {
+    // -1.0 이하 → 0, 0 → 1 로 펼친다
+    c = Math.min(c, Math.max(0, 1 + lp));
+  }
+  if (Number.isFinite(ns)) {
+    c = Math.min(c, 1 - ns);
+  }
+  return Math.round(c * 100) / 100;
+}
+
 /** 긴 문장을 자막 길이로 쪼갠다. 단어 시각이 있으면 그걸로, 없으면 글자 수 비율로 나눈다. */
 function chunkSegments(items) {
   const out = [];
@@ -122,7 +152,7 @@ function chunkSegments(items) {
       const flush = () => {
         if (!buf.length) return;
         const text = joinWords(buf);
-        if (text) out.push({ start: buf[0].start, end: buf[buf.length - 1].end, text });
+        if (text) out.push({ start: buf[0].start, end: buf[buf.length - 1].end, text, conf: item.conf });
         buf = [];
       };
       for (const w of item.words) {
@@ -140,7 +170,7 @@ function chunkSegments(items) {
     if (!text) continue;
     const span = Math.max(0, item.end - item.start);
     if (text.length <= MAX_CHARS * 1.5 || span <= 0) {
-      out.push({ start: item.start, end: item.end, text });
+      out.push({ start: item.start, end: item.end, text, conf: item.conf });
       continue;
     }
     // 시각 정보가 문장 단위뿐이면 글자 수에 비례해 나눈다
@@ -148,7 +178,7 @@ function chunkSegments(items) {
     let cursor = item.start;
     for (const p of parts) {
       const d = span * (p.length / text.length);
-      out.push({ start: cursor, end: cursor + d, text: p });
+      out.push({ start: cursor, end: cursor + d, text: p, conf: item.conf });
       cursor += d;
     }
   }
@@ -162,7 +192,7 @@ function chunkSegments(items) {
     const prev = clean[clean.length - 1];
     if (prev && start < prev.end) start = prev.end;
     if (end <= start) end = start + MIN_SEC;
-    clean.push({ start, end, text: s.text });
+    clean.push({ start, end, text: s.text, conf: s.conf ?? 1 });
   }
   return clean;
 }

@@ -156,3 +156,82 @@ export function sliceBuffer(buffer, from, seconds) {
   }
   return out;
 }
+
+/**
+ * 소리는 나는데 자막이 없는 구간을 찾는다.
+ *
+ * 말이 흐려지면 Whisper 가 그 구간을 아예 버리고 넘어간다. 틀린 자막이 생기는 게 아니라
+ * 자막이 통째로 빠지는 것이라, 눈으로는 잘 안 보이고 다 들어봐야 알 수 있다.
+ * 그래서 소리 크기만 보고 "여기 말이 있었는데 자막이 없다" 를 짚어 준다.
+ */
+export function findUncaptioned(buffer, captions, { minLen = 0.6, pad = 0.15 } = {}) {
+  if (!buffer) return [];
+
+  const win = Math.floor(buffer.sampleRate * 0.05);   // 50ms 단위로 본다
+  const ch = buffer.getChannelData(0);
+  const frames = Math.floor(ch.length / win);
+  const rms = new Float32Array(frames);
+
+  for (let f = 0; f < frames; f++) {
+    let sum = 0;
+    const base = f * win;
+    for (let i = 0; i < win; i += 4) {
+      const v = ch[base + i];
+      sum += v * v;
+    }
+    rms[f] = Math.sqrt(sum / (win / 4));
+  }
+
+  // 문턱값을 피크 기준으로 잡으면 안 된다. 웅얼거린 말은 또렷한 말보다 10배쯤 작아서
+  // "피크의 몇 %" 로 자르면 정작 찾아야 할 구간이 통째로 묵음 처리된다.
+  // 그래서 무음 바닥에서 살짝 올린 값을 쓰되, 시끄러운 녹음에서는 바닥을 따라 올린다.
+  const sorted = Float32Array.from(rms).sort();
+  const noise = sorted[Math.floor(sorted.length * 0.2)] || 0;
+  const peak = sorted[Math.floor(sorted.length * 0.95)] || 0;
+  if (peak < 0.01) return [];                      // 처음부터 조용한 파일
+  const ABS_FLOOR = 0.004;                         // 대략 -48dBFS
+  const gate = Math.min(
+    Math.max(noise * 3, ABS_FLOOR),
+    noise + (peak - noise) * 0.25,                 // 아무리 시끄러워도 이 위로는 안 올린다
+  );
+
+  // 소리가 나는 구간 묶기
+  const loud = [];
+  let start = -1;
+  for (let f = 0; f < frames; f++) {
+    if (rms[f] > gate) {
+      if (start < 0) start = f;
+    } else if (start >= 0) {
+      loud.push([start * 0.05, f * 0.05]);
+      start = -1;
+    }
+  }
+  if (start >= 0) loud.push([start * 0.05, frames * 0.05]);
+
+  // 짧은 끊김은 이어 붙인다 (말 사이 숨 쉬는 간격)
+  const merged = [];
+  for (const seg of loud) {
+    const prev = merged[merged.length - 1];
+    if (prev && seg[0] - prev[1] < 0.35) prev[1] = seg[1];
+    else merged.push(seg);
+  }
+
+  // 자막이 덮고 있는 부분을 빼고 남는 곳
+  const gaps = [];
+  for (const [s, e] of merged) {
+    let cursor = s;
+    const covering = captions
+      .filter(c => c.end > s && c.start < e)
+      .sort((a, b) => a.start - b.start);
+    for (const c of covering) {
+      if (c.start - cursor > minLen) gaps.push([cursor, c.start]);
+      cursor = Math.max(cursor, c.end);
+    }
+    if (e - cursor > minLen) gaps.push([cursor, e]);
+  }
+
+  return gaps.map(([s, e]) => ({
+    start: Math.max(0, s - pad),
+    end: e + pad,
+  }));
+}

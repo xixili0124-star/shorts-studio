@@ -8,7 +8,7 @@ import { createClip, disposeClip } from './media.js';
 import { loadFonts } from './render.js';
 import { Player } from './player.js';
 import { parseSrt, buildSrt } from './srt.js';
-import { decodeAudioFile, mixTimeline, hasClipAudio } from './audio.js';
+import { decodeAudioFile, mixTimeline, hasClipAudio, findUncaptioned } from './audio.js';
 import { detectEngine, exportVideo } from './exporter.js';
 import { isAvailable as sttAvailable, transcribe } from './transcribe.js';
 import * as yt from './youtube.js';
@@ -21,6 +21,8 @@ let exportCtrl = null;
 let bgmAudioEl = null;
 let lastExport = null;   // { blob, seconds } — 유튜브 업로드가 이걸 쓴다
 let ytCtrl = null;
+let capGaps = [];          // 소리는 있는데 자막이 없는 구간
+let lastSttAudio = null;   // 방금 인식에 쓴 오디오 (구간 다시 계산용)
 
 // ── 시작 ───────────────────────────────────────────────
 init();
@@ -145,6 +147,7 @@ function renderAll() {
 
 /** 값만 바뀐 경우 — 입력 포커스를 잃지 않도록 최소한만 갱신 */
 function softRefresh() {
+  refreshGaps();
   renderTimeline();
   el.totalDur.textContent = `${totalDuration().toFixed(1)}초`;
   el.tAll.textContent = fmtTime(totalDuration());
@@ -225,6 +228,14 @@ function renderTimeline() {
     });
     attachBlockDrag(b, o, 'ov');
     el.tlOverlays.appendChild(b);
+  }
+
+  // 소리는 있는데 자막이 없는 구간을 먼저 깔고, 그 위에 자막 블록을 올린다
+  for (const g of capGaps) {
+    const b = block(g.start, g.end - g.start, total, 'tl-block tl-gap', '?');
+    b.title = `${fmtTime(g.start)} ~ ${fmtTime(g.end)} — 소리는 있는데 자막이 없습니다`;
+    b.addEventListener('click', () => { switchTab('cap'); player.seek(g.start); });
+    el.tlCaptions.appendChild(b);
   }
 
   for (const c of project.captions) {
@@ -684,8 +695,10 @@ function renderCaptionList() {
         renderCaptionList(); softRefresh();
       });
     } else {
+      const shaky = (c.conf ?? 1) < 0.5;
       li.innerHTML = `<span class="tm">${fmtTime(c.start)}</span>
-        <span class="t">${escapeHtml(c.text.split('\n')[0] || '(빈 자막)')}</span>`;
+        <span class="t">${escapeHtml(c.text.split('\n')[0] || '(빈 자막)')}</span>`
+        + (shaky ? '<span class="shaky" title="모델이 알아듣기 애매해한 구간입니다. 들어보고 확인하세요">확인</span>' : '');
       li.addEventListener('click', () => {
         sel.capId = c.id;
         player.seek(c.start + 0.05);
@@ -794,9 +807,15 @@ async function doAutoCaption() {
     }
     project.captions = caps;
     sel.capId = null;
+    lastSttAudio = mixed;
+    refreshGaps();
     renderCaptionList();
     softRefresh();
-    setCapStatus(`자막 ${caps.length}개를 만들었습니다. 목록에서 눌러 고칠 수 있습니다.`);
+
+    const low = caps.filter(c => (c.conf ?? 1) < 0.5).length;
+    const parts = [`자막 ${caps.length}개를 만들었습니다.`];
+    if (low) parts.push(`그중 ${low}개는 알아듣기 애매한 구간이라 확인이 필요합니다.`);
+    setCapStatus(parts.join(' '));
   } catch (e) {
     if (e?.name === 'AbortError') setCapStatus('취소했습니다.');
     else {
@@ -807,6 +826,24 @@ async function doAutoCaption() {
     autoCapCtrl = null;
     el.autoCap.textContent = AUTO_CAP_LABEL;
   }
+}
+
+
+/**
+ * 소리는 나는데 자막이 없는 구간을 다시 계산한다.
+ * 자막을 손으로 고치면 빈 구간도 달라지므로 그때마다 다시 본다.
+ */
+function refreshGaps() {
+  capGaps = lastSttAudio ? findUncaptioned(lastSttAudio, project.captions) : [];
+  const box = el.capGaps;
+  if (!capGaps.length) {
+    box.hidden = true;
+    return;
+  }
+  box.hidden = false;
+  box.textContent = `소리는 있는데 자막이 없는 구간 ${capGaps.length}곳 — `
+    + capGaps.map(g => fmtTime(g.start)).join(', ')
+    + ' (타임라인의 빗금 부분을 눌러 확인하세요)';
 }
 
 function setCapStatus(msg) {

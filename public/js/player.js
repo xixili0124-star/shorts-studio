@@ -16,6 +16,7 @@ export class Player {
     this._startWall = 0;
     this._startTime = 0;
     this.bgmEl = null;
+    this.narrationEl = null;
 
     // 탭이 가려지면 requestAnimationFrame 이 멈춘다.
     // 그대로 두면 돌아왔을 때 시간이 훌쩍 뛰므로 그냥 일시정지한다.
@@ -84,6 +85,7 @@ export class Player {
     }
     this._syncVideos(!this.playing);
     this._syncBgm();
+    this._syncNarration();
     if (redraw) this.draw();
     this.onTick(this.time);
   }
@@ -100,7 +102,9 @@ export class Player {
     this._startWall = performance.now() / 1000;
     this._startTime = this.time;
     this._syncBgm();
+    this._syncNarration();
     this.bgmEl?.play().catch(() => {});
+    this.narrationEl?.play().catch(() => {});
     const tick = () => {
       if (!this.playing) return;
       const now = performance.now() / 1000;
@@ -133,6 +137,7 @@ export class Player {
     this._raf = null;
     for (const c of project.clips) { try { c.el?.pause(); } catch { /* noop */ } }
     try { this.bgmEl?.pause(); } catch { /* noop */ }
+    try { this.narrationEl?.pause(); } catch { /* noop */ }
   }
 
   toggle() { this.playing ? this.pause() : this.play(); }
@@ -163,6 +168,24 @@ export class Player {
         }
       }
     }
+  }
+
+  setNarrationElement(el) {
+    try { this.narrationEl?.pause(); } catch { /* noop */ }
+    this.narrationEl = el;
+    this._syncNarration();
+  }
+
+  /** 내레이션은 0초부터 그대로 깔리므로 재생 위치만 맞추면 된다 */
+  _syncNarration() {
+    const n = project.audio.narration;
+    const el = this.narrationEl;
+    if (!el || !n) return;
+    el.volume = clamp(n.volume ?? 1, 0, 1);
+    if (Math.abs(el.currentTime - this.time) > 0.25) {
+      el.currentTime = Math.max(0, Math.min(this.time, (el.duration || 1e9) - 0.05));
+    }
+    if (this.playing && el.paused) el.play().catch(() => {});
   }
 
   // ── 내부: 배경음악 ───────────────────────────────────

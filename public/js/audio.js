@@ -20,7 +20,9 @@ export function hasClipAudio() {
 }
 
 export function hasAnyAudio() {
-  return Boolean(project.audio.bgm?.buffer) || hasClipAudio();
+  return Boolean(project.audio.bgm?.buffer)
+    || Boolean(project.audio.narration?.buffer)
+    || hasClipAudio();
 }
 
 /** 영상 클립에서 트림 구간만큼의 오디오를 뽑아 AudioBuffer 로 만든다 */
@@ -104,7 +106,18 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true } = {}
     node.start(at, 0, Math.min(dur, buf.duration));
   }
 
-  // 2) 배경음악
+  // 2) 내레이션 — 0초부터 그대로 깐다
+  const nar = project.audio.narration;
+  if (nar?.buffer) {
+    const node = ctx.createBufferSource();
+    node.buffer = nar.buffer;
+    const gain = ctx.createGain();
+    gain.gain.value = nar.volume ?? 1;
+    node.connect(gain).connect(master);
+    node.start(0, 0, Math.min(total, nar.buffer.duration));
+  }
+
+  // 3) 배경음악
   // 음성 인식에 넘길 때는 빼고 부른다. 노래가 섞이면 알아듣는 정확도가 떨어진다.
   const bgm = includeBgm ? project.audio.bgm : null;
   if (bgm?.buffer) {

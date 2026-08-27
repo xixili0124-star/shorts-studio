@@ -158,6 +158,48 @@ CORS 는 배포 주소와 localhost 만 허용한다 (`stt-worker/src/index.js` 
 **모델 응답을 그대로 쓰지 않는다.** Whisper 가 주는 문장은 자막으로 쓰기엔 길 때가 많아서,
 단어 단위 시각을 이용해 20자 / 4초 / 문장부호 기준으로 다시 끊는다 (`chunkSegments`).
 
+## 내레이션 (TTS)
+
+[오디오] 탭에서 대본을 넣으면 읽어 주고, **자막까지 같이 만든다.**
+
+TTS 로 읽으면 대본을 이미 알고 있으므로 음성 인식이 필요 없다.
+받아쓰기 오류가 없고(자동 자막의 "숏츠 -> Shots" 같은), STT 비용도 안 든다.
+서비스가 단어별 타임스탬프를 주면 그대로 쓰고, 안 주면 글자 수에 비례해 나눈다.
+
+### 아직 목소리가 안 꽂혀 있다
+
+구조만 만들어 둔 상태다. [오디오] 탭 배지가 `미연결` 로 뜨고 버튼이 잠겨 있다.
+
+꽂는 자리는 **한 곳뿐**이다 — `stt-worker/src/index.js` 의 `PROVIDERS`.
+
+```js
+const ACTIVE = 'azure';           // 여기를 바꾸고
+const PROVIDERS = {
+  azure: async (env, { text, voice, speed }) => {
+    // 서비스를 부르고 이 모양으로 돌려준다
+    return { audio: base64, mime: 'audio/mpeg', marks: [{ text, start, end }] };
+  },
+};
+```
+
+```bash
+npx wrangler secret put AZURE_SPEECH_KEY   # 키는 코드에 넣지 않는다
+cd stt-worker && npx wrangler deploy
+```
+
+편집기(`public/js/tts.js`)는 워커의 응답 모양만 알고 있어서 **서비스가 바뀌어도 그대로다.**
+나중에 로컬 음성 복제(VoiceBox 등)로 갈아탈 때도 이 함수 하나만 바꾸면 된다.
+
+### 어느 서비스를 쓸지
+
+| | 무료 | 이후 | 타임스탬프 |
+|---|---|---|---|
+| Azure Speech | 월 50만 자 (1분 내레이션 ≈ 300자) | $16~22/100만 자 | 준다 (WordBoundary) |
+| ElevenLabs | 월 1만 자 | $5/월~ | 준다 |
+| OpenAI TTS | 없음 | $15/100만 자 | 안 준다 |
+
+Workers AI 의 MeloTTS 는 **쓸 수 없다** (영어도 3043 에러로 죽는다). 직접 확인했다.
+
 ## 유튜브 숏츠 업로드
 
 내보낸 영상을 다운로드 없이 바로 유튜브에 올립니다. OAuth 는 팝업으로 처리해서

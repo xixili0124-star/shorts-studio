@@ -39,6 +39,8 @@ export const project = {
   audio: {
     originalVolume: 1,
     bgm: null, // { name, file, buffer(AudioBuffer), volume, offset, fadeIn, fadeOut, loop }
+    // 내레이션은 배경음악과 별개 트랙이다. 항상 0초부터 깔리고 반복하지 않는다.
+    narration: null, // { name, blob, buffer(AudioBuffer), volume }
   },
 
   // 템플릿 — 영상을 화면 가운데 밴드에 넣고 위아래를 단색으로 채우는 구성.

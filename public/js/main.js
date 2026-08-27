@@ -13,6 +13,7 @@ import { detectEngine, exportVideo } from './exporter.js';
 import { isAvailable as sttAvailable, transcribe } from './transcribe.js';
 import * as yt from './youtube.js';
 import { planScenes, buildOverlays, buildCaption } from './shopping.js';
+import * as tts from './tts.js';
 
 const el = new Proxy({}, { get: (_, id) => document.getElementById(id) });
 
@@ -43,6 +44,7 @@ async function init() {
   wireExportPanel();
   wireTemplatePanel();
   wireShoppingPanel();
+  wireNarrationPanel();
   wireYouTubePanel();
   wireKeyboard();
   wirePaste();
@@ -1223,6 +1225,117 @@ async function buildShoppingShort() {
     el.shopStatus.textContent = `실패: ${e.message}`;
   } finally {
     el.shopBuild.disabled = false;
+  }
+}
+
+
+// ── 내레이션 (TTS) ─────────────────────────────────────
+let ttsCtrl = null;
+let narrationEl = null;   // 미리보기 재생용
+
+async function wireNarrationPanel() {
+  el.ttsSpeed.addEventListener('input', () => {
+    el.ttsSpeedOut.textContent = `${Number(el.ttsSpeed.value).toFixed(1)}배`;
+  });
+  el.ttsVol.addEventListener('input', () => {
+    const n = project.audio.narration;
+    if (!n) return;
+    n.volume = Number(el.ttsVol.value);
+    el.ttsVolOut.textContent = pct(n.volume);
+    if (narrationEl) narrationEl.volume = clamp(n.volume, 0, 1);
+  });
+  el.ttsRun.addEventListener('click', runNarration);
+  el.ttsDel.addEventListener('click', () => {
+    project.audio.narration = null;
+    if (narrationEl) { narrationEl.pause(); URL.revokeObjectURL(narrationEl.src); narrationEl = null; }
+    player.setNarrationElement(null);
+    el.ttsResult.hidden = true;
+    el.ttsStatus.textContent = '';
+    player.invalidate();
+  });
+
+  // 목소리가 꽂혀 있는지 물어본다
+  const st = await tts.checkAvailable();
+  if (st.ok) {
+    el.ttsBadge.textContent = st.provider || '연결됨';
+    el.ttsBadge.className = 'badge ok';
+    for (const v of st.voices) {
+      const o = document.createElement('option');
+      o.value = v.id ?? v; o.textContent = v.label ?? v;
+      el.ttsVoice.appendChild(o);
+    }
+  } else {
+    el.ttsBadge.textContent = '미연결';
+    el.ttsBadge.className = 'badge warn';
+    el.ttsRun.disabled = true;
+    el.ttsStatus.textContent = st.reason
+      || '내레이션 목소리가 아직 연결되지 않았습니다.';
+  }
+}
+
+async function runNarration() {
+  if (ttsCtrl) { ttsCtrl.abort(); return; }
+  const text = el.ttsText.value.trim();
+  if (!text) return alert('읽을 내용을 입력해 주세요.');
+
+  ttsCtrl = new AbortController();
+  el.ttsRun.textContent = '취소';
+  el.ttsProg.hidden = false;
+  el.ttsProgBar.style.width = '30%';
+  el.ttsStatus.textContent = '읽는 중…';
+
+  try {
+    const { blob, marks, provider } = await tts.speak(text, {
+      voice: el.ttsVoice.value,
+      speed: Number(el.ttsSpeed.value),
+      signal: ttsCtrl.signal,
+    });
+    el.ttsProgBar.style.width = '70%';
+
+    const buffer = await decodeAudioFile(new File([blob], 'narration'));
+    project.audio.narration = {
+      name: `내레이션 (${provider || 'TTS'})`,
+      blob, buffer, volume: 1,
+    };
+
+    if (narrationEl) URL.revokeObjectURL(narrationEl.src);
+    narrationEl = document.createElement('audio');
+    narrationEl.src = URL.createObjectURL(blob);
+    narrationEl.preload = 'auto';
+    player.setNarrationElement(narrationEl);
+
+    // 대본을 아니까 자막은 받아쓸 필요가 없다
+    let capCount = 0;
+    if (el.ttsMakeCaps.checked) {
+      const caps = tts.marksToCaptions(marks, { text, duration: buffer.duration });
+      if (caps.length) {
+        project.captions = caps;
+        sel.capId = null;
+        capCount = caps.length;
+        renderCaptionList();
+      }
+    }
+
+    el.ttsProgBar.style.width = '100%';
+    el.ttsName.textContent = `${project.audio.narration.name} · ${buffer.duration.toFixed(1)}초`;
+    el.ttsVol.value = 1;
+    el.ttsVolOut.textContent = '100%';
+    el.ttsResult.hidden = false;
+    el.ttsStatus.textContent = capCount
+      ? `${buffer.duration.toFixed(1)}초 내레이션과 자막 ${capCount}개를 만들었습니다.`
+      : `${buffer.duration.toFixed(1)}초 내레이션을 만들었습니다.`;
+    softRefresh();
+  } catch (e) {
+    if (e?.name === 'AbortError') el.ttsStatus.textContent = '취소했습니다.';
+    else if (e?.name === 'NotConfiguredError') el.ttsStatus.textContent = e.message;
+    else {
+      console.error(e);
+      el.ttsStatus.textContent = `실패: ${e.message}`;
+    }
+  } finally {
+    ttsCtrl = null;
+    el.ttsRun.textContent = '내레이션 만들기';
+    setTimeout(() => { if (!ttsCtrl) el.ttsProg.hidden = true; }, 1200);
   }
 }
 

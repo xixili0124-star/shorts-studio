@@ -172,3 +172,64 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
   .play-controls .icon-button{width:25px;flex-basis:25px}
 }
 @media(max-height:740px) and (min-width:651px){.workbench{grid-template-rows:minmax(155px,1fr) 310px}.inspector{bottom:310px}.timeline-toolbar{min-height:42px}#trackHeaders>.track-head,#timelineRows>.track{height:47px;min-height:47px}}
+
+/* 선택 묶음과 용도별 확장 트랙 */
+.track-heads{width:166px;flex-basis:166px}
+.track-selector{gap:5px}.track-selector strong{overflow:hidden;text-overflow:ellipsis}
+.add-track{width:24px;height:27px;display:grid;place-items:center;flex:0 0 24px;padding:0;border:1px solid #424b45;border-radius:4px;background:#252d27;color:#c9e9af;font:19px/1 Arial,sans-serif}
+.add-track:hover{background:#3d4e30;border-color:var(--accent)}.add-track:disabled{opacity:.3;cursor:not-allowed}
+.graphic-head .track-code{color:#c7b0f4;border-color:#615078}.caption-head .track-code{color:#f2d2a0;border-color:#796344}.voice-head .track-code{color:#9fd5e1;border-color:#42616b}
+.track-add-tools select{width:71px;min-height:26px;padding:3px 5px;font-size:10px}
+.timeline-canvas{touch-action:none}
+.timeline-marquee{position:absolute;z-index:20;pointer-events:none;border:1px solid var(--accent);background:#b8ee6320;box-shadow:0 0 0 1px #10161080}
+.timeline-insert-preview.invalid{border-color:#f28c83;background:#c4454329;color:#ffcdc7}
+.selection-count{color:var(--accent);font-size:10px;white-space:nowrap}.selection-count:empty{display:none}
+.settings-copy-symbol,.settings-paste-symbol{display:block;position:relative;flex:0 0 13px;width:13px;height:14px;font-style:normal}
+.settings-copy-symbol:before,.settings-copy-symbol:after{content:'';position:absolute;width:8px;height:9px;border:1px solid currentColor;border-radius:1px}
+.settings-copy-symbol:before{top:0;left:0}.settings-copy-symbol:after{bottom:0;right:0;background:#25302b}
+.settings-paste-symbol:before{content:'';position:absolute;inset:2px 1px 0;border:1px solid currentColor;border-radius:2px}
+.settings-paste-symbol:after{content:'';position:absolute;width:5px;height:3px;left:4px;top:0;border:1px solid currentColor;background:#25302b;border-radius:1px}
+.clip-settings{position:absolute;top:2px;right:8px;z-index:6;display:flex;gap:2px;padding:1px;border:1px solid #7c95814d;border-radius:4px;background:#17201ddd;box-shadow:0 1px 4px #0004}
+.clip-settings button{width:22px;height:20px;padding:3px 4px;display:grid;place-items:center;background:transparent;border-radius:2px;color:#d1dfcd}
+.clip-settings button:hover{background:#597043;color:#fff}.clip-settings button:disabled{opacity:.3}
+.timeline-block .block-label{max-width:calc(100% - 60px);text-overflow:ellipsis;overflow:hidden}
+.timeline-block:has(.clip-settings.compact) .block-label{max-width:100%}
+.clip-settings.compact{left:7px;right:auto;opacity:0;pointer-events:none}
+.timeline-block:hover,.timeline-block:focus-within{overflow:visible;z-index:9}
+.timeline-block:hover .clip-settings.compact,.timeline-block:focus-within .clip-settings.compact{opacity:1;pointer-events:auto}
+.timeline-block .thumb-strip{border-radius:3px}
+.settings-actions{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:10px 0}
+.settings-actions .button{font-size:10px;padding:7px 4px}
+.batch-note{padding:10px;border:1px solid #354330;background:#222b1e;border-radius:5px}
+.mixed-value>span:first-child:after{content:' ·';color:var(--accent)}
+.mixed-value input[type=color]{outline:1px dashed var(--accent);outline-offset:3px}
+.mixed-value output{color:var(--accent);font-size:9px}
+
+/* 편집 손잡이는 출력 영상과 분리되어 있습니다. */
+.viewer-stage{padding-top:43px;padding-bottom:20px;touch-action:none}
+.monitor-overlay{position:absolute;inset:0;z-index:9;pointer-events:none}
+#monitorOutline{position:absolute;inset:0;width:100%;height:100%;overflow:visible;pointer-events:none}
+#monitorOutline polygon{fill:none;stroke:var(--accent);stroke-width:1.5;vector-effect:non-scaling-stroke}
+#monitorOutline polygon.secondary{stroke-width:1;stroke-dasharray:4 3;opacity:.7}
+#monitorOutline .center-guide{stroke:#c3ff80;stroke-width:1;stroke-dasharray:5 3;vector-effect:non-scaling-stroke}
+.monitor-handle{position:absolute;width:16px;height:16px;transform:translate(-50%,-50%);padding:0;border:4px solid #182015;border-radius:2px;background:#c8f18c;box-shadow:0 0 0 1px #b8ee6399;pointer-events:auto;touch-action:none;z-index:2}
+.monitor-handle:hover,.monitor-handle:focus-visible{background:#efffd9;outline:2px solid #ddffb0;outline-offset:2px}
+.monitor-handle[data-edges="left"],.monitor-handle[data-edges="right"]{cursor:ew-resize}
+.monitor-handle[data-edges="top"],.monitor-handle[data-edges="bottom"]{cursor:ns-resize}
+.monitor-handle[data-edges="left top"],.monitor-handle[data-edges="right bottom"]{cursor:nwse-resize}
+.monitor-handle[data-edges="right top"],.monitor-handle[data-edges="left bottom"]{cursor:nesw-resize}
+.monitor-handle.crop-handle{border:2px solid #c8f18c;background:#172310dd;box-shadow:inset 0 0 0 2px #172310,0 0 0 2px #17231099}
+.monitor-handle.rotate-handle{width:23px;height:23px;border-radius:50%;border:1px solid #b8ee63;background:#1d2817;color:#d0f69e;font-size:18px;line-height:1;cursor:grab}
+.monitor-tools{position:absolute;z-index:12;display:flex;align-items:center;gap:3px;padding:4px;border:1px solid #61764f;border-radius:7px;background:#20281eee;box-shadow:0 3px 12px #0007;white-space:nowrap;max-width:calc(100% - 10px);pointer-events:auto}
+.monitor-modes{display:flex;gap:2px}
+.monitor-tools button{min-height:26px;padding:4px 7px;font-size:10px;border-radius:4px;background:transparent;color:#bbc6b2}
+.monitor-tools button:hover{background:#34422b;color:#fff}
+.monitor-tools button.active{background:#c5ed8e;color:#182111;font-weight:700}
+.monitor-tools .divider{height:17px;margin:0 2px}
+.monitor-tools small{font-size:9px;color:#d3edb8;padding:0 3px}
+.monitor-tools small:empty{display:none}
+.viewer-stage[data-monitor-mode="crop"] canvas{cursor:crosshair}
+.monitor-dragging .library,.monitor-dragging .inspector,.monitor-dragging .timeline-panel,.monitor-dragging .appbar,.monitor-dragging .tool-rail,.monitor-dragging .transport-bar{pointer-events:none}
+.monitor-dragging .viewer-stage canvas{cursor:grabbing}
+@media(max-width:960px){.track-heads{width:148px;flex-basis:148px}.edit-tools>.tool-button>span{display:none}.monitor-tools button{padding:4px 5px;font-size:9px}.monitor-tools small{display:none}}
+@media(max-width:650px){.track-heads{width:132px;flex-basis:132px}.track-selector .track-code{width:20px}.track-add-tools select{width:64px}.add-track{width:22px;flex-basis:22px}.timeline-title{display:flex}.edit-tools{justify-content:flex-start;gap:8px;overflow-x:auto}.selection-count{margin-left:auto}.viewer-stage{padding-top:41px}.monitor-tools button{padding:4px 5px}}

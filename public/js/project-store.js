@@ -1,5 +1,5 @@
 // 편집 데이터와 미디어 자원을 분리합니다. 되돌리기는 DOM/File을 복제하지 않습니다.
-import { project, newClipDefaults, syncAnchoredItems, buildLayout, pinClipPositions, timelineTracks, trackIdFor, migrateTimeline, MAX_TRACKS_PER_KIND } from './state.js';
+import { project, newClipDefaults, syncAnchoredItems, buildLayout, pinClipPositions, timelineTracks, trackIdFor, migrateTimeline, MAX_TRACKS_PER_KIND, TRACK_ROLES } from './state.js';
 import { createClip, disposeClip } from './media.js';
 import { decodeAudioFile } from './audio.js';
 import { uid } from './util.js';
@@ -216,7 +216,8 @@ export function validateDocument(doc, records) {
   if (doc.version >= 3) {
     if (!Array.isArray(doc.timelineTracks) || doc.timelineTracks.length < 2
       || new Set(doc.timelineTracks.map(t => t?.id)).size !== doc.timelineTracks.length
-      || doc.timelineTracks.some(t => !t || !safeId(t.id) || !['visual','audio'].includes(t.kind))
+      || doc.timelineTracks.some(t => !t || !safeId(t.id) || !['visual','audio'].includes(t.kind)
+        || (t.role !== undefined && !TRACK_ROLES.some(role => role.id === t.role && role.kind === t.kind)))
       || ['visual','audio'].some(kind => !doc.timelineTracks.some(t => t.kind === kind)
         || doc.timelineTracks.filter(t => t.kind === kind).length > MAX_TRACKS_PER_KIND)) throw new Error('트랙 목록이 올바르지 않습니다.');
     for (const [type, list] of [['clip',doc.clips],['graphic',doc.overlays],['caption',doc.captions],['audio',doc.tracks]]) {

@@ -1,5 +1,5 @@
 // 자동 편집 패널은 결과를 먼저 보여주고, 사용자가 적용한 순간에만 프로젝트를 바꿉니다.
-import { project, clipDuration, totalDuration, trackLabel, timelineTracks, addTimelineTrack } from './state.js';
+import { project, clipDuration, totalDuration, trackLabel, timelineTracks, addTimelineTrack, MAX_TRACKS_PER_KIND } from './state.js';
 import { captureDocument, addAsset, makeAudio } from './project-store.js';
 import { itemRange, planSilenceCuts, applySilenceCuts, placeTimelineItem, planPlacement } from './timeline-edits.js';
 import { extractClipAudio, mixTimeline, findUncaptioned } from './audio.js';
@@ -277,14 +277,14 @@ export class StudioTools {
     const v={...this.voice};if(!v.text.trim())throw new Error('읽을 원고를 입력해 주세요.');
     if(v.engine==='local'&&!v.accepted)throw new Error('모델 다운로드와 이용 조건 동의에 체크해 주세요. API 비용은 없습니다.');
     this.open(v.engine==='local'?'브라우저 음성 생성':'설치된 음성 미리듣기','<p class="note">'+(v.engine==='local'?'원고는 이 기기 안에서 처리합니다. 첫 실행에는 모델 다운로드가 필요합니다.':'기기에 설치된 음성으로 읽습니다. 이 모드는 파일을 생성하지 않습니다.')+'</p>'+progressMarkup);
-    const state={kind:'voice',before:captureDocument(),start:this.hooks.player.time,trackId:this.hooks.timeline.preferredTrack('audio'),voice:v};this.state=state;
+    const state={kind:'voice',before:captureDocument(),start:this.hooks.player.time,trackId:this.hooks.timeline.preferredTrack('voice'),voice:v};this.state=state;
     await this.run('voice',async signal=>{
       if(v.engine==='device'){this.progress(NaN,'미리듣기 중…');await speakInstalled(v.text,v.systemVoice,{rate:v.speed,signal});this.setBody('<p class="note">미리듣기를 마쳤습니다. 영상에 넣을 파일은 기기 내 AI 모드에서 만들 수 있습니다.</p>'+button('cancel','닫기'));return;}
       const result=await runLocalAI('tts',{text:v.text,voice:v.voice,speed:v.speed,steps:v.steps},{signal,onProgress:(p,m)=>this.progress(p,m)});
       if(signal.aborted)return;
       state.file=new File([result.wav],'AI 음성 '+v.voice+' '+new Date().toTimeString().slice(0,8).replace(/:/g,'-')+'.wav',{type:'audio/wav'});
       const url=this.objectUrl(state.file);
-      this.setBody('<div class="smart-success">음성을 만들었어요.</div><p class="note">'+v.voice+' · '+result.duration.toFixed(2)+'초 · 44.1kHz WAV</p><audio controls src="'+url+'" aria-label="생성된 AI 음성 미리듣기"></audio><p class="note">'+esc(v.text)+'</p><p class="note warning">숫자·날짜·금액·이름을 먼저 들어보고 확인하세요. 게시할 때 AI 생성 음성임을 표시해야 합니다.</p>'+progressMarkup+button('apply-voice','오디오 트랙에 추가',false,true)+'<a class="button subtle wide" href="'+url+'" download="'+esc(state.file.name)+'">WAV 파일 다운로드</a>');
+      this.setBody('<div class="smart-success">음성을 만들었어요.</div><p class="note">'+v.voice+' · '+result.duration.toFixed(2)+'초 · 44.1kHz WAV</p><audio controls src="'+url+'" aria-label="생성된 AI 음성 미리듣기"></audio><p class="note">'+esc(v.text)+'</p><p class="note warning">숫자·날짜·금액·이름을 먼저 들어보고 확인하세요. 게시할 때 AI 생성 음성임을 표시해야 합니다.</p>'+progressMarkup+button('apply-voice','보이스 트랙에 추가',false,true)+'<a class="button subtle wide" href="'+url+'" download="'+esc(state.file.name)+'">WAV 파일 다운로드</a>');
     });
   }
   async applyVoice(){
@@ -293,10 +293,14 @@ export class StudioTools {
     await this.run('voice-add',async signal=>{
       const asset=await addAsset(s.file,{aiGenerated:true});
       if(signal.aborted||JSON.stringify(captureDocument())!==JSON.stringify(s.before)){this.hooks.saveDraft();this.hooks.refresh();this.hooks.toast('생성 음성은 소재함에 보관했어요. 원하는 위치로 끌어 넣을 수 있습니다.');this.job=null;this.close(false);return;}
-      const before=captureDocument(),track=makeAudio(asset.id,{volume:1,fadeIn:0,fadeOut:0,role:'voice'});
-      const result=placeTimelineItem('audio',track,planPlacement(s.start,asset.duration,s.trackId));
+      const before=captureDocument(),registry=timelineTracks();
+      const existing=registry.find(row=>row.id===s.trackId&&row.kind==='audio')||registry.find(row=>row.role==='voice');
+      if(!existing&&registry.filter(row=>row.kind==='audio').length>=MAX_TRACKS_PER_KIND){this.hooks.saveDraft();this.hooks.refresh();throw new Error('보이스 트랙을 추가할 공간이 없습니다. 생성 음성은 소재함에 보관했어요.');}
+      const track=makeAudio(asset.id,{volume:1,fadeIn:0,fadeOut:0,role:'voice'});
+      const target=existing?.id||addTimelineTrack('audio',{role:'voice'}).id;
+      const result=placeTimelineItem('audio',track,planPlacement(s.start,asset.duration,target));
       this.hooks.commit(before,'브라우저 AI 음성 추가');this.hooks.select('audio',track.id);this.hooks.timeline.reveal(result);
-      this.job=null;this.close(false);this.hooks.toast('음성을 오디오 트랙에 추가했어요. 완성 영상에도 포함됩니다.');
+      this.job=null;this.close(false);this.hooks.toast('음성을 보이스 트랙에 추가했어요. 완성 영상에도 포함됩니다.');
     });
   }
   async openCaptions(){
@@ -319,7 +323,7 @@ export class StudioTools {
       const normalized=whisperCaptions(result,duration,range?.start||0);
       if(!normalized.captions.length)throw new Error('유효한 시각이 있는 자막을 만들지 못했습니다. 말소리가 분명한 구간으로 다시 시도해 주세요.');
       Object.assign(s,normalized);s.gaps=findUncaptioned(buffer,s.captions.map(c=>({...c,start:c.start-(range?.start||0),end:c.end-(range?.start||0)})));
-      this.setBody('<div class="smart-success">'+s.captions.length+'개 자막을 만들었어요.</div><p class="note">틀린 문구는 여기서 고친 뒤 적용하세요. 기존 자막은 지우지 않습니다.</p><p class="note warning">숫자·이름은 틀릴 수 있습니다.'+(s.skipped?' 시각이 불확실한 '+s.skipped+'개 항목은 제외했습니다.':'')+(s.gaps.length?' 소리는 있으나 자막이 없는 '+s.gaps.length+'개 구간도 확인해 주세요.':'')+'</p><div class="smart-caption-review">'+s.captions.map((c,i)=>'<label><span>'+c.start.toFixed(2)+' → '+c.end.toFixed(2)+'초</span><textarea data-caption-index="'+i+'" maxlength="3000" aria-label="자막 '+(i+1)+' 내용">'+esc(c.text)+'</textarea></label>').join('')+'</div><details class="smart-details"><summary>전체 인식 원문</summary><p>'+esc(s.text)+'</p></details>'+progressMarkup+button('apply-captions','새 영상 트랙에 자막 추가',false,true));
+      this.setBody('<div class="smart-success">'+s.captions.length+'개 자막을 만들었어요.</div><p class="note">틀린 문구는 여기서 고친 뒤 적용하세요. 기존 자막은 지우지 않습니다.</p><p class="note warning">숫자·이름은 틀릴 수 있습니다.'+(s.skipped?' 시각이 불확실한 '+s.skipped+'개 항목은 제외했습니다.':'')+(s.gaps.length?' 소리는 있으나 자막이 없는 '+s.gaps.length+'개 구간도 확인해 주세요.':'')+'</p><div class="smart-caption-review">'+s.captions.map((c,i)=>'<label><span>'+c.start.toFixed(2)+' → '+c.end.toFixed(2)+'초</span><textarea data-caption-index="'+i+'" maxlength="3000" aria-label="자막 '+(i+1)+' 내용">'+esc(c.text)+'</textarea></label>').join('')+'</div><details class="smart-details"><summary>전체 인식 원문</summary><p>'+esc(s.text)+'</p></details>'+progressMarkup+button('apply-captions','새 자막 트랙에 추가',false,true));
     });
   }
   applyCaptions(){
@@ -327,7 +331,7 @@ export class StudioTools {
     if(JSON.stringify(captureDocument())!==JSON.stringify(s.before))throw new Error('인식 중 편집 내용이 바뀌었습니다. 적용하지 않고 현재 편집을 유지합니다.');
     const captions=s.captions.filter(c=>c.text.trim());if(!captions.length)throw new Error('추가할 자막 내용이 없습니다.');
     if(project.captions.length+captions.length>5000)throw new Error('자막은 최대 5,000개입니다. 구간을 나눠 작업해 주세요.');
-    const track=addTimelineTrack('visual');
+    const track=addTimelineTrack('visual',{role:'caption'});
     for(const c of captions)c.trackId=track.id;
     project.captions.push(...captions);this.hooks.commit(s.before,'브라우저 자동 자막 추가');
     this.hooks.select('caption',captions[0].id);this.hooks.timeline.reveal({...captions[0],type:'caption'});

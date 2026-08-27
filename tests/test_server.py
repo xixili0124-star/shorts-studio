@@ -61,6 +61,8 @@ class ServerTests(unittest.TestCase):
             ('/js/safe-areas.js',b'export const SAFE_AREAS'),
             ('/js/sound-effects.js',b'export const SOUND_EFFECTS'),
             ('/js/visual-transform.js',b'export function transformOf'),
+            ('/js/batch-edits.js',b'export function planBatchSplit'),
+            ('/js/monitor-editor.js',b'export class MonitorEditor'),
             ('/js/studio-tools.js',b'export class StudioTools'),
             ('/js/silence.js',b'export function analyzeSilence'),
             ('/js/mosaic.js',b'export function mosaicAt'),

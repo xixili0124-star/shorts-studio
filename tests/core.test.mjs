@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack} from '../public/js/state.js';
+import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES} from '../public/js/state.js';
 import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,packProject,unpackProject,validateDocument,clearAssets,waveformOf,demoSound} from '../public/js/project-store.js';
 import {encodeWav,transcriptionCaptions} from '../public/js/ai-client.js';
 import {renderFrame,measureVisual,loadFonts} from '../public/js/render.js';
@@ -10,7 +10,7 @@ import {Player} from '../public/js/player.js';
 import {GRAPHICS,CAPTIONS} from '../public/js/presets.js';
 import {frameTime,itemRange,splitAvailability,splitTimelineItem,setItemRange,planVideoPlacement,placeVideoClip,setTransition,planClipTrim,applyClipTrim,deleteTimelineItem,planPlacement,placeTimelineItem,trackGaps,currentGap,closeTimelineGap,planItemTrim,applyItemTrim,planSilenceCuts,applySilenceCuts} from '../public/js/timeline-edits.js';
 import {Timeline} from '../public/js/timeline.js';
-import {transformOf,visualCorners,alignVisual,withVisualTransform,croppedBounds} from '../public/js/visual-transform.js';
+import {transformOf,visualCorners,alignVisual,withVisualTransform,croppedBounds,transformPoint,inverseTransformPoint,hitVisual,cropFromDrag,resizeFromDrag,snapVisualCenter} from '../public/js/visual-transform.js';
 import {SAFE_AREAS,safeAreaConfig,safeAreaRect} from '../public/js/safe-areas.js';
 import {FONTS,ensureFont} from '../public/js/font-catalog.js';
 import {SOUND_EFFECTS,synthesizeEffect,createSoundEffect} from '../public/js/sound-effects.js';
@@ -22,6 +22,8 @@ import {normalizedRect,mosaicAt,validMosaics,unresolvedMosaics,mergeTrackingKeys
 import {chunkSpeechText,whisperCaptions,runLocalAI,installedVoices,speakInstalled,TTS_MODEL} from '../public/js/local-ai.js';
 import {cachedModel} from '../public/js/model-download.js';
 import {StudioTools} from '../public/js/studio-tools.js';
+import {selectionRefs,resolveSelection,combineSelection,marqueeHits,captureItemSettings,planPasteSettings,applySettingsPlan,applySharedProperty,deleteSelectedItems,planBatchMove,applyBatchMove,planBatchSplit,applyBatchSplit,duplicateSelectedItems} from '../public/js/batch-edits.js';
+import {MonitorEditor} from '../public/js/monitor-editor.js';
 
 const require=createRequire(import.meta.url);
 let canvasModule;
@@ -426,7 +428,7 @@ test('deterministic mixed edits never create an unapproved video overlap',()=>{
   }
 });
 
-test('numbered tracks expand without coupling clip kind or narration role',()=>{
+test('named role tracks expand without coupling clip kind or narration role',()=>{
   reset();project.clips=[{...clip('media',3),start:0}];
   project.overlays=[{id:'g',text:'G',start:1,end:2}];project.captions=[{id:'c',text:'C',start:1,end:2}];
   project.audio.tracks=[fixtureAudio('voice',4,{lane:'voice'}),fixtureAudio('music',4)];
@@ -434,7 +436,7 @@ test('numbered tracks expand without coupling clip kind or narration role',()=>{
   assert.deepEqual([project.clips[0].trackId,project.overlays[0].trackId,project.captions[0].trackId],['v1','v2','v3']);
   assert.deepEqual(project.audio.tracks.map(t=>[t.trackId,t.role]),[['a2','voice'],['a1','music']]);
   const visual=addTimelineTrack('visual'),audio=addTimelineTrack('audio');
-  assert.equal(trackLabel(visual.id),'영상 4');assert.equal(trackLabel(audio.id),'오디오 3');
+  assert.equal(trackLabel(visual.id),'영상 2');assert.equal(trackLabel(audio.id),'오디오 2');
   assert.throws(()=>removeTimelineTrack('v1'),/빈 트랙/);assert.equal(removeTimelineTrack(visual.id),true);
   assert.equal(project.clips[0].trackId,'v1');
 });
@@ -938,4 +940,443 @@ test('strict audio analysis distinguishes real boundary silence, missing decodin
 test('export refuses unresolved tracking before running the media encoder',async()=>{
   reset();project.clips=[await fixtureClip('video',2,'video',{mosaics:[maskFixture({mode:'tracked',range:[0,2],keyframes:[keyFixture(0),keyFixture(1,{lost:true})]})]})];
   await assert.rejects(()=>exportVideo({}),/모자이크|추적/);
+});
+
+test('voice capacity failure saves the generated asset without changing the timeline',async()=>{
+  reset();const previous=globalThis.window,calls=[],samples=new Float32Array(16000).fill(.1);
+  globalThis.window={AudioContext:class{async decodeAudioData(){return {length:samples.length,sampleRate:16000,numberOfChannels:1,duration:1,getChannelData:()=>samples};}close(){}}};
+  project.timelineTracks=[{id:'v1',kind:'visual',role:'video'},...Array.from({length:24},(_,i)=>({id:'a'+(i+1),kind:'audio',role:'audio'}))];
+  migrateTimeline();const before=captureDocument();
+  const owner={state:{file:new File(['wav'],'generated.wav',{type:'audio/wav'}),before,start:0},run:async(kind,work)=>work(new AbortController().signal),
+    hooks:{saveDraft:()=>calls.push('save'),refresh:()=>calls.push('refresh')}};
+  try{await assert.rejects(()=>StudioTools.prototype.applyVoice.call(owner),/보이스 트랙/);assert.equal(assets.size,1);assert.deepEqual(calls,['save','refresh']);assert.deepEqual(captureDocument(),before);}
+  finally{globalThis.window=previous;reset();}
+});
+
+// 다중 선택과 직접 조작의 계산·저장 회귀입니다. 브라우저를 제어하지 않습니다.
+test('legacy role migration preserves ids, stack order, mixed tracks and version 4',()=>{
+  reset();project.timelineTracks=[{id:'v3',kind:'visual'},{id:'v1',kind:'visual'},{id:'v2',kind:'visual'},{id:'a2',kind:'audio'},{id:'a1',kind:'audio'}];
+  project.captions=[{id:'mixed',text:'그대로',trackId:'v1',start:2,end:5}];
+  const rawRows=structuredClone(project.timelineTracks),before=captureDocument(),rows=timelineTracks();
+  assert.deepEqual(rows.map(row=>row.role),['caption','video','graphic','voice','audio']);
+  assert.deepEqual(project.timelineTracks,rawRows);
+  migrateTimeline();assert.deepEqual(project.timelineTracks.map(row=>row.id),before.timelineTracks.map(row=>row.id));
+  assert.deepEqual(project.captions,before.captions);assert.equal(captureDocument().version,4);
+  assert.equal(trackIdFor('caption',project.captions[0]),'v1');
+  const explicit={...captureDocument(),timelineTracks:[{id:'v1',kind:'visual',role:'caption'},{id:'a1',kind:'audio',role:'voice'}]};
+  validateDocument(explicit,[]);restoreDocument(explicit);
+  assert.equal(trackIdFor('caption',{}),'v1');assert.equal(trackLabel('a1'),'보이스');
+});
+
+test('per-row addition is visually adjacent and protects the last row of every role',()=>{
+  reset();migrateTimeline();
+  for(const role of TRACK_ROLES){
+    const original=timelineTracks().find(row=>row.role===role.id),added=addTimelineTrack(role.kind,{afterId:original.id});
+    const display=timelineTracks().filter(row=>row.kind===role.kind);if(role.kind==='visual')display.reverse();
+    const index=display.findIndex(row=>row.id===original.id);
+    assert.equal(display[index+(role.kind==='visual'?-1:1)].id,added.id);assert.equal(added.role,role.id);
+    assert.equal(removeTimelineTrack(added.id),true);assert.equal(removeTimelineTrack(original.id),false);
+  }
+  const before=captureDocument();
+  assert.throws(()=>addTimelineTrack('audio',{role:'caption'}));assert.deepEqual(captureDocument(),before);
+  const bad=structuredClone(before);bad.timelineTracks[0].role='voice';assert.throws(()=>validateDocument(bad,[]),/트랙/);
+});
+
+test('marquee intersects across rows in both directions and modifiers preserve unique live ids',()=>{
+  reset();project.captions=[{id:'a',start:0,end:2,text:'A'},{id:'b',start:3,end:4,text:'B'}];
+  const a={type:'caption',id:'a'},b={type:'caption',id:'b'},boxes=[{...a,left:10,right:40,top:30,bottom:60},{...b,left:60,right:90,top:70,bottom:100}];
+  const expected=[a,b];assert.deepEqual(marqueeHits({x:5,y:28},{x:80,y:95},boxes),expected);
+  assert.deepEqual(marqueeHits({x:80,y:95},{x:5,y:28},boxes),expected);
+  assert.deepEqual(marqueeHits({x:0,y:0},{x:10,y:30},boxes),[]);
+  assert.deepEqual(combineSelection([a],[a,b],'add'),[a,b]);assert.deepEqual(combineSelection([a],[a,b],'toggle'),[b]);
+  assert.deepEqual(selectionRefs([a,a,{type:'caption',id:'gone'},b]),expected);
+});
+
+test('settings paste changes compatible appearance while preserving content, timing, source and masks',async()=>{
+  reset();project.clips=[await fixtureClip('source',8,'video',{start:0,trackId:'v1',volume:.25,fadeIn:.4,transform:{offsetX:.2,rotation:24},crop:{left:.1},mosaics:[maskFixture()]}),
+    await fixtureClip('destination',6,'video',{start:10,trackId:'v1',trimStart:1,trimEnd:5,mosaics:[maskFixture({id:'own-mask',strength:70})]})];
+  project.captions=[{id:'cap',trackId:'v3',start:4,end:6,text:'문구 유지',style:{size:76}}];
+  project.audio.tracks=[fixtureAudio('voice',7,{start:12,role:'voice',trackId:'a2',aiGenerated:true})];
+  const refs=[{type:'clip',id:'destination'},{type:'caption',id:'cap'},{type:'audio',id:'voice'}],before=captureDocument();
+  const payload=captureItemSettings({type:'clip',id:'source'}),result=applySettingsPlan(planPasteSettings(refs,payload));
+  assert.equal(result.applied,3);assert.equal(project.clips[1].assetId,before.clips[1].assetId);
+  assert.deepEqual(project.clips[1].mosaics,before.clips[1].mosaics);assert.equal(project.clips[1].trimStart,1);assert.equal(project.clips[1].start,10);
+  assert.equal(project.captions[0].text,'문구 유지');assert.equal(project.captions[0].start,4);assert.equal(project.captions[0].style.size,76);
+  assert.equal(project.audio.tracks[0].role,'voice');assert.equal(project.audio.tracks[0].aiGenerated,true);assert.equal(project.audio.tracks[0].volume,.25);
+  assert.notEqual(project.clips[1].transform,project.captions[0].transform);project.clips[1].transform.offsetX=.8;assert.equal(project.captions[0].transform.offsetX,.2);
+  const typography=captureItemSettings({type:'caption',id:'cap'});assert.equal(planPasteSettings([{type:'audio',id:'voice'}],typography).skipped.length,1);
+});
+
+test('shared properties apply only to eligible kinds and reject stale paste plans',async()=>{
+  reset();project.clips=[await fixtureClip('video',4,'video'),await fixtureClip('image',4,'image',{trackId:'v2'})];
+  project.captions=[{id:'cap',start:0,end:4,text:'자막',style:{size:64}}];project.overlays=[{id:'graphic',start:0,end:4,text:'그래픽',size:100,trackId:'v2'}];
+  project.audio.tracks=[fixtureAudio('audio',4)];const refs=selectionRefs(buildLayout().items),before=captureDocument();
+  assert.equal(applySharedProperty(refs,'textStyle.size',88),2);assert.equal(project.captions[0].style.size,88);assert.equal(project.overlays[0].size,88);
+  assert.equal(applySharedProperty(refs,'volume',.3),2);assert.equal(project.clips[1].volume,before.clips[1].volume);
+  assert.equal(applySharedProperty(refs,'bg','white'),2);assert.equal(applySharedProperty(refs,'transform.offsetX',.2),4);
+  assert.equal(applySharedProperty(refs,'text','잘못된 일괄 내용'),0);assert.equal(project.captions[0].text,'자막');
+  assert.deepEqual(project.audio.tracks[0].transform,undefined);
+  const plan=planPasteSettings(refs,captureItemSettings({type:'clip',id:'video'}));project.captions[0].text='새 편집';
+  const changed=captureDocument();assert.throws(()=>applySettingsPlan(plan),/변경/);assert.deepEqual(captureDocument(),changed);
+});
+
+test('group movement preserves relative timing and rejects collisions and stale plans',()=>{
+  reset();project.captions=[{id:'a',text:'A',start:1,end:3,trackId:'v3'},{id:'b',text:'B',start:2,end:4,trackId:'v2'},{id:'obstacle',text:'O',start:7,end:9,trackId:'v3'}];
+  const refs=[{type:'caption',id:'a'},{type:'caption',id:'b'}],before=captureDocument();
+  assert.equal(planBatchMove(refs,5).ok,false);assert.deepEqual(captureDocument(),before);
+  const left=planBatchMove(refs,-50);assert.equal(left.delta,-1);applyBatchMove(left);
+  assert.deepEqual(project.captions.map(item=>item.start),[0,1,7]);assert.deepEqual(project.captions.map(item=>item.trackId),['v3','v2','v3']);
+  const stale=planBatchMove(refs,1);project.captions[2].text='new';assert.throws(()=>applyBatchMove(stale),/변경/);
+});
+
+test('group movement retains internal dissolves but detaches external connections',async()=>{
+  reset();project.clips=[await fixtureClip('a',4,'image',{start:0,transitionOut:{type:'dissolve',duration:1,toId:'b'}}),
+    await fixtureClip('b',4,'image',{start:3,transitionOut:{type:'dissolve',duration:1,toId:'c'}}),await fixtureClip('c',4,'image',{start:6})];migrateTimeline();
+  applyBatchMove(planBatchMove([{type:'clip',id:'a'},{type:'clip',id:'b'}],12));
+  assert.equal(project.clips[0].transitionOut.toId,'b');assert.equal(project.clips[1].transitionOut.type,'cut');assert.equal(project.clips[2].start,6);assertValidLayout();
+});
+
+test('batch ripple deletion recalculates chained dissolve spans and is one undo',async()=>{
+  reset();project.clips=await Promise.all(['a','b','c','d'].map((id,i)=>fixtureClip(id,4,'image',{start:i*3,transitionOut:{type:i<3?'dissolve':'cut',duration:i<3?1:0,...(i<3?{toId:['b','c','d'][i]}:{})}})));
+  project.captions=[{id:'keep',text:'유지',start:2,end:9,trackId:'v3'}];migrateTimeline();const before=captureDocument(),history=new History();
+  assert.equal(deleteSelectedItems([{type:'clip',id:'b'},{type:'clip',id:'c'}],true),2);
+  assert.deepEqual(project.clips.map(item=>[item.id,item.start]),[['a',0],['d',4]]);assert.deepEqual(project.captions,before.captions);
+  history.push(before,'batch delete');history.undo();assert.deepEqual(captureDocument(),before);
+});
+
+test('batch splitting includes only selected eligible items and retains masks and envelopes',async()=>{
+  reset();project.clips=[await fixtureClip('video',12,'video',{start:0,trimStart:2,trimEnd:10,fadeIn:2,fadeOut:2,mosaics:[maskFixture()]})];
+  project.audio.tracks=[fixtureAudio('voice',12,{trimStart:2,trimEnd:10,start:0,role:'voice',fadeIn:2,fadeOut:2})];
+  project.captions=[{id:'cap',text:'분할',trackId:'v3',start:0,end:8},{id:'later',text:'그대로',trackId:'v3',start:10,end:12}];
+  project.overlays=[{id:'unselected',text:'유지',trackId:'v2',start:0,end:8}];
+  const refs=[{type:'clip',id:'video'},{type:'audio',id:'voice'},{type:'caption',id:'cap'},{type:'caption',id:'later'}],before=captureDocument();
+  const plan=planBatchSplit(refs,4),result=await applyBatchSplit(plan);assert.equal(result.items.length,3);assert.equal(result.skipped,1);
+  assert.deepEqual(project.overlays,before.overlays);assert.equal(project.captions.find(item=>item.id==='later').start,10);
+  for(const ref of result.items){const range=itemRange(ref.type,ref.id);assert.equal(range.start,4);assert.equal(range.end,8);}
+  const right=project.clips.find(item=>item.id!=='video');assert.equal(right.trimStart,6);assert.deepEqual(right.mosaics,before.clips[0].mosaics);assert.notEqual(right.mosaics,project.clips[0].mosaics);
+  for(const time of [0,.5,3.5,4,5,7.5]){const part=time<4?project.clips[0]:right;near(clipFadeGain(part,time<4?time:time-4,4),clipFadeGain(before.clips[0],time,8));}
+  const h=new History();h.push(before,'batch split');h.undo();assert.deepEqual(captureDocument(),before);
+});
+
+for(const command of ['split','duplicate'])for(const mode of ['cancel','stale','second-failure'])test('batch '+command+' stages resources atomically on '+mode,async()=>{
+  reset();project.clips=[await fixtureClip('first',8,'video',{start:0,trackId:'v1'}),await fixtureClip('second',8,'video',{start:0,trackId:'v2'})];
+  const refs=selectionRefs(buildLayout().items),before=captureDocument(),plan=planBatchSplit(refs,4),old=document.createElement,controller=new AbortController(),staged=[];let made=0;
+  document.createElement=tag=>{
+    if(++made===2&&mode==='second-failure')throw new Error('fixture decode failure');
+    if(made===1&&mode==='cancel')queueMicrotask(()=>controller.abort());
+    if(made===1&&mode==='stale')queueMicrotask(()=>{project.clips[0].name='newer edit';});
+    const element=old(tag);staged.push(element);return element;
+  };
+  try{
+    await assert.rejects(command==='split'?applyBatchSplit(plan,{signal:controller.signal}):duplicateSelectedItems(refs,{signal:controller.signal}));
+    const expected=structuredClone(before);if(mode==='stale')expected.clips[0].name='newer edit';
+    assert.deepEqual(captureDocument(),expected);assert.ok(staged.every(element=>element.src===''));
+  }finally{document.createElement=old;}
+});
+
+test('cross-track duplication preserves offsets when one row pushes the insertion later',async()=>{
+  reset();project.captions=[{id:'a',text:'A',trackId:'v3',start:0,end:2},{id:'b',text:'B',trackId:'v2',start:1,end:3},{id:'obstacle',text:'O',trackId:'v3',start:2.5,end:6}];
+  const original=captureDocument(),copies=await duplicateSelectedItems([{type:'caption',id:'a'},{type:'caption',id:'b'}]);
+  assert.equal(copies.length,2);const a=itemRange('caption',copies[0].id),b=itemRange('caption',copies[1].id);near(b.start-a.start,1);
+  assert.ok(a.start>=6);assert.deepEqual(project.captions.slice(0,3),original.captions);
+  validateDocument(captureDocument(),[]);
+});
+
+test('duplication rejects clone and downstream overflow but normalizes fractional final frame',async()=>{
+  reset();project.captions=[{id:'a',text:'A',trackId:'v3',start:86399.6,end:86399.8}];
+  const copy=(await duplicateSelectedItems([{type:'caption',id:'a'}]))[0];assert.equal(project.captions.find(item=>item.id===copy.id).end,86400);validateDocument(captureDocument(),[]);
+  const before=captureDocument();await assert.rejects(()=>duplicateSelectedItems([{type:'caption',id:copy.id}]),/최대/);assert.deepEqual(captureDocument(),before);
+  reset();project.captions=[{id:'a',text:'A',trackId:'v3',start:0,end:2},{id:'tail',text:'T',trackId:'v3',start:2,end:86400}];
+  const full=captureDocument();await assert.rejects(()=>duplicateSelectedItems([{type:'caption',id:'a'}]),/최대/);assert.deepEqual(captureDocument(),full);
+});
+
+test('inverse pointer geometry respects rotation, nonuniform scaling, flips and crop hit areas',()=>{
+  const bounds={x:130,y:240,w:430,h:720},W=1080,H=1920;
+  for(const rotation of [-130,0,33,170])for(const flipX of [false,true])for(const flipY of [false,true]){
+    const item={transform:{rotation,flipX,flipY,scaleX:1.7,scaleY:.6,offsetX:.13,offsetY:-.2},crop:{left:.2,right:.1,top:.1,bottom:.3}};
+    const point={x:bounds.x+bounds.w*.4,y:bounds.y+bounds.h*.5},screen=transformPoint(point,bounds,item,W,H),back=inverseTransformPoint(screen,bounds,item,W,H);
+    near(back.x,point.x);near(back.y,point.y);assert.equal(hitVisual(screen,bounds,item,W,H),true);
+    assert.equal(hitVisual(transformPoint({x:bounds.x,y:bounds.y},bounds,item,W,H),bounds,item,W,H),false);
+  }
+});
+
+test('direct crop adjusts local edges and resize holds the opposite cropped anchor fixed',()=>{
+  const bounds={x:120,y:80,w:400,h:600},W=1080,H=1920;
+  for(const rotation of [-45,0,77])for(const flipX of [false,true])for(const flipY of [false,true]){
+    const item={transform:{rotation,flipX,flipY,scaleX:1.8,scaleY:.7,offsetX:.1,offsetY:-.05},crop:{left:.1,right:.2,top:.15,bottom:.1}},b=croppedBounds(bounds,item.crop);
+    const from=transformPoint({x:b.x,y:b.y},bounds,item,W,H),to=transformPoint({x:b.x+40,y:b.y+60},bounds,item,W,H);
+    const crop=cropFromDrag(item,bounds,W,H,from,to,['left','top']);near(crop.left,.2);near(crop.top,.25);near(crop.right,.2);near(crop.bottom,.1);
+    const anchor={x:b.x+b.w,y:b.y+b.h},old=transformPoint(anchor,bounds,item,W,H),next=resizeFromDrag(item,bounds,W,H,from,to,['left','top'],false),fixed=transformPoint(anchor,bounds,{...item,transform:next},W,H);
+    near(fixed.x,old.x);near(fixed.y,old.y);
+    const limited=cropFromDrag(item,bounds,W,H,from,transformPoint({x:10000,y:10000},bounds,item,W,H),['left','top']);
+    assert.ok(limited.left+limited.right<=.98+1e-8);assert.ok(limited.top+limited.bottom<=.98+1e-8);
+  }
+});
+
+test('crop window dragging preserves visible dimensions and center snapping uses visible crop',()=>{
+  const bounds={x:100,y:200,w:400,h:700},item={crop:{left:.2,right:.3,top:.1,bottom:.4},transform:{rotation:33,flipX:true,scaleX:1.2,scaleY:.8}};
+  const from=transformPoint({x:300,y:400},bounds,item,1080,1920),to=transformPoint({x:340,y:470},bounds,item,1080,1920);
+  const crop=cropFromDrag(item,bounds,1080,1920,from,to,['move']);near(crop.left+crop.right,.5);near(crop.top+crop.bottom,.5);
+  alignVisual(item,bounds,1080,1920,'x');alignVisual(item,bounds,1080,1920,'y');item.transform.offsetX+=3/1080;item.transform.offsetY-=4/1920;
+  const snap=snapVisualCenter(item,bounds,1080,1920,{x:5,y:5});assert.deepEqual(snap.guides,{x:true,y:true});
+  const center=visualCorners(bounds,{...item,transform:snap.transform},1080,1920).reduce((sum,p)=>({x:sum.x+p.x/4,y:sum.y+p.y/4}),{x:0,y:0});
+  near(center.x,540);near(center.y,960);
+});
+
+test('monitor overlay draws selection outside exported pixels and keeps the legacy player path', {skip:!canvasModule},()=>{
+  reset();const bitmap=canvasModule.createCanvas(90,160);bitmap.getContext('2d').fillStyle='red';bitmap.getContext('2d').fillRect(0,0,90,160);
+  project.clips=[{...clip('image',3),bitmap,natW:90,natH:160,scale:.5}];
+  const canvas=canvasModule.createCanvas(180,320),player=new Player(canvas);player.selection={type:'clip',id:'image'};player.selectionOverlay=true;let updates=0;player.onDraw=()=>updates++;
+  player.draw();const withoutUI=canvas.getContext('2d').getImageData(0,0,180,320).data.slice();
+  const expected=canvasModule.createCanvas(180,320);renderFrame(expected.getContext('2d'),0,{source:player.source});
+  assert.deepEqual(withoutUI,expected.getContext('2d').getImageData(0,0,180,320).data);assert.equal(updates,1);
+  player.selectionOverlay=false;player.draw();assert.notDeepEqual(withoutUI,canvas.getContext('2d').getImageData(0,0,180,320).data);
+});
+
+// 직접 조작의 포인터·취소·화면 좌표 회귀 검사입니다.
+class MonitorClasses {
+  values = new Set();
+  add(...names) { names.forEach(name => this.values.add(name)); }
+  remove(...names) { names.forEach(name => this.values.delete(name)); }
+  contains(name) { return this.values.has(name); }
+  toggle(name, force) { const yes = force ?? !this.contains(name); if (yes) this.add(name); else this.remove(name); return yes; }
+}
+class MonitorNode extends EventTarget {
+  constructor(tagName = 'div', id = '') {
+    super(); Object.assign(this, { tagName: tagName.toUpperCase(), id, dataset: {}, style: {}, classList: new MonitorClasses(), children: [], parentElement: null, hidden: false, width: 1000, height: 800, clientWidth: 600, clientHeight: 500, offsetWidth: 150, offsetHeight: 35, rect: { left: 20, top: 40, width: 600, height: 500 }, captures: new Set() });
+  }
+  append(node) { this.children.push(node); node.parentElement = this; }
+  setAttribute(name, value) { this[name] = value; }
+  getBoundingClientRect() { return { ...this.rect, right: this.rect.left + this.rect.width, bottom: this.rect.top + this.rect.height }; }
+  matches(selector) {
+    if (selector.startsWith('#')) return this.id === selector.slice(1);
+    const names = { '[data-edges]': 'edges', '[data-monitor-mode]': 'monitorMode', '[data-monitor-align]': 'monitorAlign' };
+    return names[selector] ? this.dataset[names[selector]] !== undefined : false;
+  }
+  closest(selector) { for (let node = this; node; node = node.parentElement) if (node.matches(selector)) return node; return null; }
+  querySelectorAll(selector) { return this.children.flatMap(child => [...(child.matches(selector) ? [child] : []), ...child.querySelectorAll(selector)]); }
+  setPointerCapture(id) { this.captures.add(id); }
+  hasPointerCapture(id) { return this.captures.has(id); }
+  releasePointerCapture(id) { this.captures.delete(id); this.dispatchEvent(monitorEvent('lostpointercapture', { pointerId: id }, this)); }
+  blur() { if (document.activeElement === this) document.activeElement = null; }
+}
+function monitorEvent(type, fields = {}, target) {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.assign(event, fields);
+  if (target) Object.defineProperty(event, 'target', { value: target });
+  return event;
+}
+function monitorFixture(overrides = {}, extra = []) {
+  reset();Object.assign(project, { width: 1000, height: 800 });
+  const nodes = Object.fromEntries(['preview', 'viewerStage', 'monitorOverlay', 'monitorOutline', 'monitorTools', 'monitorSelectionCount'].map(id => [id, new MonitorNode(id === 'preview' ? 'canvas' : 'div', id)]));
+  const canvas = nodes.preview, stage = nodes.viewerStage;
+  canvas.rect = { left: 50, top: 80, width: 500, height: 400 };
+  stage.append(canvas); stage.append(nodes.monitorOverlay); nodes.monitorOverlay.append(nodes.monitorOutline); stage.append(nodes.monitorTools);
+  globalThis.window = new EventTarget();
+  globalThis.document = { activeElement: null, body: new MonitorNode('body'), getElementById: id => nodes[id], createElement: tag => new MonitorNode(tag) };
+  const first = { ...newClipDefaults('image'), id: 'first', start: 0, imgDuration: 10, natW: 1000, natH: 800, scale: .6, trackId: 'v1', ...structuredClone(overrides) };
+  project.clips = [first, ...extra.map((item, i) => ({ ...newClipDefaults('image'), id: 'extra-' + i, start: 0, imgDuration: 10, natW: 1000, natH: 800, scale: .5, trackId: 'v' + (i + 2), ...structuredClone(item) }))];
+  const refs = project.clips.map(item => ({ type: 'clip', id: item.id }));
+  const counts = { commits: [], starts: 0, ends: 0, refreshes: 0, invalidates: 0 };
+  const ctx = { save() {}, restore() {}, measureText: text => ({ width: text.length * 10 }) };
+  const player = { time: 1, playing: false, ctx, pause() { this.playing = false; }, invalidate() { counts.invalidates++; this.onDraw?.(); } };
+  const editor = new MonitorEditor({ player, selections: () => refs, selection: () => refs[0], busy: () => false, align() {}, gestureStart() { counts.starts++; }, gestureEnd() { counts.ends++; }, refresh() { counts.refreshes++; }, commit(before, label) { counts.commits.push({ before, label, after: captureDocument() }); } });
+  editor.update();
+  const logical = point => ({ clientX: canvas.rect.left + point.x / canvas.width * canvas.rect.width, clientY: canvas.rect.top + point.y / canvas.height * canvas.rect.height });
+  const pointer = (type, point, opts = {}) => {
+    const { target = canvas, ...fields } = opts;
+    const event = monitorEvent(type, { pointerId: 77, button: 0, buttons: type === 'pointerup' ? 0 : 1, isPrimary: true, altKey: true, shiftKey: false, ...logical(point), ...fields }, target);
+    stage.dispatchEvent(event); return event;
+  };
+  const center = () => visualCorners(editor.bounds(editor.current()), first, canvas.width, canvas.height).reduce((sum, p) => ({ x: sum.x + p.x / 4, y: sum.y + p.y / 4 }), { x: 0, y: 0 });
+  return { editor, canvas, stage, nodes, player, first, refs, counts, pointer, center };
+}
+
+const monitorNearPoint = (a, b) => { near(a.x, b.x, 'x'); near(a.y, b.y, 'y'); };
+const monitorGeometry = { transform: { offsetX: .13, offsetY: -.07, rotation: 33, scaleX: 1.4, scaleY: .65, flipX: true, flipY: false }, crop: { left: .17, right: .09, top: .12, bottom: .21 } };
+
+
+function withFitGlobals(run) {
+  const previous = { style: globalThis.getComputedStyle, observer: globalThis.ResizeObserver };
+  const padding = { paddingLeft: '20px', paddingRight: '20px', paddingTop: '30px', paddingBottom: '10px' };
+  const observers = [];
+  globalThis.getComputedStyle = () => padding;
+  globalThis.ResizeObserver = class { constructor(callback) { this.callback = callback; this.targets = []; observers.push(this); } observe(node) { this.targets.push(node); } disconnect() {} };
+  try { return run(padding, observers); }
+  finally {
+    if (previous.style === undefined) delete globalThis.getComputedStyle; else globalThis.getComputedStyle = previous.style;
+    if (previous.observer === undefined) delete globalThis.ResizeObserver; else globalThis.ResizeObserver = previous.observer;
+  }
+}
+
+const monitorTest=(name,run)=>test('monitor: '+name,()=>{
+  const saved=Object.fromEntries(['document','window','getComputedStyle','ResizeObserver'].map(key=>[key,Object.getOwnPropertyDescriptor(globalThis,key)]));
+  try{run();}finally{for(const [key,descriptor] of Object.entries(saved)){if(descriptor)Object.defineProperty(globalThis,key,descriptor);else delete globalThis[key];}reset();}
+});
+monitorTest('ten move events produce one commit; release-generated lost capture does not undo', () => {
+  const f = monitorFixture(monitorGeometry), p = f.center(), old = transformOf(f.first), before = captureDocument();
+  f.pointer('pointerdown', p);
+  for (let i = 1; i <= 10; i++) f.pointer('pointermove', { x: p.x + 6 * i, y: p.y + 2 * i });
+  f.pointer('pointerup', { x: p.x + 60, y: p.y + 20 });
+  assert.equal(f.counts.commits.length, 1); assert.deepEqual(f.counts.commits[0].before, before); near(f.first.transform.offsetX, old.offsetX + .06); near(f.first.transform.offsetY, old.offsetY + .025); assert.equal(f.editor.dragging, false); assert.equal(f.counts.ends, 1);
+});
+
+for (const cancel of ['pointercancel', 'lostpointercapture', 'blur', 'Escape']) monitorTest(cancel + ': cancels every selected target without source changes', () => {
+  const f = monitorFixture(monitorGeometry, [{ transform: { rotation: -48, offsetX: -.2 }, crop: { left: .1 } }]), before = captureDocument(), p = f.center();
+  f.pointer('pointerdown', p); f.pointer('pointermove', { x: p.x + 60, y: p.y + 20 });
+  if (cancel === 'blur') window.dispatchEvent(new Event('blur'));
+  else if (cancel === 'Escape') window.dispatchEvent(monitorEvent('keydown', { key: 'Escape' }));
+  else f.pointer(cancel, p);
+  assert.equal(f.editor.dragging, false); assert.equal(f.counts.commits.length, 0); assert.equal(f.counts.ends, 1); assert.deepEqual(captureDocument(), before);
+});
+
+monitorTest('other pointer cancellation must not cancel the primary gesture', () => {
+  const f = monitorFixture(), p = f.center();
+  f.pointer('pointerdown', p); f.pointer('pointermove', { x: p.x + 50, y: p.y }); f.pointer('pointercancel', p, { pointerId: 88 });
+  assert.equal(f.editor.dragging, true, 'secondary pointercancel cancelled primary drag'); f.pointer('pointercancel', p);
+});
+
+monitorTest('crop under rotation, flip and nonuniform scale keeps opposite edge fixed', () => {
+  const f = monitorFixture(monitorGeometry); f.editor.mode = 'crop';
+  const b = f.editor.bounds(f.editor.current()), c = croppedBounds(b, f.first.crop), beforeTransform = structuredClone(f.first.transform), corners = visualCorners(b, f.first, 1000, 800);
+  const a = { x: c.x, y: c.y + c.h / 2 }, d = { x: a.x + b.w * .1, y: a.y };
+  const from = transformPoint(a, b, f.first, 1000, 800), to = transformPoint(d, b, f.first, 1000, 800);
+  f.pointer('pointerdown', from, { target: f.editor.buttons[7] }); f.pointer('pointermove', to); f.pointer('pointerup', to);
+  near(f.first.crop.left, .27); near(f.first.crop.right, .09); assert.deepEqual(f.first.transform, beforeTransform); const after = visualCorners(b, f.first, 1000, 800); monitorNearPoint(corners[1], after[1]); monitorNearPoint(corners[2], after[2]); assert.equal(f.counts.commits.length, 1);
+});
+
+for (const rotation of [33, 350]) monitorTest('rotate out and back is no-op, starting angle ' + rotation, () => {
+  const f = monitorFixture({ ...monitorGeometry, transform: { ...monitorGeometry.transform, rotation } }), before = captureDocument(), p = f.center(), from = { x: p.x + 120, y: p.y }, angle = Math.PI / 6, to = { x: p.x + 120 * Math.cos(angle), y: p.y + 120 * Math.sin(angle) };
+  f.pointer('pointerdown', from, { target: f.editor.rotate }); f.pointer('pointermove', to); f.pointer('pointermove', from); f.pointer('pointerup', from);
+  assert.equal(f.counts.commits.length, 0, 'roundtrip transform: ' + JSON.stringify(f.first.transform)); assert.deepEqual(captureDocument(), before);
+});
+
+monitorTest('fitCanvas contains portrait/landscape/square canvas inside padded content box', () => withFitGlobals(() => {
+  const f = monitorFixture(); f.stage.clientWidth = 640; f.stage.clientHeight = 500;
+  for (const [w, h] of [[1080, 1920], [1920, 1080], [1000, 1000]]) {
+    f.canvas.width = w; f.canvas.height = h; f.editor.fitCanvas();
+    const width = parseFloat(f.canvas.style.width), height = parseFloat(f.canvas.style.height);
+    near(width / height, w / h); assert.ok(width <= 600 + 1e-8); assert.ok(height <= 460 + 1e-8); assert.equal(f.canvas.width, w); assert.equal(f.canvas.height, h);
+  }
+}));
+monitorTest('point maps fitted content pixels directly to intrinsic canvas coordinates', () => withFitGlobals(() => {
+  const f = monitorFixture(); f.canvas.width = 1080; f.canvas.height = 1920; f.editor.fitCanvas();
+  f.canvas.getBoundingClientRect = () => ({ ...f.canvas.rect, width: parseFloat(f.canvas.style.width), height: parseFloat(f.canvas.style.height) });
+  const rect = f.canvas.getBoundingClientRect();
+  monitorNearPoint(f.editor.point({ clientX: rect.left + rect.width * .25, clientY: rect.top + rect.height * .75 }), { x: 270, y: 1440 });
+}));
+monitorTest('ResizeObserver host resizing refits without changing source dimensions', () => withFitGlobals((padding, observers) => {
+  const f = monitorFixture(), oldWidth = f.canvas.width, oldHeight = f.canvas.height;
+  assert.equal(observers.length, 1); assert.equal(observers[0].targets[0], f.stage);
+  f.stage.clientWidth = 360; f.stage.clientHeight = 900; observers[0].callback();
+  near(parseFloat(f.canvas.style.width), 320); near(parseFloat(f.canvas.style.height), 256); assert.equal(f.canvas.width, oldWidth); assert.equal(f.canvas.height, oldHeight);
+}));
+monitorTest('padding-only ResizeObserver notification invalidates fit cache', () => withFitGlobals((padding, observers) => {
+  const f = monitorFixture(); f.stage.clientWidth = 640; f.stage.clientHeight = 500; f.canvas.width = 1920; f.canvas.height = 1080; f.editor.fitCanvas();
+  near(parseFloat(f.canvas.style.width), 600);
+  padding.paddingLeft = '120px'; padding.paddingRight = '120px'; observers[0].callback();
+  near(parseFloat(f.canvas.style.width), 400, 'available content width after padding change');
+}));
+
+
+// 타임라인 포인터 조작과 선택 상태 회귀 검사입니다.
+function seedTimeline() {
+  reset();
+  project.clips=[];project.overlays=[];project.audio.tracks=[];project.fps=30;
+  project.timelineTracks=[{id:'v1',kind:'visual',role:'video'},{id:'v2',kind:'visual',role:'caption'},{id:'a1',kind:'audio',role:'audio'}];
+  project.captions=[{id:'a',text:'a',trackId:'v1',start:1,end:3},{id:'b',text:'b',trackId:'v2',start:2,end:4}];
+}
+
+function mockTimelineEvents() {
+  const names=['document','window','requestAnimationFrame','cancelAnimationFrame'];
+  const saved=new Map(names.map(name=>[name,Object.getOwnPropertyDescriptor(globalThis,name)]));
+  const rafs=new Map(),calls={commits:[],seeks:[],errors:[]};let nextRaf=0;
+  const emit=(target,type,fields={})=>target.dispatchEvent(Object.assign(new Event(type,{cancelable:true}),fields));
+  const node=(data={})=>Object.assign(new EventTarget(),{
+    dataset:{},style:{},tagName:'DIV',captures:new Set(),children:[],offsetTop:27,offsetHeight:54,
+    classList:{add(){},remove(){},toggle(){}},setAttribute(){},focus(){},remove(){},closest(){return null;},querySelectorAll(){return [];},
+    append(child){this.children.push(child);},getBoundingClientRect(){return{left:0,top:0,right:500,bottom:200};},
+    setPointerCapture(id){this.captures.add(id);},hasPointerCapture(id){return this.captures.has(id);},
+    releasePointerCapture(id){this.captures.delete(id);emit(this,'lostpointercapture',{pointerId:id});},...data,
+  });
+  const rows=new Map(['v1','v2','a1'].map(id=>{const row=node({dataset:{track:id}});row.closest=s=>s==='.track'?row:null;return[id,row];}));
+  const blocks=new Map(project.captions.map(item=>{
+    const block=node({dataset:{type:'caption',id:item.id},getBoundingClientRect:()=>({left:item.start*100,right:item.end*100,top:item.id==='a'?81:27,bottom:item.id==='a'?125:71})});
+    block.closest=s=>s.includes('.timeline-block')?block:s==='.track'?rows.get(item.trackId):null;return[item.id,block];
+  }));
+  const canvas=node({querySelectorAll:s=>s.includes('.timeline-block')?[...blocks.values()]:[]});
+  const ruler=node();ruler.closest=s=>s.includes('#ruler')?ruler:null;
+  const notice=node(),scroll={scrollLeft:0,scrollTop:0,clientWidth:500,clientHeight:200,getBoundingClientRect:()=>({left:0,right:500,top:0,bottom:200})};
+  globalThis.window=new EventTarget();globalThis.document={activeElement:null,createElement:()=>node(),getElementById:id=>rows.get(id.replace('track-',''))||notice,elementFromPoint:()=>rows.get('v1')};
+  globalThis.requestAnimationFrame=fn=>{rafs.set(++nextRaf,fn);return nextRaf;};globalThis.cancelAnimationFrame=id=>rafs.delete(id);
+  const timeline=Object.assign(Object.create(Timeline.prototype),{canvas,scroll,zoom:100,snapping:false,time:0,dragging:false,selection:null,selections:[],
+    callbacks:{pause(){},select(){},selectMany(){},seek:t=>calls.seeks.push(t),commit:(before,label)=>calls.commits.push({before,label}),error:e=>calls.errors.push(e)},
+    activateTrack(){},render(){},ensureWidth(){},showPreview(){},clearPreview(){},
+  });
+  const pointer=(target,clientX=150,clientY=90,pointerId=7)=>({target,button:0,isPrimary:true,pointerId,clientX,clientY,preventDefault(){}});
+  const refs=[...blocks.keys()].map(id=>({type:'caption',id}));
+  return{timeline,canvas,ruler,blocks,refs,calls,rafs,emit,pointer,
+    restore(){emit(window,'keydown',{key:'Escape'});emit(window,'blur');for(const[name,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];}},
+  };
+}
+
+test('batch reveal preserves the selected IDs and primary item',()=>{
+  seedTimeline();const m=mockTimelineEvents();try{
+    m.timeline.selectMany(m.refs,m.refs[1]);m.timeline.reveal({type:'caption',id:'a',start:1,end:3},{preserveSelection:true});
+    assert.deepEqual(m.timeline.selections,m.refs);assert.equal(m.timeline.selection.id,'b');
+  }finally{m.restore();}
+});
+
+test('timeline pointer lifecycle ignores foreign events and aborts without committing',()=>{
+  for(const mode of ['single','group','marquee'])for(const reason of ['pointercancel','lostpointercapture','blur','Escape']){
+    seedTimeline();const m=mockTimelineEvents();try{
+      const t=m.timeline,owner=mode==='marquee'?m.canvas:m.blocks.get('a');t.selectMany(mode==='group'?m.refs:[m.refs[0]]);
+      const initial=structuredClone(t.selections),before=captureDocument();
+      if(mode==='marquee')t.startMarquee(m.pointer(owner,190,30));else t.pointerDown(m.pointer(owner));
+      for(const type of ['pointermove','pointerup','pointercancel','lostpointercapture'])m.emit(owner,type,{pointerId:8,clientX:350,clientY:60});
+      assert.equal(t.dragging,true,mode);assert.deepEqual(captureDocument(),before);
+      m.emit(owner,'pointermove',{pointerId:7,clientX:350,clientY:60});assert.deepEqual(captureDocument(),before);
+      if(reason==='Escape')m.emit(window,'keydown',{key:'Escape'});else if(reason==='blur')m.emit(window,'blur');else m.emit(owner,reason,{pointerId:7});
+      m.emit(owner,'pointerup',{pointerId:7});m.emit(window,'blur');
+      assert.equal(t.dragging,false,`${mode}: ${reason}`);assert.equal(owner.hasPointerCapture(7),false);assert.equal(m.rafs.size,0);
+      assert.deepEqual(captureDocument(),before);assert.deepEqual(t.selections,initial);assert.equal(m.calls.commits.length,0);
+    }finally{m.restore();}
+  }
+});
+
+test('group pointerup commits once and retains group timing',()=>{
+  seedTimeline();const m=mockTimelineEvents();try{
+    const t=m.timeline,owner=m.blocks.get('a');t.selectMany(m.refs);t.pointerDown(m.pointer(owner));
+    m.emit(owner,'pointermove',{pointerId:7,clientX:250,clientY:90});m.emit(owner,'pointerup',{pointerId:7});m.emit(owner,'pointerup',{pointerId:7});
+    assert.deepEqual(project.captions.map(c=>c.start),[2,3]);assert.equal(m.calls.commits.length,1);assert.deepEqual(t.selections,m.refs);assert.equal(m.rafs.size,0);
+  }finally{m.restore();}
+});
+
+test('single trim isolates its clip after multi-selection',()=>{
+  seedTimeline();const m=mockTimelineEvents();try{
+    const t=m.timeline,owner=m.blocks.get('a'),other=structuredClone(project.captions[1]);t.selectMany(m.refs);
+    const grip={dataset:{edge:'end'},closest:s=>s==='[data-edge]'?grip:owner.closest(s)};t.pointerDown(m.pointer(grip,300));
+    m.emit(owner,'pointermove',{pointerId:7,clientX:350,clientY:90});m.emit(owner,'pointerup',{pointerId:7});
+    assert.equal(project.captions[0].end,3.5);assert.deepEqual(project.captions[1],other);assert.deepEqual(t.selections,[m.refs[0]]);assert.equal(m.calls.commits.length,1);
+  }finally{m.restore();}
+});
+
+test('single drag rejects stale project data without overwriting newer edits',()=>{
+  seedTimeline();const m=mockTimelineEvents();try{
+    const owner=m.blocks.get('a');m.timeline.pointerDown(m.pointer(owner));m.emit(owner,'pointermove',{pointerId:7,clientX:250,clientY:90});
+    project.captions[1].text='newer edit';const newer=captureDocument();m.emit(owner,'pointerup',{pointerId:7});
+    assert.deepEqual(captureDocument(),newer);assert.equal(m.calls.commits.length,0);assert.equal(m.calls.errors.length,1);
+  }finally{m.restore();}
+});
+
+test('ruler scrub filters pointer IDs and removes every termination listener',()=>{
+  for(const reason of ['pointerup','pointercancel','blur','Escape']){
+    seedTimeline();const m=mockTimelineEvents();try{
+      m.timeline.pointerDown(m.pointer(m.ruler,100,10));
+      for(const type of ['pointermove','pointerup','pointercancel'])m.emit(window,type,{pointerId:8,clientX:300,clientY:10});
+      assert.deepEqual(m.calls.seeks,[1]);m.emit(window,'pointermove',{pointerId:7,clientX:200,clientY:10});
+      if(reason==='Escape')m.emit(window,'keydown',{key:'Escape'});else m.emit(window,reason,{pointerId:7});
+      m.emit(window,'pointermove',{pointerId:7,clientX:300,clientY:10});assert.deepEqual(m.calls.seeks,[1,2],reason);
+    }finally{m.restore();}
+  }
 });

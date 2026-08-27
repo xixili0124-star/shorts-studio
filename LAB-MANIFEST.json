@@ -1,7 +1,7 @@
 {
   "baseline": "9eb4ef137222d393d247cf79f6f2a1b4b7713368",
   "referenceUnmodified": true,
-  "release": "local-smart-tools-2026-08-28",
+  "release": "batch-monitor-editor-2026-08-28",
   "changedTrackedFiles": [
     ".gitignore",
     "README.md",
@@ -23,9 +23,11 @@
     "public/demo/seoul-03.jpg",
     "public/js/ai-client.js",
     "public/js/asr-worker.js",
+    "public/js/batch-edits.js",
     "public/js/font-catalog.js",
     "public/js/local-ai.js",
     "public/js/model-download.js",
+    "public/js/monitor-editor.js",
     "public/js/mosaic-worker.js",
     "public/js/mosaic.js",
     "public/js/presets.js",
@@ -67,7 +69,7 @@
   "localEntry": "http://127.0.0.1:8787/studio.html",
   "sharedPreview": "https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html",
   "tests": {
-    "node": 79,
+    "node": 120,
     "python": 7,
     "nativeWasmTts": "2-korean-cases-passed",
     "nativeWasmAsr": "2-korean-cases-completed-numeric-errors-observed",

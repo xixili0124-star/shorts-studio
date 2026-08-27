@@ -14,7 +14,7 @@ export const project = {
   fileName: 'shorts',
 
   clips: [],
-  timelineTracks: undefined, // 구형 파일은 첫 편집 때 번호형 트랙으로 변환합니다.
+  timelineTracks: undefined, // 구형 파일은 시각·쌓임 순서를 보존하고 트랙 용도를 보충합니다.
   overlays: [],
   captions: [],
 
@@ -148,28 +148,42 @@ export function clipStartTime(index) {
   return buildLayout().entries.find(entry => entry.index === index)?.start ?? 0;
 }
 
-/** 번호는 화면의 표시 순서이며 ID는 저장·되돌리기 중에도 바뀌지 않습니다. */
+/** 용도는 기본 배치와 이름에만 사용합니다. 호환되는 다른 행으로도 이동할 수 있습니다. */
+export const TRACK_ROLES = Object.freeze([
+  { id: 'video', kind: 'visual', label: '영상', code: 'V' },
+  { id: 'graphic', kind: 'visual', label: '그래픽', code: 'G' },
+  { id: 'caption', kind: 'visual', label: '자막', code: 'T' },
+  { id: 'audio', kind: 'audio', label: '오디오', code: 'A' },
+  { id: 'voice', kind: 'audio', label: '보이스', code: 'VO' },
+]);
 export const DEFAULT_TRACKS = Object.freeze([
-  { id: 'v1', kind: 'visual' }, { id: 'v2', kind: 'visual' }, { id: 'v3', kind: 'visual' },
-  { id: 'a1', kind: 'audio' }, { id: 'a2', kind: 'audio' },
+  { id: 'v1', kind: 'visual', role: 'video' }, { id: 'v2', kind: 'visual', role: 'graphic' }, { id: 'v3', kind: 'visual', role: 'caption' },
+  { id: 'a1', kind: 'audio', role: 'audio' }, { id: 'a2', kind: 'audio', role: 'voice' },
 ]);
 export const MAX_TRACKS_PER_KIND = 24;
+export function trackRole(track) {
+  if (TRACK_ROLES.some(role => role.id === track?.role && role.kind === track.kind)) return track.role;
+  return DEFAULT_TRACKS.find(t => t.id === track?.id && t.kind === track.kind)?.role || (track?.kind === 'audio' ? 'audio' : 'video');
+}
+export function itemTrackRole(type, item = {}) {
+  return type === 'audio' ? ((item.role || item.lane) === 'voice' ? 'voice' : 'audio')
+    : type === 'caption' ? 'caption' : type === 'graphic' ? 'graphic' : 'video';
+}
 export function timelineTracks(doc = project) {
-  return doc.timelineTracks?.length ? doc.timelineTracks : DEFAULT_TRACKS;
+  return (doc.timelineTracks?.length ? doc.timelineTracks : DEFAULT_TRACKS).map(track => ({ ...track, role: trackRole(track) }));
 }
 export const trackKind = type => type === 'audio' ? 'audio' : 'visual';
 export function trackIdFor(type, item = {}, doc = project) {
   const registry = timelineTracks(doc), kind = trackKind(type);
   if (registry.some(track => track.id === item.trackId && track.kind === kind)) return item.trackId;
-  const legacy = type === 'audio' ? ((item.role || item.lane) === 'voice' ? 'a2' : 'a1')
-    : type === 'caption' ? 'v3' : type === 'graphic' ? 'v2' : 'v1';
-  return registry.find(track => track.id === legacy && track.kind === kind)?.id
+  return registry.find(track => track.role === itemTrackRole(type, item) && track.kind === kind)?.id
     || registry.find(track => track.kind === kind)?.id;
 }
 export function trackLabel(id, doc = project) {
   const tracks = timelineTracks(doc), track = tracks.find(track => track.id === id);
   if (!track) return '';
-  return (track.kind === 'audio' ? '오디오 ' : '영상 ') + (tracks.filter(t => t.kind === track.kind).indexOf(track) + 1);
+  const siblings = tracks.filter(t => t.role === track.role), number = siblings.findIndex(t => t.id === id) + 1;
+  return TRACK_ROLES.find(role => role.id === track.role).label + (number > 1 ? ' ' + number : '');
 }
 
 /** 구형 파일의 실제 시각은 보존하고, 자동 연결 정보만 제거합니다. */
@@ -184,21 +198,26 @@ export function migrateTimeline(doc = project) {
     delete item.anchor;
   }
 }
-export function addTimelineTrack(kind) {
-  migrateTimeline();
+export function addTimelineTrack(kind, { role, afterId } = {}) {
   if (!['visual', 'audio'].includes(kind)) throw new Error('지원하지 않는 트랙입니다.');
-  if (project.timelineTracks.filter(t => t.kind === kind).length >= MAX_TRACKS_PER_KIND) throw new Error('종류별로 24개 트랙까지 지원합니다.');
+  const registry = timelineTracks(), after = registry.find(t => t.id === afterId);
+  if (afterId && (!after || after.kind !== kind)) throw new Error('기준 트랙이 변경되었습니다. 다시 선택해 주세요.');
+  role ||= after?.role || (kind === 'audio' ? 'audio' : 'video');
+  if (!TRACK_ROLES.some(r => r.id === role && r.kind === kind)) throw new Error('트랙 용도가 올바르지 않습니다.');
+  if (registry.filter(t => t.kind === kind).length >= MAX_TRACKS_PER_KIND) throw new Error('영상 계열과 오디오 계열은 각각 24개 트랙까지 지원합니다.');
+  migrateTimeline();
   const prefix = kind === 'audio' ? 'a' : 'v';
   let number = 1;
   while (project.timelineTracks.some(t => t.id === prefix + number)) number++;
-  const track = { id: prefix + number, kind };
-  project.timelineTracks.push(track);
+  const track = { id: prefix + number, kind, role };
+  const previous = after || registry.filter(t => t.role === role).at(-1) || registry.filter(t => t.kind === kind).at(-1);
+  project.timelineTracks.splice(project.timelineTracks.findIndex(t => t.id === previous?.id) + 1, 0, track);
   return track;
 }
 export function removeTimelineTrack(id) {
   migrateTimeline();
   const track = project.timelineTracks.find(t => t.id === id);
-  if (!track || project.timelineTracks.filter(t => t.kind === track.kind).length < 2) return false;
+  if (!track || project.timelineTracks.filter(t => t.role === track.role).length < 2) return false;
   if (trackItems(id).length) throw new Error('빈 트랙만 삭제할 수 있습니다.');
   project.timelineTracks = project.timelineTracks.filter(t => t.id !== id);
   return true;

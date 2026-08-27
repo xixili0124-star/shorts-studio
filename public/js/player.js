@@ -118,7 +118,8 @@ export class Player {
   }
 
   draw() {
-    renderFrame(this.ctx, this.time, { source: this.source, safeArea: this.safeArea, selection: this.playing ? null : this.selection });
+    renderFrame(this.ctx, this.time, { source: this.source, safeArea: this.safeArea, selection: this.playing || this.selectionOverlay ? null : this.selection });
+    this.onDraw?.();
   }
 
   /** 상태가 바뀌었을 때 정지 상태에서도 한 프레임 다시 그린다 */

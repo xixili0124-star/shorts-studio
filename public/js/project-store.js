@@ -3,6 +3,7 @@ import { project, newClipDefaults, syncAnchoredItems, buildLayout, pinClipPositi
 import { createClip, disposeClip } from './media.js';
 import { decodeAudioFile } from './audio.js';
 import { uid } from './util.js';
+import { validMosaics } from './mosaic.js';
 
 export const assets = new Map();
 const clipRuntime = new Map();
@@ -11,7 +12,7 @@ let assetReady = () => {};
 export function onAssetReady(callback) { assetReady = callback; }
 export let documentName = '새 프로젝트';
 export function setDocumentName(name) { documentName = String(name).trim().slice(0, 100) || '새 프로젝트'; }
-const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop'];
+const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop','mosaics'];
 const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','role','trackId','aiGenerated'];
 const copy = value => JSON.parse(JSON.stringify(value));
 const pick = (object, keys) => Object.fromEntries(keys.filter(k => object[k] !== undefined).map(k => [k, object[k]]));
@@ -24,7 +25,7 @@ export function captureDocument() {
     const { anchor, ...rest } = item;
     return { ...rest, trackId: trackIdFor(type, item) };
   };
-  return copy({ version: 3, name: documentName, timelineTracks: timelineTracks(),
+  return copy({ version: 4, name: documentName, timelineTracks: timelineTracks(),
     settings: pick(project, ['width','height','fps','quality']),
     clips: project.clips.map(c => ({ ...pick(c, clipKeys), ...timing.get(c.id) })),
     overlays: project.overlays.map(item => timed('graphic', item)),
@@ -43,7 +44,8 @@ export function restoreDocument(doc) {
     if (!runtime) throw new Error('프로젝트 소재를 먼저 불러와야 합니다.');
     return { ...runtime, ...copy(pick(c,clipKeys)), start: Number.isFinite(c.start) ? c.start : undefined,
       motionDuration: c.motionDuration, motionOffset: c.motionOffset, fadeEnvelope: c.fadeEnvelope ? copy(c.fadeEnvelope) : undefined,
-      trackId: c.trackId, transform: c.transform ? copy(c.transform) : undefined, crop: c.crop ? copy(c.crop) : undefined };
+      trackId: c.trackId, transform: c.transform ? copy(c.transform) : undefined, crop: c.crop ? copy(c.crop) : undefined,
+      mosaics: c.mosaics ? copy(c.mosaics) : undefined };
   });
   const tracks = (doc.tracks || []).map(t => {
     const runtime = audioRuntime.get(t.id);
@@ -121,6 +123,7 @@ export async function makeClip(assetId, overrides = {}) {
     runtime.el = el;
   }
   const clip = { ...runtime, ...pick(newClipDefaults(runtime.type), ['transitionOut']), assetId, id, ...overrides };
+  if (clip.mosaics) clip.mosaics = copy(clip.mosaics);
   clipRuntime.set(id, clip);
   return clip;
 }
@@ -166,6 +169,18 @@ export function clearAssets() {
   assets.clear();clipRuntime.clear();audioRuntime.clear();
 }
 
+/** 취소된 비동기 편집에서 새로 만든 인스턴스만 정리합니다. 공유 소재는 유지합니다. */
+export function discardStagedInstance(type, id) {
+  const map = type === 'clip' ? clipRuntime : audioRuntime, item = map.get(id);
+  if (!item) return;
+  if (project.clips.some(c => c.id === id) || project.audio.tracks.some(t => t.id === id)) return;
+  item.el?.pause(); if (item.el) item.el.src = '';
+  if (item.decoderOnly) try { item.input?.dispose?.(); } catch {}
+  const shared = assets.get(item.assetId);
+  if (item.url && item.url !== shared?.url && item.url !== shared?.base?.url) URL.revokeObjectURL(item.url);
+  map.delete(id);
+}
+
 async function hydrate(doc, records) {
   // 파일이 손상되었거나 디코딩에 실패해도 열려 있던 프로젝트와 undo 자원은 유지합니다.
   const before=captureDocument(), oldAssets=new Map(assets), oldClips=new Map(clipRuntime), oldAudio=new Map(audioRuntime);
@@ -195,7 +210,7 @@ async function hydrate(doc, records) {
 }
 
 export function validateDocument(doc, records) {
-  if (!doc || ![1, 2, 3].includes(doc.version) || !Array.isArray(records) || !Array.isArray(doc.clips) || !Array.isArray(doc.captions) || !Array.isArray(doc.overlays) || !Array.isArray(doc.tracks)) throw new Error('지원하지 않는 프로젝트 형식입니다.');
+  if (!doc || ![1, 2, 3, 4].includes(doc.version) || !Array.isArray(records) || !Array.isArray(doc.clips) || !Array.isArray(doc.captions) || !Array.isArray(doc.overlays) || !Array.isArray(doc.tracks)) throw new Error('지원하지 않는 프로젝트 형식입니다.');
   if (doc.clips.length > 1000 || doc.tracks.length > 1000 || doc.captions.length > 5000 || doc.overlays.length > 1000 || records.length > 200) throw new Error('실험판의 프로젝트 크기 제한을 초과했습니다.');
   const safeId=id=>typeof id==='string' && /^[a-zA-Z0-9_-]{1,80}$/.test(id);
   if (doc.version >= 3) {
@@ -232,6 +247,7 @@ export function validateDocument(doc, records) {
   const ids = new Set(records.map(r => r.id));
   const instanceIds = new Set();
   for(const clip of doc.clips) {
+    if (!validMosaics(clip?.mosaics)) throw new Error('모자이크 추적 정보가 올바르지 않습니다.');
     if(!clip || !['video','image'].includes(clip.type) || !Number.isFinite(clip.scale) || !Number.isFinite(clip.offX) || !Number.isFinite(clip.offY) || !Number.isFinite(clip.trimStart) || !Number.isFinite(clip.trimEnd) || !Number.isFinite(clip.imgDuration))throw new Error('클립 속성이 올바르지 않습니다.');
     if(clip.scale<.1 || clip.scale>10 || Math.abs(clip.offX)>2 || Math.abs(clip.offY)>2)throw new Error('클립 배치가 허용 범위를 벗어났습니다.');
     if(doc.version >= 2 && (!Number.isFinite(clip.start) || clip.start < 0))throw new Error('영상 클립의 타임라인 위치가 올바르지 않습니다.');
@@ -273,6 +289,7 @@ export function validateDocument(doc, records) {
 export function packProject() {
   const records = [...assets.values()].map(a => ({ id:a.id, name:a.file.name, type:a.file.type, size:a.file.size, lastModified:a.file.lastModified || 0, aiGenerated:!!a.aiGenerated }));
   const header = new TextEncoder().encode(JSON.stringify({ document:captureDocument(), assets:records }));
+  if (header.length > 4 * 1024 * 1024) throw new Error('편집 정보가 너무 큽니다. 추적 클립을 여러 프로젝트로 나눠 저장해 주세요.');
   const length = new Uint8Array(4);new DataView(length.buffer).setUint32(0, header.length, true);
   return new Blob(['SSLAB01\n',length,header,...[...assets.values()].map(a=>a.file)],{type:'application/octet-stream'});
 }

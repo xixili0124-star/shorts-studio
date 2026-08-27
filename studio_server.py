@@ -46,6 +46,11 @@ def transcription_body(audio):
     return b''.join(parts), f'multipart/form-data; boundary={boundary}'
 
 class StudioHandler(SimpleHTTPRequestHandler):
+    # Windows의 파일 연결 설정과 무관하게 브라우저 모듈과 WASM을 올바르게 제공합니다.
+    extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
+                      '.js': 'text/javascript', '.mjs': 'text/javascript',
+                      '.wasm': 'application/wasm'}
+
     def __init__(self, *args, **kwargs):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 

@@ -72,3 +72,21 @@
 [Google Shorts Ads 가이드](https://business.google.com/us/ad-solutions/youtube-ads/shorts-ads/), [Meta Safe Zone Checker 원본 PPT](https://www.facebook.com/gms_hub/share/safe-zone-checker-2023-08-24.pptx), [TikTok Creative Accelerator](https://ads.tiktok.com/business/creativecenter/quicktok/online/tiktok_creative_accelerator/pc/en), [TikTok 현재 광고 사양](https://ads.tiktok.com/resources/help/article/tiktok-auction-in-feed-ads?lang=en-GB)
 
 Meta 자료는 표지에 Last Updated June 15th, 2023으로 표시된 구형 참고 자료입니다. TikTok 교육 도해의 버전 날짜는 확인되지 않았습니다. 위 값은 최신 공식 공통 규격이 아니며, 일반 게시물·광고·기기·설명 길이·추가 버튼에 따라 달라집니다. 편집기에서 각 여백을 조절할 수 있고 가이드는 출력 영상에 포함되지 않습니다.
+
+## 브라우저 AI 엔진·모델
+
+| 구성 | 고정 버전 / 원본 | 이용 조건 |
+| --- | --- | --- |
+| Supertonic 2 한국어 TTS 모델 | [Supertone/supertonic-2](https://huggingface.co/Supertone/supertonic-2), revision `75e6727618a02f323c720cba9478152d4bc16ca4` | OpenRAIL-M, [동봉 원문](public/vendor/supertonic/MODEL-LICENSE) |
+| Supertonic 공식 JavaScript helper | [공식 소스 e71c5167](https://github.com/supertone-inc/supertonic/blob/e71c51671494c9dd15167fc464985f4e2099605d/web/helper.js) | MIT, [동봉 원문](public/vendor/supertonic/LICENSE) |
+| Whisper Tiny 다국어 ONNX 모델 | [Xenova/whisper-tiny](https://huggingface.co/Xenova/whisper-tiny), revision `5332fcc35e32a33b86612b9a57a89be7906102b1` | 모델 카드 표기 Apache-2.0 |
+| Transformers.js | [공식 v3.8.1](https://github.com/huggingface/transformers.js/tree/3.8.1) | Apache-2.0, [동봉 원문](public/vendor/transformers/3.8.1/LICENSE) |
+| 번들 Jinja 템플릿 엔진 | @huggingface/jinja 0.5.3 | MIT, [동봉 원문](public/vendor/transformers/3.8.1/LICENSE-JINJA) |
+| Transformers.js 내부 ONNX Runtime·WASM | 1.22.0-dev.20250409-89f8206ba4 | [MIT 원문](public/vendor/transformers/3.8.1/LICENSE-ONNXRUNTIME), [제3자 고지](public/vendor/transformers/3.8.1/THIRD-PARTY-NOTICES-ONNXRUNTIME.txt) |
+| ONNX Runtime Web | [Microsoft v1.23.2](https://github.com/microsoft/onnxruntime/tree/v1.23.2), TTS 전용 | [MIT 원문](public/vendor/onnxruntime-web/1.23.2/LICENSE), [제3자 고지](public/vendor/onnxruntime-web/1.23.2/ThirdPartyNotices.txt) |
+
+모델 가중치는 Git이나 ZIP에 넣지 않습니다. 사용자가 실행한 뒤 해당 고정 revision의 공개 파일을 받습니다. 실행 엔진은 vendor 폴더에 포함하며, 출처·크기·SHA-256은 [browser-ai-vendors.json](public/vendor/browser-ai-vendors.json)에 기록했습니다. Supertonic helper는 npm import를 고정 로컬 ORT import로 바꾸었고 파일 상단에 변경을 표시했습니다. mediabunny 원본 vendor 파일은 변경하지 않았습니다.
+
+**Supertonic 모델과 예제 코드의 라이선스는 서로 다릅니다.** 모델의 이용 제한을 따르고, 생성 음성을 게시할 때 AI 생성물임을 명시해야 합니다. 앱은 다운로드 전 모델 조건 링크와 동의란, 결과 확인 화면의 고지를 제공합니다. 특정 인물의 음성 복제 기능은 포함하지 않습니다.
+
+설치된 기기 음성은 [Web Speech API](https://webaudio.github.io/web-speech-api/)의 `localService` 보이스만 사용합니다. 파일을 반환하지 않는 재생 전용 API이므로 WAV 생성과 구분했습니다. 운영체제에 설치된 보이스 자체의 사용 조건은 해당 제공자의 조건을 확인하세요.

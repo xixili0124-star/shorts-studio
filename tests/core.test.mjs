@@ -8,13 +8,20 @@ import {encodeWav,transcriptionCaptions} from '../public/js/ai-client.js';
 import {renderFrame,measureVisual,loadFonts} from '../public/js/render.js';
 import {Player} from '../public/js/player.js';
 import {GRAPHICS,CAPTIONS} from '../public/js/presets.js';
-import {frameTime,itemRange,splitAvailability,splitTimelineItem,setItemRange,planVideoPlacement,placeVideoClip,setTransition,planClipTrim,applyClipTrim,deleteTimelineItem,planPlacement,placeTimelineItem,trackGaps,currentGap,closeTimelineGap,planItemTrim,applyItemTrim} from '../public/js/timeline-edits.js';
+import {frameTime,itemRange,splitAvailability,splitTimelineItem,setItemRange,planVideoPlacement,placeVideoClip,setTransition,planClipTrim,applyClipTrim,deleteTimelineItem,planPlacement,placeTimelineItem,trackGaps,currentGap,closeTimelineGap,planItemTrim,applyItemTrim,planSilenceCuts,applySilenceCuts} from '../public/js/timeline-edits.js';
 import {Timeline} from '../public/js/timeline.js';
 import {transformOf,visualCorners,alignVisual,withVisualTransform,croppedBounds} from '../public/js/visual-transform.js';
 import {SAFE_AREAS,safeAreaConfig,safeAreaRect} from '../public/js/safe-areas.js';
 import {FONTS,ensureFont} from '../public/js/font-catalog.js';
 import {SOUND_EFFECTS,synthesizeEffect,createSoundEffect} from '../public/js/sound-effects.js';
-import {applyFade,mixTimeline} from '../public/js/audio.js';
+import {applyFade,mixTimeline,extractClipAudio} from '../public/js/audio.js';
+import {Input,InputAudioTrack,AudioBufferSink} from '../public/vendor/mediabunny.min.js';
+import {exportVideo} from '../public/js/exporter.js';
+import {analyzeSilence,monoPcm} from '../public/js/silence.js';
+import {normalizedRect,mosaicAt,validMosaics,unresolvedMosaics,mergeTrackingKeys,redactSource,trackingTemplate,trackRectangle} from '../public/js/mosaic.js';
+import {chunkSpeechText,whisperCaptions,runLocalAI,installedVoices,speakInstalled,TTS_MODEL} from '../public/js/local-ai.js';
+import {cachedModel} from '../public/js/model-download.js';
+import {StudioTools} from '../public/js/studio-tools.js';
 
 const require=createRequire(import.meta.url);
 let canvasModule;
@@ -216,12 +223,12 @@ test('manual caption and graphic movement detaches anchors without clipping at v
   assert.equal(totalDuration(),10);
 });
 
-test('save/undo preserves explicit starts and migrates old contiguous projects to version 3',async()=>{
+test('save/undo preserves explicit starts and migrates old contiguous projects to version 4',async()=>{
   reset();project.clips=[await fixtureClip('a'),await fixtureClip('b',3)];
   project.clips[0].transitionOut={type:'dissolve',duration:1};
   const legacy=captureDocument();legacy.version=1;delete legacy.timelineTracks;for(const c of legacy.clips){delete c.start;delete c.trackId;delete c.transitionOut.toId;}
   restoreDocument(legacy);
-  const before=captureDocument();assert.equal(before.version,3);assert.deepEqual(before.clips.map(c=>c.start),[0,3]);assert.equal(before.clips[0].transitionOut.toId,'b');
+  const before=captureDocument();assert.equal(before.version,4);assert.deepEqual(before.clips.map(c=>c.start),[0,3]);assert.equal(before.clips[0].transitionOut.toId,'b');
   assert.equal(new History().push(before,'no change'),false);
   const history=new History();placeVideoClip(project.clips[1],planVideoPlacement(9,3,'b'));history.push(before,'move');
   assert.deepEqual(captureDocument().clips.map(c=>c.start),[0,9]);history.undo();assert.deepEqual(captureDocument(),before);
@@ -508,7 +515,7 @@ test('v2 explicit timing and legacy anchors restore into v3 without a position j
   restoreDocument(legacy);assert.deepEqual([project.clips[0].start,project.captions[0].start,project.captions[0].end],[6,7,9]);
   placeVideoClip(project.clips[0],planPlacement(0,4,'v2','a'));
   assert.deepEqual([project.captions[0].start,project.captions[0].end,project.captions[0].anchor],[7,9,undefined]);
-  const saved=captureDocument();assert.equal(saved.version,3);assert.equal(saved.clips[0].trackId,'v2');
+  const saved=captureDocument();assert.equal(saved.version,4);assert.equal(saved.clips[0].trackId,'v2');
 });
 
 test('v3 validates track compatibility and finite transform/crop ranges while accepting cross-track overlap',async()=>{
@@ -665,4 +672,270 @@ test('font binary failure and cancellation reject export preparation instead of 
     const controller=new AbortController(),pending=loadFonts({signal:controller.signal});
     queueMicrotask(()=>controller.abort());await assert.rejects(()=>pending,error=>error.name==='AbortError');
   }finally{globalThis.document=previous;}
+});
+
+// 자동 편집은 브라우저 UI 대신 순수 PCM·프레임·편집 명령으로 검증합니다.
+const pcmFixture=(channels,rate=16000)=>({numberOfChannels:channels.length,sampleRate:rate,length:channels[0].length,duration:channels[0].length/rate,getChannelData:i=>channels[i]});
+const maskFixture=(overrides={})=>({id:'mask',enabled:true,mode:'static',rect:{x:.2,y:.2,w:.3,h:.3},strength:100,padding:.12,keyframes:[],...overrides});
+const keyFixture=(time,overrides={})=>({x:.2,y:.2,w:.3,h:.3,time,duration:1/30,confidence:1,lost:false,...overrides});
+
+test('silence candidates retain speech padding and examine every channel',()=>{
+  const samples=new Float32Array(16000*4);samples.fill(.2,8000,24000);samples.fill(.2,40000,56000);
+  const result=analyzeSilence(pcmFixture([new Float32Array(samples.length),samples]),{thresholdDb:-38,minSilence:.4,padding:.1,fps:30});
+  assert.deepEqual(result.removed, [{start:0,end:.4},{start:1.6,end:2.4},{start:3.6,end:4}]);
+  assert.equal(result.allSilent,false);near(result.removedDuration,1.6);
+  assert.deepEqual(result.kept,[{start:.4,end:1.6},{start:2.4,end:3.6}]);
+  const right=Float32Array.from({length:16000},(_,i)=>[0,.5,0,-.5][i%4]);
+  assert.equal(analyzeSilence(pcmFixture([new Float32Array(16000),right])).removed.length,0);
+  assert.deepEqual(monoPcm(pcmFixture([new Float32Array(16000),right])),right);
+});
+
+test('silence handles all-silent, all-loud, bounded duration and corrupt PCM safely',()=>{
+  const quiet=analyzeSilence(pcmFixture([new Float32Array(16000)]));assert.equal(quiet.allSilent,true);assert.deepEqual(quiet.removed,[{start:0,end:1}]);
+  const loud=new Float32Array(16000).fill(.1);assert.deepEqual(analyzeSilence(pcmFixture([loud])).removed,[]);
+  const tail=new Float32Array(500);tail.fill(.2,405);
+  const bounded=analyzeSilence(pcmFixture([tail],1000),{duration:.405,minSilence:.1,padding:0});
+  assert.equal(bounded.peak,0);assert.equal(bounded.allSilent,true);assert.deepEqual(bounded.kept,[]);
+  assert.throws(()=>analyzeSilence(null));assert.throws(()=>analyzeSilence(pcmFixture([loud]),{thresholdDb:NaN}));
+  assert.throws(()=>analyzeSilence(pcmFixture([Float32Array.of(0,NaN)])),/손상/);
+  assert.throws(()=>monoPcm(pcmFixture([loud]),0));assert.throws(()=>monoPcm(pcmFixture([Float32Array.of(NaN)])),/손상/);
+});
+
+test('PCM conversion preserves antiphase speech and alternating active channels',()=>{
+  const left=new Float32Array(32000),right=new Float32Array(32000);left.fill(.25,0,16000);right.fill(.4,16000);
+  const alternating=monoPcm(pcmFixture([left,right]));near(alternating[100],.25);assert.ok(alternating[20000]>.39);
+  const anti=monoPcm(pcmFixture([new Float32Array(48000).fill(.25),new Float32Array(48000).fill(-.25)],48000));
+  assert.equal(anti.length,16000);assert.ok(anti.every(x=>x===.25));
+});
+
+test('automatic cuts move only their track, retain source masks and round-trip undo',async()=>{
+  reset();const selected=await fixtureClip('talk',20,'video',{start:2,trimStart:5,trimEnd:15,trackId:'v1',fadeIn:2,fadeOut:2,mosaics:[maskFixture()]});
+  project.clips=[selected,await fixtureClip('other',4,'video',{start:3,trackId:'v2'})];
+  project.overlays=[{id:'following',text:'same track',trackId:'v1',start:14,end:16}];
+  project.captions=[{id:'independent',text:'stay here',trackId:'v2',start:4,end:5}];
+  project.audio.tracks=[fixtureAudio('music',8,{start:2,trackId:'a1'})];
+  const before=captureDocument(),plan=planSilenceCuts({type:'clip',id:'talk'},[{start:2,end:3},{start:6,end:9}]);
+  assert.deepEqual(captureDocument(),before);
+  const result=await applySilenceCuts(plan),parts=project.clips.filter(c=>c.trackId==='v1');
+  assert.equal(result.count,3);assert.equal(result.removedDuration,4);
+  assert.deepEqual(parts.map(c=>[c.start,c.trimStart,c.trimEnd]),[[2,5,7],[4,8,11],[7,14,15]]);
+  assert.deepEqual(parts.map(c=>c.fadeEnvelope.offset),[0,3,9]);
+  assert.notEqual(parts[0].mosaics,parts[1].mosaics);assert.deepEqual(parts[0].mosaics,parts[1].mosaics);
+  assert.equal(project.overlays[0].start,10);assert.equal(project.overlays[0].end,12);
+  const after=captureDocument();assert.deepEqual(after.clips.find(c=>c.id==='other'),before.clips.find(c=>c.id==='other'));
+  assert.deepEqual(after.captions,before.captions);assert.deepEqual(after.tracks,before.tracks);
+  validateDocument(after,[...assets.values()]);
+  const history=new History();history.push(before,'cuts');history.undo();assert.deepEqual(captureDocument(),before);history.redo();assert.deepEqual(captureDocument(),after);
+});
+
+test('automatic audio cuts respect trim offset and leave the second audio track alone',async()=>{
+  reset();project.audio.tracks=[fixtureAudio('speech',10,{start:3,trimStart:2,trimEnd:8,trackId:'a1'}),fixtureAudio('next',2,{start:10,trackId:'a1'}),fixtureAudio('other',4,{start:5,trackId:'a2'})];
+  const before=captureDocument();await applySilenceCuts(planSilenceCuts({type:'audio',id:'speech'},[{start:1,end:3}]));
+  assert.deepEqual(project.audio.tracks.filter(c=>c.trackId==='a1').map(c=>[c.start,c.trimStart,c.trimEnd]),[[3,2,3],[4,5,8],[8,0,2]]);
+  assert.deepEqual(captureDocument().tracks.find(c=>c.id==='other'),before.tracks.find(c=>c.id==='other'));
+});
+
+test('automatic cuts reject transitions, overlaps, invalid intervals and collection overflow',async()=>{
+  reset();project.clips=[await fixtureClip('video',4,'video'),await fixtureClip('next',4,'video',{start:4})];migrateTimeline();
+  setTransition('video','next','dissolve',.5);assert.throws(()=>planSilenceCuts({type:'clip',id:'video'},[{start:1,end:2}]),/전환/);
+  setTransition('video','next','cut',0);project.overlays=[{id:'overlap',text:'x',start:1,end:2,trackId:'v1'}];
+  assert.throws(()=>planSilenceCuts({type:'clip',id:'video'},[{start:1,end:2}]),/겹친/);project.overlays=[];
+  for(const cuts of [[{start:0,end:4}],[{start:1,end:5}],[{start:1,end:2},{start:1.5,end:3}],[]])assert.throws(()=>planSilenceCuts({type:'clip',id:'video'},cuts));
+  reset();const first=fixtureAudio('speech',4,{start:0,trackId:'a1'});
+  project.audio.tracks=[first,...Array.from({length:999},(_,i)=>makeAudio(first.assetId,{id:'extra-'+i,start:5+i,trimEnd:1,trackId:'a1'}))];
+  const before=captureDocument();assert.throws(()=>planSilenceCuts({type:'audio',id:'speech'},[{start:1,end:2}]),/1,000/);assert.deepEqual(captureDocument(),before);
+});
+
+test('automatic cuts abort staging without changing a newer edit or leaking video elements',async()=>{
+  reset();project.clips=[await fixtureClip('video',8,'video')];
+  const plan=planSilenceCuts({type:'clip',id:'video'},[{start:1,end:2},{start:4,end:5}]),before=captureDocument();
+  const originalDocument=globalThis.document,created=[],controller=new AbortController();
+  globalThis.document={...originalDocument,createElement(){const el=fakeMedia();created.push(el);queueMicrotask(()=>controller.abort());return el;}};
+  try{await assert.rejects(()=>applySilenceCuts(plan,{signal:controller.signal}),e=>e.name==='AbortError');assert.deepEqual(captureDocument(),before);assert.ok(created.every(el=>el.src===''));}
+  finally{globalThis.document=originalDocument;}
+  project.clips[0].volume=.4;const changed=captureDocument();await assert.rejects(()=>applySilenceCuts(plan),/바뀌/);assert.deepEqual(captureDocument(),changed);
+});
+
+test('tracking keys use actual frame coverage at 24fps, 15fps and VFR',()=>{
+  for(const duration of [1/24,1/15,.27]){
+    const effect=maskFixture({mode:'tracked',range:[0,1],keyframes:[keyFixture(0),keyFixture(1-duration,{duration})]});
+    assert.equal(validMosaics([effect]),true);assert.deepEqual(unresolvedMosaics({trimStart:0,trimEnd:1,mosaics:[effect]}),[]);
+    assert.equal(mosaicAt(effect,.9999).full,false);assert.equal(mosaicAt(effect,1.01).full,true);
+  }
+  const failed=maskFixture({mode:'tracked',range:[0,2],keyframes:[keyFixture(0),keyFixture(.1,{lost:true}),keyFixture(2)]});
+  assert.equal(mosaicAt(failed,.05).full,true);assert.equal(unresolvedMosaics({trimStart:.02,trimEnd:.08,mosaics:[failed]}).length,1);
+  assert.equal(mosaicAt(failed,NaN).full,true);assert.equal(mosaicAt({...failed,enabled:false},.1),null);
+});
+
+test('tracking repair cannot interpolate across two unverified paths or tiny shifted masks',()=>{
+  const previous=[keyFixture(0),keyFixture(.1),keyFixture(.2,{lost:true}),keyFixture(1,{lost:true})];
+  const next=[keyFixture(0,{lost:true}),keyFixture(.1,{lost:true}),keyFixture(.2),keyFixture(.3),keyFixture(1)];
+  const merged=maskFixture({mode:'tracked',keyframes:mergeTrackingKeys(previous,next)});
+  assert.equal(mosaicAt(merged,.05).full,false);assert.equal(mosaicAt(merged,.15).full,true);assert.equal(mosaicAt(merged,.5).full,false);
+  const small=[0,.5,1].map(t=>keyFixture(t,{x:.1,w:.005})),shifted=[keyFixture(0,{x:.107,w:.005,lost:true}),keyFixture(.5,{x:.107,w:.005}),keyFixture(1,{x:.107,w:.005,lost:true})];
+  const safe=maskFixture({mode:'tracked',keyframes:mergeTrackingKeys(small,shifted)});
+  assert.equal(mosaicAt(safe,.25).full,true);assert.equal(mosaicAt(safe,.5).full,true);
+});
+
+test('mosaic validation rejects unsafe keys and version 4 persists independent masks',async()=>{
+  reset();const effect=maskFixture({mode:'tracked',range:[0,4],keyframes:[keyFixture(0),keyFixture(4-1/30)]});
+  project.clips=[await fixtureClip('video',4,'video',{mosaics:[effect]})];const before=captureDocument();assert.equal(before.version,4);
+  validateDocument(before,[...assets.values()]);
+  for(const bad of [maskFixture({strength:NaN}),maskFixture({padding:2}),{...effect,keyframes:[keyFixture(0,{duration:0})]},{...effect,keyframes:[keyFixture(1),keyFixture(0)]}])assert.equal(validMosaics([bad]),false);
+  assert.equal(validMosaics([effect,effect]),false);
+  await splitTimelineItem({type:'clip',id:'video'},2);assert.notEqual(project.clips[0].mosaics,project.clips[1].mosaics);
+  assert.deepEqual(project.clips[0].mosaics,project.clips[1].mosaics);const after=captureDocument();
+  const history=new History();history.push(before,'split masked clip');history.undo();assert.deepEqual(captureDocument(),before);history.redo();assert.deepEqual(captureDocument(),after);
+  const cleared=captureDocument();delete cleared.clips[0].mosaics;restoreDocument(cleared);assert.equal(project.clips[0].mosaics,undefined);
+  assert.equal(unresolvedMosaics({...project.clips[1],trimEnd:5}).length,1);
+});
+
+function texturedFrame(W,H,x,y,size=26,frequency=1){
+  const gray=new Float32Array(W*H).fill(.08);
+  for(let j=0;j<size;j++)for(let i=0;i<size;i++)gray[(y+j)*W+x+i]=.5+.2*Math.sin(i*.61*frequency)+.18*Math.cos(j*.83*frequency);
+  return gray;
+}
+test('tracking follows textured translation but fails on occlusion and ambiguous jumps',()=>{
+  const W=128,H=128,rect={x:28/W,y:32/H,w:26/W,h:26/H};
+  for(const frequency of [1,2]){
+    const template=trackingTemplate(texturedFrame(W,H,28,32,26,frequency),W,H,rect);let previous=rect;
+    for(let i=1;i<=6;i++){const next=trackRectangle(texturedFrame(W,H,28+i*2,32+i,26,frequency),W,H,template,previous);assert.equal(next.lost,false);assert.ok(Math.abs(next.x*W-(28+i*2))<1);assert.ok(Math.abs(next.y*H-(32+i))<1);previous=next;}
+    assert.equal(trackRectangle(new Float32Array(W*H).fill(.08),W,H,template,previous).lost,true);
+  }
+  assert.throws(()=>trackingTemplate(new Float32Array(W*H),W,H,rect),/특징/);
+  const template=trackingTemplate(texturedFrame(W,H,28,32),W,H,rect);
+  assert.equal(trackRectangle(texturedFrame(W,H,46,32),W,H,template,rect).lost,true);
+});
+
+test('mosaic replaces transparent details and fully covers unresolved sources',{skip:!canvasModule},()=>{
+  const {createCanvas}=canvasModule,source=createCanvas(40,40),g=source.getContext('2d'),out=createCanvas(40,40),ctx=out.getContext('2d');
+  for(let x=0;x<40;x++){g.fillStyle=x%2?'rgba(255,0,0,.5)':'rgba(0,0,255,.5)';g.fillRect(x,0,1,40);}
+  const clip={mosaics:[maskFixture({rect:{x:0,y:0,w:1,h:1},padding:0})]};
+  let redacted=redactSource(ctx,{img:source,w:40,h:40,sourceTime:0},clip,0);const r=redacted.img.getContext('2d');
+  assert.deepEqual([...r.getImageData(5,5,1,1).data],[...r.getImageData(6,5,1,1).data]);assert.equal(r.getImageData(5,5,1,1).data[3],255);
+  clip.mosaics=[maskFixture({mode:'tracked',range:[0,1],keyframes:[keyFixture(0,{lost:true})]})];
+  redacted=redactSource(ctx,{img:source,w:40,h:40,sourceTime:.1},clip,.1);
+  assert.deepEqual([...redacted.img.getContext('2d').getImageData(5,5,1,1).data],[21,21,21,255]);
+});
+
+test('shared renderer keeps a masked source unchanged through split and transformed blur backdrop',{skip:!canvasModule},async()=>{
+  reset();const {createCanvas}=canvasModule,source=createCanvas(90,160),out=createCanvas(90,160),g=source.getContext('2d');
+  for(let x=0;x<90;x++){g.fillStyle=x%2?'#f00':'#00f';g.fillRect(x,0,1,160);}
+  const effect=maskFixture({mode:'tracked',range:[0,4],keyframes:[keyFixture(0),keyFixture(4-1/30)]});
+  project.clips=[await fixtureClip('video',4,'video',{mosaics:[effect],fit:'contain',bg:'blur',transform:{scaleX:.8,rotation:10},crop:{left:.1}})];
+  const provider=(clip,local)=>({img:source,w:90,h:160,sourceTime:clip.trimStart+local});
+  renderFrame(out.getContext('2d'),2.5,{source:provider});const before=Buffer.from(out.getContext('2d').getImageData(0,0,90,160).data);
+  await splitTimelineItem({type:'clip',id:'video'},2);renderFrame(out.getContext('2d'),2.5,{source:provider});
+  assert.deepEqual(Buffer.from(out.getContext('2d').getImageData(0,0,90,160).data),before);
+});
+
+test('tracking preview holds pixels with their presentation timestamp',{skip:!canvasModule},async()=>{
+  reset();const {createCanvas}=canvasModule,frame=createCanvas(30,30),player=new Player(createCanvas(30,30)),el={...fakeMedia(),videoWidth:30,videoHeight:30};
+  const c={...clip('video',2),type:'video',el,mosaics:[maskFixture({mode:'tracked'})]};project.clips=[c];
+  assert.equal(player.source(c,0).timeReliable,false);
+  frame.getContext('2d').fillStyle='red';frame.getContext('2d').fillRect(0,0,30,30);player.rememberPresentedFrame(el,frame,.1);
+  frame.getContext('2d').fillStyle='blue';frame.getContext('2d').fillRect(0,0,30,30);el.currentTime=.8;
+  const src=player.source(c,.8);assert.equal(src.sourceTime,.1);assert.deepEqual([...src.img.getContext('2d').getImageData(0,0,1,1).data],[255,0,0,255]);
+  let reads=0;const decoder={...c,id:'decoder',decoderOnly:true,trimStart:0,sink:{getCanvas:async()=>{reads++;return{timestamp:.1,duration:.3,canvas:frame};}}};
+  project.clips=[decoder];player.draw=()=>{};assert.equal(player.source(decoder,.1),null);await new Promise(resolve=>setImmediate(resolve));
+  frame.getContext('2d').fillStyle='red';frame.getContext('2d').fillRect(0,0,30,30);
+  const held=player.source(decoder,.1);assert.equal(held.timeReliable,true);assert.equal(held.sourceTime,.1);assert.deepEqual([...held.img.getContext('2d').getImageData(0,0,1,1).data],[0,0,255,255]);
+  player.source(decoder,.39);assert.equal(reads,1);
+});
+
+test('local speech chunks are bounded and do not break Unicode pairs',()=>{
+  const chunks=chunkSpeechText('첫 번째 문장입니다. '+('한국어 원고 😀 '.repeat(20)),70);
+  assert.ok(chunks.length>1&&chunks.every(c=>c.length<=70&&c.length>0));assert.ok(chunks.every(c=>!/[\uD800-\uDBFF]$/.test(c)&&! /^[\uDC00-\uDFFF]/.test(c)));
+  assert.throws(()=>chunkSpeechText(''));assert.throws(()=>chunkSpeechText('가'.repeat(2001)));assert.throws(()=>chunkSpeechText('😀',1));
+});
+
+test('Whisper captions retain valid times, offset trimmed clips and never invent missing timestamps',()=>{
+  const result=whisperCaptions({text:'안녕하세요. 다음 문장',chunks:[{text:' 안녕하세요.',timestamp:[.2,1.2]},{text:'다음',timestamp:[2,3]},{text:'문장',timestamp:[3,7]},{text:'bad',timestamp:[4,null]},{text:'bad',timestamp:[5,4]},{text:'outside',timestamp:[8,9]}]},5,10);
+  assert.deepEqual(result.captions.map(c=>[c.start,c.end,c.text]),[[10.2,11.2,'안녕하세요.'],[12,15,'다음 문장']]);assert.equal(result.skipped,3);
+  assert.ok(result.captions.every(c=>c.generated==='local-whisper'));assert.deepEqual(whisperCaptions({text:'missing times'},3).captions,[]);
+  assert.throws(()=>whisperCaptions({},NaN));
+});
+
+test('AI workers terminate on success, cancellation, startup error and transfer error',async()=>{
+  const old=globalThis.Worker,workers=[];
+  globalThis.Worker=class{constructor(url,options){this.url=url;this.options=options;this.terminated=false;workers.push(this);}postMessage(payload,transfer){this.payload=payload;this.transfer=transfer;}terminate(){this.terminated=true;}};
+  try{
+    const events=[],pcm=Float32Array.of(.1,.2),pending=runLocalAI('asr',{audio:pcm},{onProgress:(p,m)=>events.push([p,m])}),worker=workers.at(-1);
+    assert.equal(worker.options.type,'module');assert.equal(worker.transfer[0],pcm.buffer);
+    worker.onmessage({data:{type:'progress',progress:.5,message:'working'}});worker.onmessage({data:{type:'result',result:{text:'완료'}}});
+    assert.deepEqual(await pending,{text:'완료'});assert.equal(worker.terminated,true);assert.deepEqual(events,[[.5,'working']]);
+    const ctrl=new AbortController(),cancelled=runLocalAI('tts',{text:'한국어'},{signal:ctrl.signal});ctrl.abort();await assert.rejects(()=>cancelled,e=>e.name==='AbortError');assert.equal(workers.at(-1).terminated,true);
+    const failed=runLocalAI('tts',{});workers.at(-1).onerror();await assert.rejects(()=>failed,/엔진/);assert.equal(workers.at(-1).terminated,true);
+    globalThis.Worker.prototype.postMessage=function(){throw new Error('transfer failed');};await assert.rejects(()=>runLocalAI('asr',{}),/transfer failed/);assert.equal(workers.at(-1).terminated,true);
+    const n=workers.length;await assert.rejects(()=>runLocalAI('tts',{}, {signal:AbortSignal.abort()}),e=>e.name==='AbortError');assert.equal(workers.length,n);
+  }finally{globalThis.Worker=old;}
+});
+
+test('installed speech excludes remote voices and cancels without producing an audio asset',async()=>{
+  reset();const old=globalThis.speechSynthesis,oldU=globalThis.SpeechSynthesisUtterance,spoken=[];
+  const local={name:'한국어',lang:'ko-KR',voiceURI:'local-ko',localService:true};let cancelled=0;
+  globalThis.speechSynthesis={getVoices:()=>[{name:'Remote',lang:'ko-KR',voiceURI:'cloud',localService:false},local],cancel(){cancelled++;},speak(u){spoken.push(u);}};
+  globalThis.SpeechSynthesisUtterance=class{constructor(text){this.text=text;}};
+  try{
+    assert.deepEqual(installedVoices(),[local]);const before=captureDocument(),controller=new AbortController(),pending=speakInstalled('안녕하세요','local-ko',{signal:controller.signal});
+    assert.equal(spoken[0].voice,local);controller.abort();await assert.rejects(()=>pending,e=>e.name==='AbortError');assert.ok(cancelled>=1);assert.equal(assets.size,0);assert.deepEqual(captureDocument(),before);
+    await assert.rejects(()=>speakInstalled('안녕하세요','cloud'),/설치된/);
+  }finally{globalThis.speechSynthesis=old;globalThis.SpeechSynthesisUtterance=oldU;}
+});
+
+test('model downloads use public immutable GETs, detect truncation and tolerate disabled caches',async()=>{
+  const oldFetch=globalThis.fetch,oldCaches=globalThis.caches,requests=[];let response=Uint8Array.of(1,2,3,4);
+  globalThis.caches={open:async()=>{throw new Error('storage disabled');}};
+  globalThis.fetch=async(url,options)=>{requests.push({url,options});return new Response(response);};
+  try{
+    assert.deepEqual(await cachedModel(TTS_MODEL.base+'onnx/test.onnx',4),response);assert.equal(requests[0].options.credentials,'omit');assert.equal(requests[0].options.body,undefined);
+    response=Uint8Array.of(1,2);await assert.rejects(()=>cachedModel(TTS_MODEL.base+'onnx/test.onnx',4),/끊겼/);
+    const count=requests.length;await assert.rejects(()=>cachedModel('https://unapproved.example/model',4),/허용/);assert.equal(requests.length,count);
+  }finally{globalThis.fetch=oldFetch;globalThis.caches=oldCaches;}
+});
+
+test('automatic caption application preserves old captions, uses a new track and rejects stale results',()=>{
+  reset();project.captions=[{id:'existing',text:'유지',start:0,end:1,trackId:'v3'}];migrateTimeline();const before=captureDocument(),calls=[];
+  const owner={state:{kind:'captions',before,captions:[{id:'new',text:'새 자막',start:1,end:2,generated:'local-whisper'}]},close(){},hooks:{commit:(doc,label)=>calls.push(label),select(){},timeline:{reveal(){}},toast(){}}};
+  StudioTools.prototype.applyCaptions.call(owner);assert.equal(calls.length,1);assert.equal(project.captions[0].text,'유지');assert.notEqual(project.captions[1].trackId,'v3');assert.equal(project.captions[1].text,'새 자막');
+  const after=captureDocument();assert.throws(()=>StudioTools.prototype.applyCaptions.call(owner),/바뀌/);assert.deepEqual(captureDocument(),after);
+});
+
+test('cancelling generated voice insertion retains the WAV in saved library without timeline mutation',async()=>{
+  reset();const old=globalThis.window,controller=new AbortController(),before=captureDocument(),calls=[];
+  globalThis.window={AudioContext:class{async decodeAudioData(){controller.abort();return pcmFixture([new Float32Array(1600).fill(.1)]);}close(){}}};
+  const owner={state:{file:new File(['wave'],'voice.wav',{type:'audio/wav'}),before},run:async(kind,work)=>work(controller.signal),close:()=>calls.push('close'),hooks:{saveDraft:()=>calls.push('save'),refresh:()=>calls.push('refresh'),toast(){},commit:()=>calls.push('commit')}};
+  try{await StudioTools.prototype.applyVoice.call(owner);assert.equal(assets.size,1);assert.deepEqual(captureDocument(),before);assert.deepEqual(calls,['save','refresh','close']);}
+  finally{globalThis.window=old;reset();}
+});
+
+test('strict audio analysis distinguishes real boundary silence, missing decoding, channel loss and cancellation',async()=>{
+  const oldTrack=Input.prototype.getPrimaryAudioTrack,oldBuffers=AudioBufferSink.prototype.buffers,oldAudioBuffer=globalThis.AudioBuffer;
+  const track=Object.assign(Object.create(InputAudioTrack.prototype),{canDecode:async()=>true,getFirstTimestamp:async()=>.1,computeDuration:async()=>.9});
+  let sourceTrack=track,rows=[{timestamp:.1,buffer:pcmFixture([new Float32Array(800).fill(.25)],1000)}];
+  Input.prototype.getPrimaryAudioTrack=async()=>sourceTrack;
+  AudioBufferSink.prototype.buffers=async function*(){for(const row of rows)yield row;};
+  globalThis.AudioBuffer=class{constructor({length,numberOfChannels,sampleRate}){Object.assign(this,{length,numberOfChannels,sampleRate,duration:length/sampleRate});this.channels=Array.from({length:numberOfChannels},()=>new Float32Array(length));}getChannelData(c){return this.channels[c];}copyToChannel(pcm,c,offset){this.channels[c].set(pcm,offset);}};
+  const clip={type:'video',file:new File(['sample'],'audio.mp4'),trimStart:0,trimEnd:1,muted:true};
+  try{
+    await assert.rejects(()=>extractClipAudio(clip,null,{strict:true,ignoreMute:true}),/읽지 못한/);
+    const result=await extractClipAudio(clip,null,{strict:true,ignoreMute:true,allowBoundaryGaps:true});
+    assert.equal(result.length,1000);assert.equal(result.getChannelData(0)[0],0);assert.equal(result.getChannelData(0)[150],.25);assert.equal(result.getChannelData(0)[999],0);assert.equal(clip.muted,true);
+    sourceTrack=null;await assert.rejects(()=>extractClipAudio(clip,null,{strict:true,ignoreMute:true}),/오디오 트랙/);
+    assert.equal(await extractClipAudio(clip,null,{strict:true,ignoreMute:true,allowMissingTrack:true}),null);
+    sourceTrack=track;track.canDecode=async()=>false;await assert.rejects(()=>extractClipAudio(clip,null,{strict:true,ignoreMute:true}),/코덱/);track.canDecode=async()=>true;
+    track.getFirstTimestamp=async()=>0;track.computeDuration=async()=>1;
+    rows=[{timestamp:0,buffer:pcmFixture([new Float32Array(400)],1000)},{timestamp:.5,buffer:pcmFixture([new Float32Array(500)],1000)}];
+    await assert.rejects(()=>extractClipAudio(clip,null,{strict:true,ignoreMute:true,allowBoundaryGaps:true}),/읽지 못한/);
+    rows=[{timestamp:0,buffer:pcmFixture([new Float32Array(1000),new Float32Array(1000),new Float32Array(1000).fill(.5)],1000)}];
+    const all=await extractClipAudio(clip,null,{strict:true,ignoreMute:true,allChannels:true});assert.equal(all.numberOfChannels,3);assert.equal(all.getChannelData(2)[600],.5);
+    const controller=new AbortController();AudioBufferSink.prototype.buffers=async function*(){controller.abort();yield rows[0];};
+    await assert.rejects(()=>extractClipAudio(clip,controller.signal,{strict:true,ignoreMute:true}),e=>e.name==='AbortError');
+    assert.equal(await extractClipAudio({...clip,trimStart:2,trimEnd:3},null,{strict:true,ignoreMute:true,allowBoundaryGaps:true,allowMissingTrack:true}),null);
+  }finally{Input.prototype.getPrimaryAudioTrack=oldTrack;AudioBufferSink.prototype.buffers=oldBuffers;globalThis.AudioBuffer=oldAudioBuffer;}
+});
+
+test('export refuses unresolved tracking before running the media encoder',async()=>{
+  reset();project.clips=[await fixtureClip('video',2,'video',{mosaics:[maskFixture({mode:'tracked',range:[0,2],keyframes:[keyFixture(0),keyFixture(1,{lost:true})]})]})];
+  await assert.rejects(()=>exportVideo({}),/모자이크|추적/);
 });

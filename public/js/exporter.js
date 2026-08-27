@@ -73,6 +73,8 @@ function pickRecorderMime() {
  * @returns {Promise<Blob>}
  */
 export async function exportVideo({ engine, onProgress = () => {}, signal, player }) {
+  const { unresolvedMosaics } = await import('./mosaic.js');
+  if (project.clips.some(clip => unresolvedMosaics(clip).length)) throw new Error('추적을 놓쳤거나 아직 추적하지 않은 모자이크 구간이 있습니다. 모자이크 패널에서 확인·보정한 뒤 내보내 주세요.');
   const total = totalDuration();
   if (total <= 0) throw new Error('클립을 먼저 추가하세요.');
   await loadFonts({ signal });
@@ -162,7 +164,7 @@ export async function exportVideo({ engine, onProgress = () => {}, signal, playe
           }
           const sample = provider.last;
           if (!sample) throw new Error(`${c.name}: 영상 프레임을 읽지 못했습니다.`);
-          sources.set(c.id, { img: sample, w: sample.displayWidth, h: sample.displayHeight, draw: (context, ...args) => sample.draw(context, ...args) });
+          sources.set(c.id, { img: sample, w: sample.displayWidth, h: sample.displayHeight, sourceTime: sample.timestamp, draw: (context, ...args) => sample.draw(context, ...args) });
         }
         renderFrame(ctx, t, { layout, source: clip => sources.get(clip.id) });
         await videoSource.add(t, Math.min(1 / fps, total - t));

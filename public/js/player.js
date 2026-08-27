@@ -20,6 +20,9 @@ export class Player {
     this.trackElements = new Map();
     // undo는 클립 데이터를 교체하므로 비동기 디코더 상태는 sink에 연결합니다.
     this.sinkStates = new WeakMap();
+    this.presentedTimes = new WeakMap();
+    this.presentedFrames = new WeakMap();
+    this.watchedVideos = new WeakSet();
 
     // 탭이 가려지면 requestAnimationFrame 이 멈춘다.
     // 그대로 두면 돌아왔을 때 시간이 훌쩍 뛰므로 그냥 일시정지한다.
@@ -38,8 +41,38 @@ export class Player {
     if (clip.decoderOnly) return this._sinkSource(clip, clip.trimStart + local);
     const el = clip.el;
     if (!el || el.readyState < 2 || !el.videoWidth) return null;
-    return { img: el, w: el.videoWidth, h: el.videoHeight };
+    if (el.requestVideoFrameCallback && !this.watchedVideos.has(el)) {
+      this.watchedVideos.add(el);
+      const remember = (_, meta) => {
+        this.presentedTimes.set(el, meta.mediaTime);
+        const current = project.clips.find(c => c.el === el);
+        if (!current) { this.watchedVideos.delete(el); return; }
+        if (current.mosaics?.some(m => m.enabled !== false && m.mode === 'tracked')) {
+          this.rememberPresentedFrame(el, el, meta.mediaTime);
+        }
+        if (!this.playing) this.draw();
+        el.requestVideoFrameCallback(remember);
+      };
+      el.requestVideoFrameCallback(remember);
+    }
+    if (clip.mosaics?.some(m => m.enabled !== false && m.mode === 'tracked')) {
+      const held = this.presentedFrames.get(el);
+      if (held) return { img: held.canvas, w: held.canvas.width, h: held.canvas.height, sourceTime: held.time };
+      return { img: el, w: el.videoWidth, h: el.videoHeight, timeReliable: false };
+    }
+    return { img: el, w: el.videoWidth, h: el.videoHeight,
+      sourceTime: this.presentedTimes.get(el) ?? el.currentTime,
+      timeReliable: !el.seeking };
   };
+
+  // 프레임 픽셀과 시각을 함께 복사합니다. 원본 video의 뒤늦은 이동과 섞지 않습니다.
+  rememberPresentedFrame(el, source, time) {
+    let held = this.presentedFrames.get(el);
+    if (!held) { held = { canvas: document.createElement('canvas') };this.presentedFrames.set(el, held); }
+    const width = source.videoWidth || source.width, height = source.videoHeight || source.height;
+    if (held.canvas.width !== width || held.canvas.height !== height) { held.canvas.width = width;held.canvas.height = height; }
+    held.canvas.getContext('2d').drawImage(source, 0, 0);held.time = time;
+  }
 
   /**
    * <video> 로 못 여는 파일용 — 디코더에서 프레임을 하나씩 받아 온다.
@@ -47,8 +80,11 @@ export class Player {
    */
   _sinkSource(clip, t) {
     const held = this._sinkState(clip).frame;
-    if (!held || Math.abs(held.t - t) > 0.06) this._requestSinkFrame(clip, t);
-    return held ? { img: held.canvas, w: held.canvas.width, h: held.canvas.height } : null;
+    const tracked = clip.mosaics?.some(m => m.enabled !== false && m.mode === 'tracked');
+    const covers = held && (Number.isFinite(held.duration) && held.duration > 0
+      ? t >= held.t - 1e-6 && t <= held.t + held.duration + 1e-6 : Math.abs(held.t - t) <= .06);
+    if (!covers || (tracked && !held.owned)) this._requestSinkFrame(clip, t);
+    return held ? { img: held.canvas, w: held.canvas.width, h: held.canvas.height, sourceTime: held.t, timeReliable: !tracked || !!held.owned } : null;
   }
 
   _sinkState(clip) {
@@ -62,7 +98,15 @@ export class Player {
     if (state.pending) { state.queued = t; return; }   // 한 번에 하나만
     state.pending = true;
     clip.sink.getCanvas(t)
-      .then(w => { if (w) state.frame = { t: w.timestamp, canvas: w.canvas }; })
+      .then(w => {
+        if (!w) return;
+        const current = project.clips.find(c => c.id === clip.id && c.sink === clip.sink);
+        if (current?.mosaics?.some(m => m.enabled !== false && m.mode === 'tracked')) {
+          const canvas = document.createElement('canvas');canvas.width = w.canvas.width;canvas.height = w.canvas.height;
+          canvas.getContext('2d').drawImage(w.canvas, 0, 0);
+          state.frame = { t: w.timestamp, duration: w.duration, canvas, owned: true };
+        } else state.frame = { t: w.timestamp, duration: w.duration, canvas: w.canvas };
+      })
       .catch(() => { /* 디코딩 실패한 지점은 직전 프레임 유지 */ })
       .finally(() => {
         state.pending = false;

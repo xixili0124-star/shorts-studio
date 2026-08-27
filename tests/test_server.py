@@ -61,11 +61,29 @@ class ServerTests(unittest.TestCase):
             ('/js/safe-areas.js',b'export const SAFE_AREAS'),
             ('/js/sound-effects.js',b'export const SOUND_EFFECTS'),
             ('/js/visual-transform.js',b'export function transformOf'),
+            ('/js/studio-tools.js',b'export class StudioTools'),
+            ('/js/silence.js',b'export function analyzeSilence'),
+            ('/js/mosaic.js',b'export function mosaicAt'),
+            ('/js/video-analysis.js',b'export async function trackMosaic'),
+            ('/js/local-ai.js',b'export function runLocalAI'),
+            ('/js/tts-worker.js',b'TextToSpeech'),
+            ('/js/asr-worker.js',b'automatic-speech-recognition'),
         ):
             with self.subTest(module=path):
                 status,body,_=self.request(path)
                 self.assertEqual(status,200)
                 self.assertIn(marker,body)
+        for path,mime in (
+            ('/vendor/onnxruntime-web/1.23.2/ort.wasm.min.mjs','text/javascript'),
+            ('/vendor/onnxruntime-web/1.23.2/ort-wasm-simd-threaded.wasm','application/wasm'),
+            ('/vendor/transformers/3.8.1/ort-wasm-simd-threaded.jsep.mjs','text/javascript'),
+            ('/vendor/transformers/3.8.1/ort-wasm-simd-threaded.jsep.wasm','application/wasm'),
+        ):
+            with self.subTest(runtime=path):
+                status,_,headers=self.request(path,method='HEAD')
+                self.assertEqual(status,200)
+                self.assertEqual(headers.get_content_type(),mime)
+                self.assertGreater(int(headers['Content-Length']),1000)
         status,body,_=self.request('/api/ai/status')
         self.assertFalse(json.loads(body)['configured'])
         self.assertFalse(json.loads(body)['verified'])

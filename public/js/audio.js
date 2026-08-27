@@ -24,32 +24,47 @@ export function hasAnyAudio() {
 }
 
 /** 영상 클립에서 트림 구간만큼의 오디오를 뽑아 AudioBuffer 로 만든다 */
-export async function extractClipAudio(clip, signal) {
-  if (clip.type !== 'video' || clip.muted || !clip.file) return null;
+export async function extractClipAudio(clip, signal, { ignoreMute = false, strict = false, allChannels = false, allowBoundaryGaps = false, allowMissingTrack = false } = {}) {
+  if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+  if (clip.type !== 'video' || (!ignoreMute && clip.muted) || !clip.file) return null;
   let input = null;
+  const cancel = () => { try { input?.dispose(); } catch {} };
   try {
     input = new Input({ formats: ALL_FORMATS, source: new BlobSource(clip.file) });
+    signal?.addEventListener('abort', cancel, { once: true });
     const track = await input.getPrimaryAudioTrack();
-    if (!track) return null;
-    if (track.canDecode && !(await track.canDecode())) return null;
+    if (!track) { if (strict && !allowMissingTrack) throw new Error('선택한 영상에는 오디오 트랙이 없습니다.'); return null; }
+    if (track.canDecode && !(await track.canDecode())) { if (strict) throw new Error('이 브라우저에서 영상의 오디오 코덱을 읽을 수 없습니다.'); return null; }
 
-    const dur = clipDuration(clip);
+    let coverageStart = clip.trimStart, coverageEnd = clip.trimEnd;
+    if (strict && allowBoundaryGaps) {
+      const [first, end] = await Promise.all([track.getFirstTimestamp(), track.computeDuration()]);
+      if (!Number.isFinite(first) || !Number.isFinite(end)) throw new Error('오디오의 시작·끝 시각을 확인하지 못했습니다.');
+      coverageStart = Math.max(clip.trimStart, first, 0);coverageEnd = Math.min(clip.trimEnd, end);
+      if (coverageEnd <= coverageStart) { if (allowMissingTrack) return null;throw new Error('선택한 구간에는 오디오가 없습니다.'); }
+    }
+
+    const dur = clip.trimEnd - clip.trimStart;
     const sink = new AudioBufferSink(track);
-    let out = null, rate = 0, ch = 0;
+    let out = null, rate = 0, ch = 0, covered = 0;
 
     for await (const w of sink.buffers(clip.trimStart, clip.trimEnd)) {
       if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
       if (!w?.buffer) continue;
       if (!out) {
         rate = w.buffer.sampleRate;
-        ch = Math.min(2, w.buffer.numberOfChannels);
+        ch = Math.min(allChannels ? 32 : 2, w.buffer.numberOfChannels);
+        covered = Math.max(0, Math.round((coverageStart - clip.trimStart) * rate));
         out = new AudioBuffer({
-          length: Math.max(1, Math.ceil(dur * rate) + 1),
+          length: Math.max(1, Math.ceil(dur * rate)),
           numberOfChannels: ch,
           sampleRate: rate,
         });
       }
+      if (strict && (w.buffer.sampleRate !== rate || Math.min(allChannels ? 32 : 2, w.buffer.numberOfChannels) !== ch)) throw new Error('중간에 오디오 형식이 바뀌어 정확히 분석할 수 없습니다.');
       const offset = Math.round((w.timestamp - clip.trimStart) * rate);
+      if (strict && offset > covered + 1) throw new Error('오디오를 읽지 못한 구간이 있습니다. 무음으로 간주하지 않고 분석을 중단합니다.');
+      covered = Math.max(covered, offset + w.buffer.length);
       for (let c = 0; c < ch; c++) {
         const src = w.buffer.getChannelData(Math.min(c, w.buffer.numberOfChannels - 1));
         let s = 0, d = offset;
@@ -58,12 +73,16 @@ export async function extractClipAudio(clip, signal) {
         if (n > 0) out.copyToChannel(src.subarray(s, s + n), c, d);
       }
     }
+    if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+    if (strict && (!out || covered < (coverageEnd - clip.trimStart) * rate - 1)) throw new Error('선택 구간의 오디오를 끝까지 읽지 못했습니다.');
     return out;
   } catch (e) {
-    if (e?.name === 'AbortError') throw e;
+    if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+    if (e?.name === 'AbortError' || strict) throw e;
     console.warn('[audio] 추출 실패:', clip.name, e);
     return null;
   } finally {
+    signal?.removeEventListener('abort', cancel);
     try { input?.dispose?.(); } catch { /* noop */ }
   }
 }
@@ -72,7 +91,7 @@ export async function extractClipAudio(clip, signal) {
  * 타임라인 전체 오디오 믹스.
  * @returns {Promise<AudioBuffer|null>}
  */
-export async function mixTimeline({ onProgress, signal, includeBgm = true, includeVoice = false } = {}) {
+export async function mixTimeline({ onProgress, signal, includeBgm = true, includeVoice = false, strictSources = false } = {}) {
   const total = totalDuration();
   const wanted = includeBgm ? hasAnyAudio() : hasClipAudio() || (includeVoice && project.audio.tracks?.some(t => (t.role || t.lane) === 'voice' && !t.muted));
   if (total <= 0 || !wanted) return null;
@@ -88,7 +107,9 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
   for (let i = 0; i < videoClips.length; i++) {
     const clip = videoClips[i];
     onProgress?.(i / Math.max(1, videoClips.length), `소리 추출 중… (${i + 1}/${videoClips.length})`);
-    const buf = await extractClipAudio(clip, signal);
+    let buf;
+    try { buf = await extractClipAudio(clip, signal, { strict: strictSources, allowBoundaryGaps: strictSources, allowMissingTrack: true }); }
+    catch (error) { if (error.name === 'AbortError') throw error;throw new Error((clip.name || '영상') + ': ' + error.message); }
     if (!buf) continue;
 
     const at = buildLayout().entries.find(entry => entry.clip.id === clip.id)?.start || 0;
@@ -109,7 +130,8 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
   // 통합 소재함의 독립 오디오. 자동자막에는 사용자 선택 시 보이스만 포함합니다.
   for (const track of project.audio.tracks || []) {
     if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
-    if (track.muted || !track.buffer || (!includeBgm && !(includeVoice && (track.role || track.lane) === 'voice'))) continue;
+    if (track.muted || (!includeBgm && !(includeVoice && (track.role || track.lane) === 'voice'))) continue;
+    if (!track.buffer) { if (strictSources) throw new Error((track.name || '오디오') + ': 소리를 읽지 못해 자막 인식을 중단했습니다.');continue; }
     const duration = Math.min(track.trimEnd - track.trimStart, total - track.start);
     if (!(duration > 0)) continue;
     const node = ctx.createBufferSource();

@@ -1,6 +1,7 @@
 // UI와 드래그 미리보기가 함께 쓰는 편집 명령입니다. 다른 트랙은 명시적으로 선택하지 않으면 자르지 않습니다.
 import { project, buildLayout, clipDuration, pinClipPositions, transitionPairs, syncAnchoredItems, trackIdFor, trackItems, migrateTimeline, timelineTracks, trackKind } from './state.js';
-import { captureDocument, makeClip, makeAudio, assets } from './project-store.js';
+import { captureDocument, makeClip, makeAudio, assets, discardStagedInstance } from './project-store.js';
+import { complementRanges } from './silence.js';
 import { uid, clamp } from './util.js';
 
 const EPS = 1e-6;
@@ -291,4 +292,64 @@ export function deleteTimelineItem(selection, ripple = false) {
   normalizeTransitions();
   syncAnchoredItems();
   return true;
+}
+
+/** 분석 결과를 선택 클립의 원본 구간에 적용할 계획입니다. 아직 프로젝트는 바꾸지 않습니다. */
+export function planSilenceCuts(selection, ranges, doc = captureDocument()) {
+  const range = selection && itemRange(selection.type, selection.id, doc);
+  if (!range || !['clip','audio'].includes(range.type) || (range.type === 'clip' && range.item.type !== 'video')) throw new Error('소리가 있는 영상 또는 오디오 클립을 선택해 주세요.');
+  if (range.overlapIn || range.overlapOut) throw new Error('이 클립의 장면 전환을 먼저 제거한 뒤 자동 컷을 적용해 주세요.');
+  const siblings = trackItems(range.trackId, doc).filter(e => e.id !== range.id);
+  if (siblings.some(e => e.start < range.end - EPS && e.end > range.start + EPS)) throw new Error('같은 트랙에 겹친 항목이 있습니다. 다른 트랙으로 옮긴 뒤 자동 컷을 적용해 주세요.');
+  if (!Array.isArray(ranges) || ranges.length > 200) throw new Error('삭제할 무음 구간이 올바르지 않습니다.');
+  let previous = -Infinity;
+  const removed = ranges.map(r => {
+    if (!r || !Number.isFinite(r.start) || !Number.isFinite(r.end) || r.start < 0 || r.end > range.duration + EPS || r.end <= r.start || r.start < previous - EPS) throw new Error('삭제 구간이 원본 범위를 벗어나거나 겹칩니다.');
+    previous = r.end;return { start: r.start, end: Math.min(r.end, range.duration) };
+  });
+  if (!removed.length) throw new Error('선택된 무음 구간이 없습니다.');
+  const kept = complementRanges(removed, range.duration), frame = 1 / (doc.settings?.fps || doc.fps || 30);
+  if (!kept.length) throw new Error('클립 전체가 무음으로 감지됐습니다. 안전을 위해 원본을 유지합니다. 임계값을 낮춰 확인해 주세요.');
+  if (kept.some(r => r.end - r.start < frame - EPS)) throw new Error('남는 구간이 한 프레임보다 짧습니다. 삭제할 구간을 줄여 주세요.');
+  if (timelineCollection(range.type, doc).length - 1 + kept.length > 1000) throw new Error('자동 컷 후 클립 수가 1,000개를 넘습니다. 프로젝트를 나눠 작업해 주세요.');
+  const amount = removed.reduce((sum, r) => sum + r.end - r.start, 0);
+  return { before: doc, selection: { type: range.type, id: range.id }, trackId: range.trackId,
+    start: range.start, duration: range.duration, item: range.item, kept, removed, removedDuration: amount,
+    shifts: siblings.filter(e => e.start >= range.end - EPS).map(e => ({ type: e.type, id: e.id, start: e.start - amount })) };
+}
+
+/** 새 미디어 인스턴스를 준비한 뒤 한 번에 바꿉니다. 취소·실패·오래된 결과는 적용하지 않습니다. */
+export async function applySilenceCuts(plan, { signal } = {}) {
+  const signature = JSON.stringify(plan.before), staged = [];
+  const check = () => {
+    if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+    if (JSON.stringify(captureDocument()) !== signature) throw new Error('분석 이후 편집 내용이 바뀌었습니다. 다시 분석해 주세요.');
+  };
+  check();
+  const { type, id } = plan.selection, original = timelineCollection(type).find(i => i.id === id);
+  if (!original) throw new Error('분석한 클립을 찾을 수 없습니다.');
+  const envelope = original.fadeEnvelope || { offset: 0, duration: plan.duration, fadeIn: original.fadeIn || 0, fadeOut: original.fadeOut || 0 };
+  let start = plan.start;
+  try {
+    const replacements = [];
+    for (let i = 0; i < plan.kept.length; i++) {
+      check();
+      const r = plan.kept[i], saved = JSON.parse(JSON.stringify(plan.item));
+      Object.assign(saved, { id: i ? uid() : id, start, trimStart: original.trimStart + r.start, trimEnd: original.trimStart + r.end,
+        fadeEnvelope: { ...envelope, offset: envelope.offset + r.start } });
+      if (type === 'clip') saved.transitionOut = cut();
+      const item = i ? (type === 'clip' ? await makeClip(original.assetId, saved) : makeAudio(original.assetId, saved)) : { ...original, ...saved };
+      if (i) staged.push(item.id);
+      replacements.push(item);start += r.end - r.start;
+    }
+    check();migrateTimeline();
+    const list = timelineCollection(type), index = list.findIndex(i => i.id === id);
+    list.splice(index, 1, ...replacements);
+    for (const shift of plan.shifts) { const r = itemRange(shift.type, shift.id); if (r) moveRange(r, shift.start); }
+    normalizeTransitions();syncAnchoredItems();
+    return { type, id, trackId: plan.trackId, start: plan.start, end: start, count: replacements.length, removedDuration: plan.removedDuration };
+  } catch (error) {
+    for (const stagedId of staged) discardStagedInstance(type, stagedId);
+    throw error;
+  }
 }

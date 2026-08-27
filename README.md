@@ -2,11 +2,11 @@
 
 > **이 브랜치는 디자인·편집 기능을 검토하는 실험판입니다.** 운영 `main`과 분리되어 있으며 아직 병합할 단계가 아닙니다.
 >
-> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 2026-08-28: 확장 가능한 영상·오디오 트랙, 독립 이동, 공백 S 삭제, 변형·크롭·중앙 정렬, 플랫폼 안전영역, 한국어 폰트 30종·모션 20종·자막 16종·합성 효과음 20종을 추가했습니다.
+> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 2026-08-28: **트래킹 모자이크·무음 구간 자동 컷·브라우저 TTS·한국어 자동자막**을 추가했습니다. API 키 없이 실행하며, 기존 번호형 트랙·변형·안전영역·소재 라이브러리도 유지합니다.
 >
 > 먼저 [실험판 실행 안내](START-HERE.md)를 읽어 주세요. Windows에서는 `start-studio.cmd`를 실행한 뒤 `http://127.0.0.1:8787/studio.html`을 열면 됩니다. [변경 범위](CHANGELOG-LAB.md) · [검증 기록](VERIFICATION.md)
 >
-> 아래 설명은 기준 버전의 원본 안내입니다. 실험판 UI의 진입점은 `public/studio.html`이고, TTS는 별도 API 설정이 필요합니다. 브라우저 전체 조작·실제 MP4 출력·한국어 TTS 음질 검수는 아직 남아 있습니다.
+> 아래 설명은 기준 버전의 원본 안내입니다. 실험판 UI의 진입점은 `public/studio.html`입니다. 최초 TTS 약 276MB·자동자막 약 66MB의 모델/엔진을 내려받고 기기에서 처리합니다. Node 79개·서버 7개 검사와 실제 WASM 한국어 생성/인식을 확인했습니다. 브라우저 전체 조작·실제 MP4 출력·사람이 듣는 음질 평가는 아직 남아 있습니다.
 
 **https://shorts-studio-75p.pages.dev**
 

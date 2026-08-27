@@ -3,7 +3,6 @@ import {project,FONTS,clipAt,clipDuration,buildLayout,totalDuration,newOverlay,s
 import {Player} from './player.js';
 import {loadFonts,measureVisual} from './render.js';
 import {detectEngine,exportVideo} from './exporter.js';
-import {mixTimeline,findUncaptioned} from './audio.js';
 import {parseSrt,buildSrt} from './srt.js';
 import {uid,clamp,download} from './util.js';
 import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,demoSound,onAssetReady} from './project-store.js';
@@ -14,15 +13,13 @@ import {transformOf,alignVisual,visualCorners} from './visual-transform.js';
 import {SAFE_AREAS,safeAreaConfig} from './safe-areas.js';
 import {SOUND_EFFECTS,createSoundEffect} from './sound-effects.js';
 import {ensureFont} from './font-catalog.js';
-import {encodeWav,transcriptionCaptions,apiError} from './ai-client.js';
+import {StudioTools} from './studio-tools.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=t=>`${Math.floor(t/60).toString().padStart(2,'0')}:${Math.floor(t%60).toString().padStart(2,'0')}`;
-let selection=null,view='media',mediaFilter='all',search='',isDemo=false,engine=null,exportCtrl=null,aiCtrl=null,importing=false,captionScope='selected',activeTransition='dissolve',draftTimer,toastTimer,dirty=false;
-let aiStatus={configured:false,provider:'openai'};
-const voice={text:'익숙한 도시를 새롭게 보는 시간. 오늘의 순간을, 나만의 이야기로 남겨보세요.',voice:'marin',tone:'natural',speed:1};
-const tones={natural:'자연스러운 한국어로, 과장 없이 따뜻하고 편안하게 읽어주세요.',energetic:'밝고 생동감 있는 한국어로 읽어주세요. 또렷하게 말하되 소리를 지르거나 과장하지 마세요.',narration:'차분한 다큐멘터리 내레이션처럼 자연스러운 한국어로 읽어주세요. 문장 사이에 짧게 쉬어주세요.',product:'신뢰감 있는 한국어 제품 소개처럼 읽어주세요. 숫자와 제품명을 또렷하게 발음하고 광고조는 절제하세요.'};
+let selection=null,view='media',mediaFilter='all',search='',isDemo=false,engine=null,exportCtrl=null,importing=false,captionScope='selected',activeTransition='dissolve',draftTimer,toastTimer,dirty=false;
+let smartTools;
 let safeConfig=safeAreaConfig('shorts'),safeEnabled=false,soundPreview=null,soundPreviewUrl=null;
 const player=new Player($('preview'),{onTick:tick});
 const history=new History(()=>{selection=validSelection();refresh();scheduleDraft();});
@@ -30,7 +27,7 @@ const timeline=new Timeline({
   select:(type,id)=>select(type,id,{timeline:false}),gap:gap=>select('gap',gap.id,{gap,timeline:false}),
   removeTrack:id=>{try{edit('빈 트랙 삭제',()=>removeTimelineTrack(id));}catch(error){toast(error.message);}},
   sound:id=>SOUND_EFFECTS.find(s=>s.id===id),graphic:id=>GRAPHICS.find(g=>g.id===id),pause:()=>player.pause(),seek:t=>player.seek(t,{allowBeyond:true}),preview:()=>player.invalidate(),
-  busy:()=>!!(exportCtrl||importing),error:message=>toast(message),
+  busy:()=>!!(exportCtrl||importing||smartTools?.busy),error:message=>toast(message),
   commit:(before,label)=>commit(before,label),transition:(id,rightId)=>selectTransition(id,rightId),
   drop:async(kind,id,t,lane,plan)=>{
     if(kind==='asset')return placeAsset(id,t,lane,plan);
@@ -41,6 +38,8 @@ const timeline=new Timeline({
     if(type==='sfx')return addSound(key,t,lane,plan);
   },
 });
+
+smartTools=new StudioTools({player,timeline,selection:()=>selection,view:()=>view,toast,renderLibrary,refresh,commit,select,saveDraft:()=>{dirty=true;scheduleDraft();}});
 
 onAssetReady(()=>player.invalidate());
 
@@ -70,7 +69,7 @@ function updateToolbar(){
 function select(type,id,options={}){
   selection={type,id,...(options.gap||{})};player.selection=selection;if(options.timeline!==false)timeline.select(type,id);
   player.invalidate();
-  renderInspector();if(view==='media')document.querySelectorAll('[data-asset]').forEach(n=>n.classList.toggle('selected',type==='asset'&&n.dataset.asset===id));if(view==='captions')renderCaptionList();if(view==='transitions')renderLibrary();
+  renderInspector();if(view==='media')document.querySelectorAll('[data-asset]').forEach(n=>n.classList.toggle('selected',type==='asset'&&n.dataset.asset===id));if(['captions','transitions','mosaic','silence'].includes(view))renderLibrary();
   updateToolbar();if(window.innerWidth<651)$('workbench').classList.remove('show-library');
 }
 function selectTransition(id,rightId){
@@ -106,16 +105,17 @@ function setView(next){
 }
 
 function renderLibrary(){
-  const titles={media:'소재 라이브러리',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'AI 보이스',sounds:'효과음 라이브러리'};
-  $('libraryTitle').textContent=titles[view];$('libraryCount').textContent=view==='media'?String(assets.size).padStart(2,'0'):view==='graphics'?String(GRAPHICS.length):view==='captions'?String(CAPTIONS.length):view==='transitions'?'04':view==='sounds'?String(SOUND_EFFECTS.length):'AI';
+  const titles={media:'소재 라이브러리',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'브라우저 AI 음성',sounds:'효과음 라이브러리',mosaic:'트래킹 모자이크',silence:'무음 구간 자동 컷'};
+  $('libraryTitle').textContent=titles[view];$('libraryCount').textContent=view==='media'?String(assets.size).padStart(2,'0'):view==='graphics'?String(GRAPHICS.length):view==='captions'?String(CAPTIONS.length):view==='transitions'?'04':view==='sounds'?String(SOUND_EFFECTS.length):'LOCAL';
   const host=$('libraryContent');
+  if(['voice','mosaic','silence'].includes(view)){smartTools.render(view,host);return;}
   if(view==='media'){
     host.innerHTML=`<button class="import-zone" data-action="import"><span class="import-plus">＋</span><strong>파일 가져오기</strong><span>영상 · 이미지 · 오디오를 한곳에</span><small>또는 여기에 파일을 놓아주세요</small></button><div class="filter-tabs" aria-label="소재 종류">${[['all','전체'],['video','영상'],['image','이미지'],['audio','오디오']].map(([key,label])=>`<button data-filter="${key}" class="${mediaFilter===key?'active':''}">${label}</button>`).join('')}</div><label class="search-box"><span>⌕</span><input id="mediaSearch" type="search" placeholder="소재 검색" aria-label="소재 검색" value="${esc(search)}"><kbd>/</kbd></label><div id="assetGrid" class="asset-grid"></div><p class="library-hint">더블클릭·＋는 재생 막대 위치에 추가합니다.<br>끌어 넣을 때 초록색 범위가 실제 배치 위치예요.<br>이미지 기본 3초 · 영상은 원본 길이</p>`;
     renderAssets();
   }else if(view==='graphics'){
     host.innerHTML=`<p class="preset-intro">움직임 하나로 장면에 포인트를.<br>클릭하면 선택한 영상 트랙에 추가돼요.</p><div class="preset-grid">${GRAPHICS.map(g=>`<button class="preset-card" draggable="true" data-preset="g:${g.id}" aria-label="${g.name} 추가"><div class="preset-art ${g.art}"><span>${g.label}</span><small>MOTION GRAPHIC</small></div><strong>${g.name}</strong><small>${g.hint}</small></button>`).join('')}</div><p class="library-hint">문구·색상·크기·표시 시간은<br>오른쪽 속성에서 자유롭게 바꿔보세요.</p>`;
   }else if(view==='captions'){
-    host.innerHTML=`<div class="segmented"><button data-scope="selected" class="${captionScope==='selected'?'active':''}">선택 자막에 적용</button><button data-scope="all" class="${captionScope==='all'?'active':''}">전체 자막에 적용</button></div><div class="section-label">자막 스타일 <span>${CAPTIONS.length} STYLES</span></div><div class="preset-grid">${CAPTIONS.map(c=>`<button class="preset-card" draggable="true" data-preset="c:${c.id}" aria-label="${c.name} 자막 스타일"><div class="preset-art caption-preview ${c.art}"><span>${c.label}</span></div><strong>${c.name}</strong></button>`).join('')}</div><div class="section-label">자막 편집 <span>${project.captions.length}개</span></div><button class="button primary wide" data-action="add-caption">＋ 현재 위치에 자막</button><div class="field-grid"><button class="button subtle" data-action="import-srt">SRT 가져오기</button><button class="button subtle" data-action="export-srt">SRT 저장</button></div><button class="button secondary wide" data-action="auto-caption" ${!aiStatus.configured?'disabled':''}>${aiCtrl?'처리 취소':'자동 자막 만들기'}</button><p class="inspector-note">${aiStatus.configured?'실행 전 확인 후 오디오를 OpenAI로 전송합니다. 배경음악은 제외합니다.':'자동 자막은 AI 연결 후 사용할 수 있어요. 실험판은 원본 자막 서버를 호출하지 않습니다.'}</p><div id="captionList" class="caption-list"></div>`;
+    host.innerHTML=`${smartTools.captionControls()}<div class="segmented"><button data-scope="selected" class="${captionScope==='selected'?'active':''}">선택 자막에 적용</button><button data-scope="all" class="${captionScope==='all'?'active':''}">전체 자막에 적용</button></div><div class="section-label">자막 스타일 <span>${CAPTIONS.length} STYLES</span></div><div class="preset-grid">${CAPTIONS.map(c=>`<button class="preset-card" draggable="true" data-preset="c:${c.id}" aria-label="${c.name} 자막 스타일"><div class="preset-art caption-preview ${c.art}"><span>${c.label}</span></div><strong>${c.name}</strong></button>`).join('')}</div><div class="section-label">자막 편집 <span>${project.captions.length}개</span></div><button class="button primary wide" data-action="add-caption">＋ 현재 위치에 자막</button><div class="field-grid"><button class="button subtle" data-action="import-srt">SRT 가져오기</button><button class="button subtle" data-action="export-srt">SRT 저장</button></div><div id="captionList" class="caption-list"></div>`;
     renderCaptionList();
   }else if(view==='transitions'){
     const pair=currentTransition(),effect=pair?.type||activeTransition;
@@ -126,8 +126,7 @@ function renderLibrary(){
     host.innerHTML='<p class="preset-intro">컷 사이에 리듬을 더하세요.<br>미리 듣고, ＋ 또는 드래그로 넣을 수 있어요.</p>'+
       ['전환','클릭','알림','강조'].map(category=>'<div class="section-label">'+category+'</div><div class="sound-list">'+SOUND_EFFECTS.filter(s=>s.category===category).map(s=>'<article class="sound-card" draggable="true" data-preset="sfx:'+s.id+'"><button class="sound-play" data-preview-sound="'+s.id+'" aria-label="'+s.name+' 미리 듣기"><span class="play-symbol" aria-hidden="true"></span></button><div><strong>'+s.name+'</strong><small>'+s.duration.toFixed(2)+'초 · 합성 효과음</small></div><button class="sound-add" data-add-sound="'+s.id+'" aria-label="'+s.name+' 추가">＋</button></article>').join('')+'</div>').join('')+
       '<p class="library-hint">이 실험판이 직접 합성한 20종입니다.<br>외부 음원 샘플 없이 생성하며 영상에 사용할 수 있어요.</p><div class="external-sounds"><strong>더 많은 소리를 찾고 있다면</strong><a class="button secondary wide" href="https://www.myinstants.com/ko/instant/app/" target="_blank" rel="noopener noreferrer">Myinstants에서 찾기 ↗</a><p class="inspector-note">외부 사이트입니다. 자동 다운로드·음원 수집은 하지 않습니다. 다운로드 가능 여부와 상업적 재사용 권한은 다르므로, 권리를 확인한 파일만 소재함에 가져오세요.</p></div>';
-  }else{
-    host.innerHTML=`<p class="preset-intro">문장을 쓰고, 이야기의 목소리를 고르세요.</p><div class="voice-card"><div class="voice-avatar">≋</div><div><strong>OpenAI Voice</strong><p>gpt-4o-mini-tts · 한국어 지원</p></div></div><label class="field-label">보이스<select id="ttsVoice">${['marin','cedar','coral','onyx','nova','sage','shimmer','alloy','ash','ballad','echo','fable','verse'].map(v=>`<option value="${v}" ${v===voice.voice?'selected':''}>${v[0].toUpperCase()+v.slice(1)}</option>`).join('')}</select></label><label class="field-label">말하기 스타일<select id="ttsTone">${[['natural','자연스럽게'],['energetic','밝고 생동감 있게'],['narration','차분한 내레이션'],['product','또렷한 제품 소개']].map(([v,n])=>`<option value="${v}" ${v===voice.tone?'selected':''}>${n}</option>`).join('')}</select></label><label class="property-row"><span>속도</span><input id="ttsSpeed" type="range" min=".75" max="1.25" step=".05" value="${voice.speed}" aria-label="TTS 말하기 속도"><output id="ttsSpeedOut">${voice.speed.toFixed(2)}×</output></label><label class="field-label">원고<textarea id="ttsText" class="tts-text" maxlength="2000" placeholder="들려주고 싶은 이야기를 적어보세요.">${esc(voice.text)}</textarea></label><p class="inspector-note" id="ttsCount">${voice.text.length} / 2,000자</p><button class="button primary wide" data-action="generate-voice" ${!aiStatus.configured?'disabled':''}>${aiCtrl?'생성 취소':'음성 생성 후 타임라인에 추가'}</button><div class="voice-status">${aiStatus.configured?'설정됨 · 실제 연결/한국어 음질 미검증<br>생성 전 확인 후 API 이용료가 발생할 수 있어요.':'연결 필요<br>API 키는 화면에 입력하지 않습니다. 로컬 서버에 키를 설정한 뒤 사용할 수 있어요.'}</div><p class="library-hint">AI 생성 음성입니다. 원고는 음성 생성 시 OpenAI로 전송됩니다. 생성한 음성은 소재함과 선택한 오디오 트랙에 추가돼요.</p><button class="button subtle wide" data-action="refresh-ai">연결 상태 다시 확인</button>`;
+
   }
 }
 
@@ -165,6 +164,7 @@ function renderInspector(){
   const name=item.name||item.text;
   let html=`<div class="selected-item">${item.thumb?`<img src="${item.thumb}" alt="">`:`<div class="item-icon">${type==='audio'?'♫':type==='caption'?'T':'✧'}</div>`}<div><strong>${esc(name)}</strong><small>${type==='clip'?`${item.type==='image'?'이미지':'영상'} 클립 · ${clipDuration(item).toFixed(2)}초`:type==='audio'?(item.aiGenerated?'AI 생성 음성':'독립 오디오 클립'):`${item.start.toFixed(2)} → ${item.end.toFixed(2)}초`}</small></div></div>`;
   html+=section('트랙',selectField('배치 트랙','trackId',trackIdFor(type,item),timelineTracks().filter(t=>t.kind===trackKind(type)).map(t=>[t.id,trackLabel(t.id)]))+'<p class="inspector-note">트랙 사이로 직접 끌어 옮길 수도 있어요. 다른 트랙은 따라오지 않습니다.</p>');
+  html+=smartTools.inspector(type,item);
   if(type==='clip'){
     html+=section('원본 맞춤',selectField('맞춤','fit',item.fit,[['cover','꽉 채우기'],['contain','전체 보이기']])+selectField('여백','bg',item.bg,[['transparent','투명 · 아래 트랙 보이기'],['blur','흐린 원본'],['black','검정'],['white','흰색']]));
     const clipRange=itemRange('clip',item.id);
@@ -206,7 +206,7 @@ function renderInspector(){
 }
 
 async function importFiles(files){
-  if(aiCtrl)return toast('AI 처리를 마치거나 취소한 뒤 파일을 가져와 주세요.');
+  if(smartTools.busy)return toast('AI 처리를 마치거나 취소한 뒤 파일을 가져와 주세요.');
   if(importing||exportCtrl)return;importing=true;player.pause();const before=captureDocument();const errors=[];let added=0;
   $('workbench').inert=true;document.querySelector('.appbar').inert=true;toast('소재를 불러오고 있어요…');
   try{for(const file of files){
@@ -361,42 +361,8 @@ function applyProperty(input){
   if(prop==='font'||prop==='style.font'||prop==='text')prepareFonts();
 }
 
-async function checkAI(){try{const r=await fetch('/api/ai/status');aiStatus=r.ok?await r.json():{configured:false};}catch{aiStatus={configured:false};}if(view==='voice'||view==='captions')renderLibrary();}
-async function generateVoice(){
-  if(aiCtrl){aiCtrl.abort();return;}if(!aiStatus.configured)return toast('로컬 서버에 AI 연결이 필요합니다.');
-  if(!voice.text.trim())return toast('읽을 원고를 입력해 주세요.');
-  if(!confirm('입력한 원고를 OpenAI로 보내 음성을 생성합니다. 별도 API 이용료가 발생할 수 있습니다. 생성할까요?'))return;
-  aiCtrl=new AbortController();renderLibrary();const start=player.time,before=JSON.stringify(captureDocument());
-  try{
-    const r=await fetch('/api/tts',{method:'POST',headers:{'Content-Type':'application/json','X-Studio-Consent':'text-to-openai'},body:JSON.stringify({text:voice.text,voice:voice.voice,instructions:tones[voice.tone],speed:voice.speed}),signal:aiCtrl.signal});
-    if(!r.ok)throw await apiError(r);
-    const blob=await r.blob();if(blob.size<44)throw new Error('생성된 음성 파일이 비어 있습니다.');
-    const asset=await addAsset(new File([blob],`AI 보이스 ${voice.voice} ${new Date().toTimeString().slice(0,8).replace(/:/g,'-')}.wav`,{type:'audio/wav'}),{aiGenerated:true});
-    if(before===JSON.stringify(captureDocument())&&!importing&&!exportCtrl){await placeAsset(asset.id,start,timeline.preferredTrack('audio'));toast('AI 음성을 만들고 오디오 트랙에 추가했어요.');}
-    else{dirty=true;scheduleDraft();refresh();toast('편집 내용이 바뀌어 AI 음성은 소재함에만 추가했어요. 원하는 곳으로 끌어 넣으세요.');}
-  }catch(e){toast(e.name==='AbortError'?'음성 생성을 취소했어요. 서버에서 이미 처리한 요청은 과금될 수 있습니다.':e.message);}finally{aiCtrl=null;renderLibrary();}
-}
-async function autoCaption(){
-  if(aiCtrl){aiCtrl.abort();return;}if(!aiStatus.configured)return toast('자동 자막은 AI 연결 후 사용할 수 있어요.');
-  if(!project.clips.length)return toast('먼저 영상 클립을 추가해 주세요.');
-  if(!confirm('영상의 오디오와 보이스 트랙을 OpenAI로 전송합니다. 배경음악은 제외합니다. 기존 자막을 교체하며 API 이용료가 발생할 수 있습니다. 계속할까요?'))return;
-  const before=captureDocument();aiCtrl=new AbortController();player.pause();renderLibrary();
-  try{
-    toast('자막용 오디오를 준비하고 있어요…');
-    const buffer=await mixTimeline({includeBgm:false,includeVoice:true,signal:aiCtrl.signal});
-    if(!buffer)throw new Error('인식할 영상 오디오 또는 보이스 트랙이 없습니다.');
-    const wav=encodeWav(buffer);if(wav.size>22*1024*1024)throw new Error('자동 자막은 오디오 22MB까지 처리합니다. 짧게 나눠 주세요.');
-    const response=await fetch('/api/transcribe',{method:'POST',headers:{'Content-Type':'audio/wav','X-Studio-Consent':'audio-to-openai'},body:wav,signal:aiCtrl.signal});
-    if(!response.ok)throw await apiError(response);
-    const caps=transcriptionCaptions(await response.json());if(!caps.length)throw new Error('인식한 말소리가 없습니다. 기존 자막은 유지합니다.');
-    if(JSON.stringify(before)!==JSON.stringify(captureDocument())||importing||exportCtrl)throw new Error('처리 중 편집 내용이 바뀌어 자막을 적용하지 않았어요. 현재 편집을 유지합니다.');
-    project.captions=caps;selection={type:'caption',id:caps[0].id};
-    const gaps=findUncaptioned(buffer,caps);commit(before,'자동 자막 생성');toast(`${caps.length}개 자막 생성${gaps.length?` · 누락 의심 ${gaps.length}구간, 재생하며 확인해 주세요.`:''}`);
-  }catch(e){toast(e.name==='AbortError'?'자동 자막 처리를 취소했어요.':e.message);}finally{aiCtrl=null;renderLibrary();}
-}
-
 async function startExport(){
-  if(aiCtrl)return toast('AI 처리를 마치거나 취소한 뒤 내보내 주세요.');
+  if(smartTools.busy)return toast('AI 처리를 마치거나 취소한 뒤 내보내 주세요.');
   if(exportCtrl||importing||!engine?.ok||totalDuration()<=0)return;
   if(engine.mode==='recorder')return toast('이 실험판의 정확한 프레임 내보내기는 WebCodecs 지원 Chrome 또는 Edge가 필요합니다.');
   exportCtrl=new AbortController();player.pause();
@@ -413,11 +379,11 @@ async function startExport(){
   finally{exportCtrl=null;$('startExport').disabled=false;$('exportDialog').querySelector('form button').disabled=false;$('workbench').inert=false;document.querySelector('.appbar').inert=false;$('cancelExport').hidden=true;for(const id of ['exportResolution','exportFps','exportQuality'])$(id).disabled=false;refresh();}
 }
 function openExport(){if(totalDuration()<=0)return toast('타임라인에 소재 또는 자막을 추가해 주세요.');player.pause();$('exportProjectName').textContent=documentName;$('exportSummary').textContent=`${project.clips.length} 클립 · ${totalDuration().toFixed(2)}초 · 9:16 · ${engine?.label||'확인 중'}`;$('exportDialog').showModal();}
-function saveProjectFile(){download(packProject(),`${documentName.replace(/[<>:"/\\|?*]/g,'_')}.shorts`);$('saveStatus').textContent='프로젝트 파일 저장';dirty=false;toast('편집 정보와 소재가 포함된 .shorts 프로젝트를 저장했어요.');}
-async function openProjectFile(file){if(!file||importing||exportCtrl)return;if(aiCtrl)return toast('AI 처리를 마치거나 취소한 뒤 프로젝트를 열어 주세요.');player.pause();importing=true;clearTimeout(draftTimer);$('workbench').inert=true;document.querySelector('.appbar').inert=true;try{await unpackProject(file);history.clear();isDemo=false;selection=null;refresh();scheduleDraft();toast('프로젝트를 열었어요.');}catch(e){toast(e.message);}finally{importing=false;$('workbench').inert=false;document.querySelector('.appbar').inert=false;refresh();}}
+function saveProjectFile(){try{download(packProject(),`${documentName.replace(/[<>:"/\\|?*]/g,'_')}.shorts`);$('saveStatus').textContent='프로젝트 파일 저장';dirty=false;toast('편집 정보와 소재가 포함된 .shorts 프로젝트를 저장했어요.');}catch(error){toast(error.message);}}
+async function openProjectFile(file){if(!file||importing||exportCtrl)return;if(smartTools.busy)return toast('AI 처리를 마치거나 취소한 뒤 프로젝트를 열어 주세요.');player.pause();importing=true;clearTimeout(draftTimer);$('workbench').inert=true;document.querySelector('.appbar').inert=true;try{await unpackProject(file);history.clear();isDemo=false;selection=null;refresh();scheduleDraft();toast('프로젝트를 열었어요.');}catch(e){toast(e.message);}finally{importing=false;$('workbench').inert=false;document.querySelector('.appbar').inert=false;refresh();}}
 
 async function loadDemo(){
-  if(aiCtrl||importing||exportCtrl)return toast('진행 중인 작업을 마치거나 취소한 뒤 샘플을 열어 주세요.');
+  if(smartTools.busy||importing||exportCtrl)return toast('진행 중인 작업을 마치거나 취소한 뒤 샘플을 열어 주세요.');
   return mediaEdit(async()=>{
   const before=captureDocument();clearTimeout(draftTimer);
   try {
@@ -492,9 +458,6 @@ function routeAction(action){
     alignVisual(item,measureVisual(player.ctx,selection.type,item,canvas.width,canvas.height,player.time),canvas.width,canvas.height,action==='align-x'?'x':'y');
   });
   if(action==='all-transitions')applyTransition(activeTransition,true);
-  if(action==='generate-voice')generateVoice();
-  if(action==='auto-caption')autoCaption();
-  if(action==='refresh-ai')checkAI().then(()=>toast(aiStatus.configured?'설정을 확인했어요. 실제 생성은 버튼을 누른 뒤 진행됩니다.':'아직 AI 연결이 설정되지 않았어요.'));
 }
 
 function wire(){
@@ -540,7 +503,7 @@ function wire(){
   $('libraryContent').addEventListener('keydown',e=>{const card=e.target.closest('[data-asset]');if(card&&e.key==='Enter'){e.preventDefault();placeAsset(card.dataset.asset).catch(e=>toast(e.message));}});
   $('libraryContent').addEventListener('dragstart',e=>{if(exportCtrl||importing){e.preventDefault();return;}const a=e.target.closest('[data-asset]'),p=e.target.closest('[data-preset]');if(a){e.dataTransfer.setData('application/x-shorts-asset',a.dataset.asset);timeline.beginExternalDrag('asset',a.dataset.asset);}else if(p){e.dataTransfer.setData('application/x-shorts-preset',p.dataset.preset);timeline.beginExternalDrag('preset',p.dataset.preset);}e.dataTransfer.effectAllowed='copy';});
   $('libraryContent').addEventListener('change',e=>{if(e.target.id==='transitionDuration'){const pair=currentTransition();if(pair&&pair.type!=='cut')applyTransition(pair.type);}});
-  $('libraryContent').addEventListener('input',e=>{if(e.target.id==='mediaSearch'){search=e.target.value;renderAssets();}if(e.target.id==='ttsText'){voice.text=e.target.value;$('ttsCount').textContent=`${voice.text.length} / 2,000자`;}if(e.target.id==='ttsVoice')voice.voice=e.target.value;if(e.target.id==='ttsTone')voice.tone=e.target.value;if(e.target.id==='ttsSpeed'){voice.speed=Number(e.target.value);$('ttsSpeedOut').textContent=voice.speed.toFixed(2)+'×';}});
+  $('libraryContent').addEventListener('input',e=>{if(e.target.id==='mediaSearch'){search=e.target.value;renderAssets();}});
   $('inspectorContent').addEventListener('focusin',e=>{if(e.target.dataset.prop)controlBefore.set(e.target,captureDocument());});
   $('inspectorContent').addEventListener('pointerdown',e=>{if(e.target.dataset.prop&&!controlBefore.has(e.target))controlBefore.set(e.target,captureDocument());});
   $('inspectorContent').addEventListener('input',e=>{if(e.target.dataset.prop&&!stagedProperties.has(e.target.dataset.prop)){if(!controlBefore.has(e.target))controlBefore.set(e.target,captureDocument());applyProperty(e.target);}});
@@ -597,7 +560,7 @@ function wire(){
 }
 
 async function init(){
-  wire();checkAI();
+  wire();
   engine=await detectEngine();$('engineLabel').textContent=engine.label;
   try{if(new URLSearchParams(location.search).has('empty')){setDocumentName('새 프로젝트');refresh();}else if(await loadDraft()){selection=null;refresh();$('saveStatus').textContent='저장된 작업 복구';}else await loadDemo();}
   catch(e){console.warn('초기 프로젝트 로딩 실패',e);try{await loadDemo();}catch{refresh();toast('샘플을 불러오지 못했어요. 파일 가져오기로 시작해 주세요.');}}

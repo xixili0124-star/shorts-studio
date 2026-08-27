@@ -8,6 +8,7 @@ import {
 import { withVisualTransform, visualCorners } from './visual-transform.js';
 import { safeAreaConfig, safeAreaRect } from './safe-areas.js';
 import { ensureFont } from './font-catalog.js';
+import { redactSource } from './mosaic.js';
 
 const REF_H = 1920; // 스타일 수치의 기준 높이 (해상도가 달라져도 같은 비율로 보이게)
 const plateCache = new WeakMap();
@@ -33,8 +34,9 @@ export function renderFrame(ctx, t, opts = {}) {
   ctx.fillStyle=band?tpl.bg:'#000';ctx.fillRect(0,0,W,H);
   const atTime=t===layout.total?Math.max(0,t-1e-7):t;
   const paintMedia=(target,at)=>{
-    const source=opts.source?.(at.clip,at.local);
+    let source=opts.source?.(at.clip,at.local);
     if(!source?.img||source.w<=0||source.h<=0)return;
+    source=redactSource(ctx,source,at.clip,at.clip.trimStart+at.local);
     paintTransformed(target,'clip',at.clip,dest=>{
       if(band&&at.trackId===visualTracks[0]?.id){
         dest.save();dest.beginPath();dest.rect(band.x,band.y,band.w,band.h);dest.clip();

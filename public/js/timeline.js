@@ -1,19 +1,19 @@
 // 드래그 중에는 잡은 DOM을 유지하고, 놓을 때 한 번만 편집 명령을 적용합니다.
-import { project, buildLayout, totalDuration, transitionPairs, syncAnchoredItems } from './state.js';
+import { project, buildLayout, totalDuration, transitionPairs, syncAnchoredItems, timelineTracks, trackIdFor, trackLabel, trackItems, trackKind } from './state.js';
 import { assets, captureDocument } from './project-store.js';
-import { frameTime, itemRange, planVideoPlacement, placeVideoClip, planClipTrim, applyClipTrim, setItemRange } from './timeline-edits.js';
+import { frameTime, itemRange, planVideoPlacement, placeVideoClip, planClipTrim, applyClipTrim, setItemRange, planPlacement, placeTimelineItem, trackGaps, planItemTrim, applyItemTrim } from './timeline-edits.js';
 import { clamp } from './util.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stamp = t => Math.floor(t/60).toString().padStart(2,'0')+':'+Math.floor(t%60).toString().padStart(2,'0');
 const precise = t => stamp(t)+'.'+Math.floor((t % 1) * 100).toString().padStart(2,'0');
-const trackIds = { graphics:'graphicTrack', captions:'captionTrack', clips:'videoTrack', audio:'audioTrack', voice:'voiceTrack' };
-const trackNames = { graphics:'G1 그래픽', captions:'C1 자막', clips:'V1 영상', audio:'A1 오디오', voice:'A2 보이스' };
+
 
 export class Timeline {
   constructor(callbacks) {
     this.callbacks=callbacks;this.zoom=70;this.snapping=true;this.selection=null;this.time=0;this.dragging=false;
+    this.activeTrackId='v1';this.activeAudioTrackId='a1';
     this.scroll=$('timelineScroll');this.canvas=$('timelineCanvas');this.external=null;this.preview=null;
     $('timelineZoom').oninput=e=>this.setZoom(Number(e.target.value));
     $('zoomIn').onclick=()=>this.setZoom(this.zoom*1.25);
@@ -23,6 +23,21 @@ export class Timeline {
     this.canvas.addEventListener('click',e=>{
       const button=e.target.closest('[data-transition]');
       if(button&&!this.dragging){e.stopPropagation();this.callbacks.transition(button.dataset.transition,button.dataset.right);}
+    });
+    $('trackHeaders').addEventListener('click',e=>{
+      const remove=e.target.closest('[data-remove-track]');
+      if(remove){this.callbacks.removeTrack?.(remove.dataset.removeTrack);return;}
+      const head=e.target.closest('[data-track-select]');
+      if(head)this.activateTrack(head.dataset.trackSelect);
+    });
+    this.scroll.addEventListener('scroll',()=>{$('trackHeaders').style.transform='translateY(-'+this.scroll.scrollTop+'px)';});
+    this.canvas.addEventListener('keydown',e=>{
+      if(!['Enter',' '].includes(e.key)||this.callbacks.busy?.())return;
+      const button=e.target.closest('.timeline-block,.timeline-gap,.transition-chip');
+      if(!button)return;e.preventDefault();e.stopPropagation();
+      if(button.dataset.type==='gap')this.chooseGap(button.dataset.id);
+      else if(button.dataset.type==='transition')this.callbacks.transition(button.dataset.id,button.dataset.right);
+      else{this.select(button.dataset.type,button.dataset.id);this.callbacks.select(button.dataset.type,button.dataset.id);}
     });
     this.canvas.addEventListener('dragover',e=>this.externalOver(e));
     this.canvas.addEventListener('dragleave',e=>{if(!this.canvas.contains(e.relatedTarget)){this.clearPreview();this.stopScroll();}});
@@ -36,12 +51,31 @@ export class Timeline {
   fit(){this.setZoom((this.scroll.clientWidth-70)/Math.max(4,totalDuration()));}
   toggleSnap(){this.snapping=!this.snapping;$('snap').classList.toggle('active',this.snapping);$('snap').setAttribute('aria-pressed',this.snapping);}
   xTime(x){return clamp((x-this.canvas.getBoundingClientRect().left)/this.zoom,0,86400);}
+  preferredTrack(kind) {
+    const id=kind==='audio'?this.activeAudioTrackId:this.activeTrackId;
+    return timelineTracks().find(t=>t.id===id&&t.kind===kind)?.id||timelineTracks().find(t=>t.kind===kind)?.id;
+  }
+  activateTrack(id) {
+    const track=timelineTracks().find(t=>t.id===id);if(!track)return;
+    if(track.kind==='audio')this.activeAudioTrackId=id;else this.activeTrackId=id;
+    $('trackHeaders').querySelectorAll('[data-track-select]').forEach(n=>{
+      const active=n.dataset.trackSelect===(track.kind==='audio'?this.activeAudioTrackId:this.activeTrackId);
+      n.classList.toggle('active',active);n.setAttribute('aria-pressed',String(active));
+    });
+  }
   select(type,id,rightId){
-    this.selection=type?{type,id,rightId}:null;
-    this.canvas.querySelectorAll('.timeline-block,.transition-chip').forEach(node=>{
+    const gap=type==='gap'?timelineTracks().flatMap(t=>trackGaps(t.id)).find(g=>g.id===id):null;
+    this.selection=type?{type,id,rightId,...(gap||{})}:null;
+    const range=type==='transition'?itemRange('clip',id):itemRange(type,id);
+    if(gap||range)this.activateTrack((gap||range).trackId);
+    this.canvas.querySelectorAll('.timeline-block,.transition-chip,.timeline-gap').forEach(node=>{
       const selected=node.dataset.type===type&&node.dataset.id===id&&(!rightId||node.dataset.right===rightId);
       node.classList.toggle('selected',selected);node.setAttribute('aria-pressed',String(selected));
     });
+  }
+  chooseGap(id) {
+    const gap=timelineTracks().flatMap(t=>trackGaps(t.id)).find(g=>g.id===id);if(!gap)return;
+    this.callbacks.pause();this.select('gap',id);this.callbacks.gap?.(gap);
   }
   tick(t){this.time=t;$('playhead').style.left=t*this.zoom+'px';}
   snapTime(t,exclude,duration=0){
@@ -74,21 +108,30 @@ export class Timeline {
     if(this.dragging)return;
     const layout=buildLayout(),width=Math.max(this.scroll.clientWidth,Math.ceil((Math.max(layout.total,this.time)+3)*this.zoom));
     this.canvas.style.width=width+'px';this.renderRuler(width);
-    $('graphicTrack').innerHTML=project.overlays.filter(o=>o.end>o.start).map(o=>this.block('graphic',o,o.start,o.end-o.start)).join('');
-    $('captionTrack').innerHTML=project.captions.filter(c=>c.end>c.start).map(c=>this.block('caption',c,c.start,c.end-c.start)).join('');
-    $('videoTrack').innerHTML=layout.entries.map(e=>this.block('clip',e.clip,e.start,e.duration,e.start+e.overlapIn/2,e.end-e.overlapOut/2)).join('')+
-      transitionPairs().map(pair=>this.transitionButton(pair)).join('');
-    for(const lane of ['music','voice']){
-      $(lane==='music'?'audioTrack':'voiceTrack').innerHTML=(project.audio.tracks||[]).filter(t=>(t.lane||'music')===lane).map(t=>this.block('audio',t,t.start,t.trimEnd-t.trimStart)).join('');
-    }
-    $('totalDuration').textContent=stamp(layout.total);$('sequenceInfo').textContent=project.clips.length+' 클립 · '+layout.total.toFixed(1)+'초';
+    const registry=timelineTracks();
+    const rows=[...registry.filter(t=>t.kind==='visual').reverse(),...registry.filter(t=>t.kind==='audio')];
+    const pairs=transitionPairs();
+    $('timelineRows').innerHTML=rows.map(track=>{
+      const items=trackItems(track.id,project,layout);
+      return '<div id="track-'+track.id+'" class="track '+(track.kind==='audio'?'audio-track':'visual-track')+'" data-track="'+track.id+'" data-kind="'+track.kind+'">'+
+        trackGaps(track.id).map(gap=>'<div tabindex="0" role="button" aria-pressed="false" aria-label="'+trackLabel(track.id)+' 빈 공간 '+gap.duration.toFixed(2)+'초 · S로 닫기" class="timeline-gap" data-type="gap" data-id="'+gap.id+'" style="left:'+gap.start*this.zoom+'px;width:'+Math.max(1,gap.duration*this.zoom-1)+'px"><span>빈 공간 · '+gap.duration.toFixed(2)+'초</span></div>').join('')+
+        items.map(e=>this.block(e.type,e.item,e.start,e.duration,e.start+(e.overlapIn||0)/2,e.end-(e.overlapOut||0)/2)).join('')+
+        pairs.filter(p=>p.trackId===track.id).map(pair=>this.transitionButton(pair)).join('')+'</div>';
+    }).join('');
+    $('trackHeaders').innerHTML=rows.map(track=>{
+      const count=trackItems(track.id,project,layout).length;
+      const active=track.id===(track.kind==='audio'?this.preferredTrack('audio'):this.preferredTrack('visual'));
+      return '<div class="track-head '+track.kind+'-head"><button class="track-selector '+(active?'active':'')+'" data-track-select="'+track.id+'" aria-pressed="'+active+'" title="새 클립 추가 대상 트랙"><span class="track-code">'+(track.kind==='audio'?'A':'V')+'</span><strong>'+trackLabel(track.id)+'</strong><small>'+count+'</small></button><button class="remove-track" data-remove-track="'+track.id+'" aria-label="'+trackLabel(track.id)+' 빈 트랙 삭제" '+(count||registry.filter(t=>t.kind===track.kind).length<2?'disabled':'')+'>×</button></div>';
+    }).join('');
+    $('trackHeaders').style.transform='translateY(-'+this.scroll.scrollTop+'px)';
+    $('totalDuration').textContent=stamp(layout.total);$('sequenceInfo').textContent=layout.items.length+' 클립 · '+layout.total.toFixed(1)+'초';
     this.tick(this.time);this.select(this.selection?.type,this.selection?.id,this.selection?.rightId);
   }
   transitionButton(pair){
     const name={cut:'바로 연결',dissolve:'디졸브',fade:'검정 페이드',flash:'화이트 플래시'}[pair.type];
     const label=(pair.left.clip.name||'앞 클립')+' ↔ '+(pair.right.clip.name||'뒤 클립')+' · '+name+(pair.duration?' '+pair.duration.toFixed(2)+'초':'');
     const band=pair.duration?'<span class="transition-band" style="left:'+pair.start*this.zoom+'px;width:'+pair.duration*this.zoom+'px"></span>':'';
-    return band+'<button type="button" class="transition-chip '+(pair.duration?'':'cut-connector')+'" data-type="transition" data-id="'+pair.left.clip.id+'" data-transition="'+pair.left.clip.id+'" data-right="'+pair.right.clip.id+'" aria-label="'+esc(label)+' 전환 편집" aria-pressed="false" style="left:'+pair.center*this.zoom+'px" title="'+esc(label)+' · 클릭하여 편집">'+(pair.duration?'◩':'＋')+'</button>';
+    return band+'<button type="button" class="transition-chip '+(pair.duration?'':'cut-connector')+'" data-type="transition" data-id="'+pair.left.clip.id+'" data-transition="'+pair.left.clip.id+'" data-right="'+pair.right.clip.id+'" aria-label="'+esc(label)+' 전환 편집" aria-pressed="false" style="left:'+pair.center*this.zoom+'px" title="'+esc(label)+' · 클릭하여 편집">'+'<span class="'+(pair.duration?'transition-symbol':'plus-symbol')+'" aria-hidden="true"></span></button>';
   }
   block(type,item,start,duration,visibleStart=start,visibleEnd=start+duration){
     const klass={clip:'video',caption:'caption',graphic:'graphic',audio:'audio'}[type],label=item.name||item.text||'클립';
@@ -105,38 +148,44 @@ export class Timeline {
   endExternalDrag(){this.external=null;this.clearPreview();this.stopScroll();}
   externalPlan(clientX,lane){
     if(!this.external)return null;
-    const {kind,id}=this.external;let duration,type,name,target=lane;
+    const track=timelineTracks().find(t=>t.id===lane);if(!track)return null;
+    const {kind,id}=this.external;let duration,type,name;
     if(kind==='asset'){
       const asset=assets.get(id);if(!asset)return null;
       duration=asset.kind==='image'?3:asset.duration;name=asset.file.name;
       type=asset.kind==='audio'?'audio':'clip';
-      target=type==='clip'?'clips':lane==='voice'?'voice':lane==='audio'?'audio':asset.aiGenerated?'voice':'audio';
     }else{
       const [preset,key]=id.split(':');
       if(preset==='t'){
-        const time=this.xTime(clientX),pair=transitionPairs().sort((a,b)=>Math.abs(a.center-time)-Math.abs(b.center-time))[0];
-        if(!pair||lane!=='clips'||Math.abs(pair.center-time)>Math.max(.3,30/this.zoom))return null;
-        return {kind,id,type:'transition',lane:'clips',start:pair.center,end:pair.center,name:'이 연결에 전환 적용',leftId:pair.left.clip.id,rightId:pair.right.clip.id};
+        const time=this.xTime(clientX),pair=transitionPairs().filter(p=>p.trackId===lane).sort((a,b)=>Math.abs(a.center-time)-Math.abs(b.center-time))[0];
+        if(!pair||Math.abs(pair.center-time)>Math.max(.3,30/this.zoom))return null;
+        return {kind,id,type:'transition',lane,trackId:lane,start:pair.center,end:pair.center,name:'이 연결에 전환 적용',leftId:pair.left.id,rightId:pair.right.id};
       }
-      if(preset!=='g'&&preset!=='c')return null;
-      type=preset==='g'?'graphic':'caption';target=preset==='g'?'graphics':'captions';duration=preset==='g'?3:2.5;name=key;
+      if(preset!=='g'&&preset!=='c'&&preset!=='sfx')return null;
+      if(preset==='sfx'){
+        const effect=this.callbacks.sound?.(key);if(!effect)return null;
+        type='audio';duration=effect.duration;name=effect.name;
+      }else{
+        type=preset==='g'?'graphic':'caption';duration=preset==='g'?(this.callbacks.graphic?.(key)?.duration||3):2.5;name=key;
+      }
     }
-    const time=this.snapTime(this.xTime(clientX),null,duration);
-    const placement=type==='clip'?planVideoPlacement(time,duration):null;
-    return {kind,id,type,lane:target,name,duration,start:placement?.start??time,end:placement?.end??time+duration,placement};
+    if(track.kind!==trackKind(type))return null;
+    const time=this.snapTime(this.xTime(clientX),null,duration),placement=planPlacement(time,duration,lane);
+    return {kind,id,type,lane,trackId:lane,name,duration,start:placement.start,end:placement.end,placement};
   }
   showPreview(plan,label){
     this.clearPreview();if(!plan)return;
-    const track=$(trackIds[plan.lane]);if(!track)return;
+    const track=$('track-'+(plan.trackId||plan.lane));if(!track)return;
     track.classList.add('drop-target');this.ensureWidth(plan.end);
     const ghost=document.createElement('div');ghost.className='timeline-insert-preview '+(plan.type==='transition'?'connection-preview':'');
     ghost.style.left=plan.start*this.zoom+'px';ghost.style.width=Math.max(12,(plan.end-plan.start)*this.zoom)+'px';
     ghost.setAttribute('aria-hidden','true');ghost.textContent=plan.name||'';track.append(ghost);
     const guide=document.createElement('div');guide.className='insertion-guide';guide.style.left=plan.start*this.zoom+'px';this.canvas.append(guide);
     const text=document.createElement('div');text.className='insertion-label';
+    text.style.top=(this.scroll.scrollTop+2)+'px';
     text.style.left=clamp(plan.start*this.zoom,this.scroll.scrollLeft+4,Math.max(this.scroll.scrollLeft+4,this.scroll.scrollLeft+this.scroll.clientWidth-290))+'px';
     const shifted=plan.placement?.shifts?.length?' · 뒤 '+plan.placement.shifts.length+'개 +'+plan.placement.shift.toFixed(2)+'초':'';
-    text.textContent=label||trackNames[plan.lane]+' · '+precise(plan.start)+' → '+precise(plan.end)+' · '+(plan.end-plan.start).toFixed(2)+'초'+shifted;
+    text.textContent=label||trackLabel(plan.trackId||plan.lane)+' · '+precise(plan.start)+' → '+precise(plan.end)+' · '+(plan.end-plan.start).toFixed(2)+'초'+shifted;
     this.canvas.append(text);this.preview=plan;
   }
   clearPreview(){
@@ -160,7 +209,7 @@ export class Timeline {
     this.external={kind:asset?'asset':'preset',id:asset||preset};
     const plan=this.externalPlan(event.clientX,event.target.closest('.track')?.dataset.track);
     this.endExternalDrag();
-    if(!plan){this.callbacks.error?.('맞닿은 두 영상 클립의 연결점 위에 놓아 주세요.');return;}
+    if(!plan){this.callbacks.error?.('영상·자막·그래픽은 영상 트랙에, 소리는 오디오 트랙에 놓아 주세요. 전환은 두 미디어 사이에 놓습니다.');return;}
     try{const result=await this.callbacks.drop(plan.kind,plan.id,plan.start,plan.lane,plan);if(result)this.reveal(result);}
     catch(error){this.callbacks.error?.(error.message);}
   }
@@ -168,8 +217,12 @@ export class Timeline {
     if(!result)return;this.select(result.type,result.id,result.rightId);this.ensureWidth(result.end??result.start);
     const left=(result.start||0)*this.zoom;
     if(left<this.scroll.scrollLeft||left>this.scroll.scrollLeft+this.scroll.clientWidth-70)this.scroll.scrollLeft=Math.max(0,left-50);
-    const node=[...this.canvas.querySelectorAll('.timeline-block,.transition-chip')].find(n=>n.dataset.type===result.type&&n.dataset.id===result.id);
-    if(node){node.classList.add('just-added');setTimeout(()=>node.classList.remove('just-added'),1600);}
+    const node=[...this.canvas.querySelectorAll('.timeline-block,.transition-chip,.timeline-gap')].find(n=>n.dataset.type===result.type&&n.dataset.id===result.id);
+    if(node){
+      const row=node.closest('.track'),top=row?.offsetTop||0;
+      if(top<this.scroll.scrollTop+27)this.scroll.scrollTop=Math.max(0,top-27);
+      else if(top+(row?.offsetHeight||54)>this.scroll.scrollTop+this.scroll.clientHeight)this.scroll.scrollTop=top+(row?.offsetHeight||54)-this.scroll.clientHeight;
+      node.classList.add('just-added');setTimeout(()=>node.classList.remove('just-added'),1600);}
     const notice=$('timelineNotice');if(notice)notice.textContent=(result.type==='transition'?'전환 선택':'클립 배치')+': '+precise(result.start||0)+(result.end!=null?'부터 '+(result.end-result.start).toFixed(2)+'초':'');
   }
   trackScroll(event,update){
@@ -179,20 +232,37 @@ export class Timeline {
       this.scrollRaf=0;if(!this.scrollPoint)return;
       const rect=this.scroll.getBoundingClientRect(),{x,y}=this.scrollPoint;
       const delta=y<rect.top||y>rect.bottom?0:x>rect.right-30?Math.min(16,(x-rect.right+30)/2):x<rect.left+30?-Math.min(16,(rect.left+30-x)/2):0;
-      if(delta){
+      const vertical=x<rect.left||x>rect.right?0:y>rect.bottom-24?Math.min(12,(y-rect.bottom+24)/2):y<rect.top+48?-Math.min(12,(rect.top+48-y)/2):0;
+      if(delta||vertical){
         if(delta>0)this.ensureWidth((this.scroll.scrollLeft+this.scroll.clientWidth+delta)/this.zoom);
-        const previous=this.scroll.scrollLeft;this.scroll.scrollLeft=Math.max(0,previous+delta);
-        if(previous!==this.scroll.scrollLeft)this.scrollUpdate?.();
+        const previous=this.scroll.scrollLeft,previousTop=this.scroll.scrollTop;
+        this.scroll.scrollLeft=Math.max(0,previous+delta);this.scroll.scrollTop=Math.max(0,previousTop+vertical);
+        if(previous!==this.scroll.scrollLeft||previousTop!==this.scroll.scrollTop)this.scrollUpdate?.();
       }
       this.scrollRaf=requestAnimationFrame(run);
     };this.scrollRaf=requestAnimationFrame(run);
   }
   stopScroll(){cancelAnimationFrame(this.scrollRaf);this.scrollRaf=0;this.scrollPoint=null;this.scrollUpdate=null;}
   pointerDown(event){
-    if(event.button!==0||this.callbacks.busy?.()||event.target.closest('[data-transition]'))return;
-    const node=event.target.closest('.timeline-block');
+    if(event.button!==0||this.callbacks.busy?.())return;
+    const hit=event.target.closest('.timeline-block,.timeline-gap,.transition-chip');
+    const info=hit?{type:hit.dataset.type,id:hit.dataset.id,right:hit.dataset.right}:null;
+    const typing=/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);
+    if(typing)document.activeElement.blur();
+    // 속성의 change가 타임라인을 다시 그릴 수 있으므로 포커스를 옮긴 뒤 현재 노드를 찾습니다.
+    const target=info?[...this.canvas.querySelectorAll('.timeline-block,.timeline-gap,.transition-chip')].find(n=>n.dataset.type===info.type&&n.dataset.id===info.id):null;
+    if(info?.type==='transition'){
+      if(typing){event.preventDefault();target?.focus({preventScroll:true});this.callbacks.transition(info.id,info.right);}
+      return;
+    }
+    if(info?.type==='gap'){
+      event.preventDefault();target?.focus({preventScroll:true});this.chooseGap(info.id);return;
+    }
+    const node=target;
+    (node||this.canvas).focus({preventScroll:true});
     if(!node){
       event.preventDefault();this.callbacks.pause();
+      const row=event.target.closest('.track');if(row)this.activateTrack(row.dataset.track);
       const seek=e=>{const time=frameTime(this.xTime(e.clientX));this.ensureWidth(time);this.callbacks.seek(time);};
       seek(event);const move=e=>seek(e),up=()=>{window.removeEventListener('pointermove',move);window.removeEventListener('pointerup',up);window.removeEventListener('pointercancel',up);};
       window.addEventListener('pointermove',move);window.addEventListener('pointerup',up,{once:true});window.addEventListener('pointercancel',up,{once:true});return;
@@ -204,19 +274,22 @@ export class Timeline {
     this.dragging=true;this.canvas.classList.add('is-dragging');node.setPointerCapture(event.pointerId);
     const update=()=>{
       const delta=this.xTime(lastEvent.clientX)-origin;
-      if(!changed&&Math.abs(delta*this.zoom)<3)return;
+      const hovered=document.elementFromPoint(lastEvent.clientX,lastEvent.clientY)?.closest('.track');
+      const target=edge?range.trackId:hovered?.dataset.track;
+      const compatible=timelineTracks().some(t=>t.id===target&&t.kind===trackKind(type));
+      if(!changed&&Math.abs(delta*this.zoom)<3&&target===range.trackId)return;
       changed=true;node.classList.add('dragging');
-      if(type==='clip'){
-        const time=this.snapTime((edge==='end'?range.end:range.start)+delta,id,edge?0:range.duration);
-        pending=edge?planClipTrim(id,edge,time):Math.abs(time-range.start)<1e-6?{start:range.start,end:range.end,noop:true}:planVideoPlacement(time,range.duration,id);
-      }else if(edge){
-        let start=range.start,end=range.end;
-        if(edge==='start')start=clamp(this.snapTime(range.start+delta,id),type==='audio'?Math.max(0,range.start-original.trimStart):0,range.end-1/project.fps);
-        else end=clamp(this.snapTime(range.end+delta,id),range.start+1/project.fps,type==='audio'?range.end+(assets.get(original.assetId)?.duration||original.trimEnd)-original.trimEnd:86400);
-        pending={start,end};
-      }else{const start=this.snapTime(range.start+delta,id,range.duration);pending={start,end:start+range.duration};}
-      const lane=type==='clip'?'clips':type==='caption'?'captions':type==='graphic'?'graphics':original.lane==='voice'?'voice':'audio';
-      this.showPreview({type,lane,name:original.name||original.text,start:pending.start,end:pending.end,placement:type==='clip'&&!edge?pending:null});
+      if(!compatible){pending=null;this.clearPreview();return;}
+      if(!edge){
+        const time=this.snapTime(range.start+delta,id,range.duration);
+        pending=target===range.trackId&&Math.abs(time-range.start)<1e-6
+          ?{start:range.start,end:range.end,trackId:target,noop:true}
+          :planPlacement(time,range.duration,target,id);
+      }else{
+        const time=this.snapTime((edge==='end'?range.end:range.start)+delta,id);
+        pending={...planItemTrim(type,id,edge,time),trackId:range.trackId};
+      }
+      this.showPreview({type,lane:target,trackId:target,name:original.name||original.text,start:pending.start,end:pending.end,placement:!edge?pending:null});
     };
     const move=e=>{lastEvent=e;update();this.trackScroll(e,update);};
     const finish=cancel=>{
@@ -225,17 +298,10 @@ export class Timeline {
       if(node.hasPointerCapture(event.pointerId))node.releasePointerCapture(event.pointerId);
       if(!cancel&&changed&&pending&&!pending.noop){
         try{
-          if(type==='clip'){if(edge)applyClipTrim(pending);else placeVideoClip(range.item,pending);}
-          else if(type==='audio'){
-            range.item.start=pending.start;
-            if(edge==='start'){
-              range.item.trimStart=original.trimStart+pending.start-range.start;
-              if(original.fadeEnvelope)range.item.fadeEnvelope={...original.fadeEnvelope,offset:original.fadeEnvelope.offset+pending.start-range.start};
-            }
-            if(edge==='end')range.item.trimEnd=original.trimEnd+pending.end-range.end;
-          }else setItemRange(range.item,pending.start,pending.end);
+          if(!edge)placeTimelineItem(type,range.item,pending);
+          else applyItemTrim(pending);
           syncAnchoredItems();this.callbacks.commit(before,edge?'클립 구간 조절':'클립 위치 이동');
-          this.reveal({type,id,start:pending.start,end:pending.end});
+          this.reveal({type,id,trackId:pending.trackId,start:pending.start,end:pending.end});
         }catch(error){this.callbacks.error?.(error.message);this.render();}
       }else this.render();
     };

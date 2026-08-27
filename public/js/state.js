@@ -1,16 +1,7 @@
 // 프로젝트 상태 모델 + 타임라인 계산
 // 여기 있는 값들만이 "진실"이고, 미리보기와 내보내기는 둘 다 이 값으로 그린다.
 
-export const FONTS = [
-  { css: '"Black Han Sans"', label: '검은고딕', weight: 400 },
-  { css: '"Do Hyeon"', label: '도현', weight: 400 },
-  { css: '"Jua"', label: '주아', weight: 400 },
-  { css: '"Gugi"', label: '구기', weight: 400 },
-  { css: '"Nanum Gothic"', label: '나눔고딕', weight: 800 },
-  { css: '"Nanum Pen Script"', label: '나눔손글씨', weight: 400 },
-  { css: '"Noto Sans KR"', label: '본고딕', weight: 900 },
-  { css: '"Noto Serif KR"', label: '본명조', weight: 900 },
-];
+export { FONTS } from './font-catalog.js';
 
 export const ACCENT = '#ff3b5c';
 
@@ -23,6 +14,7 @@ export const project = {
   fileName: 'shorts',
 
   clips: [],
+  timelineTracks: undefined, // 구형 파일은 첫 편집 때 번호형 트랙으로 변환합니다.
   overlays: [],
   captions: [],
 
@@ -156,87 +148,166 @@ export function clipStartTime(index) {
   return buildLayout().entries.find(entry => entry.index === index)?.start ?? 0;
 }
 
-/** 전체 타임라인 시각 t 에서 재생 중인 클립과 그 내부 시각 */
-export function clipAt(t) {
-  return layersAt(t).reduce((a, b) => !a || b.weight >= a.weight ? b : a, null);
+/** 번호는 화면의 표시 순서이며 ID는 저장·되돌리기 중에도 바뀌지 않습니다. */
+export const DEFAULT_TRACKS = Object.freeze([
+  { id: 'v1', kind: 'visual' }, { id: 'v2', kind: 'visual' }, { id: 'v3', kind: 'visual' },
+  { id: 'a1', kind: 'audio' }, { id: 'a2', kind: 'audio' },
+]);
+export const MAX_TRACKS_PER_KIND = 24;
+export function timelineTracks(doc = project) {
+  return doc.timelineTracks?.length ? doc.timelineTracks : DEFAULT_TRACKS;
+}
+export const trackKind = type => type === 'audio' ? 'audio' : 'visual';
+export function trackIdFor(type, item = {}, doc = project) {
+  const registry = timelineTracks(doc), kind = trackKind(type);
+  if (registry.some(track => track.id === item.trackId && track.kind === kind)) return item.trackId;
+  const legacy = type === 'audio' ? ((item.role || item.lane) === 'voice' ? 'a2' : 'a1')
+    : type === 'caption' ? 'v3' : type === 'graphic' ? 'v2' : 'v1';
+  return registry.find(track => track.id === legacy && track.kind === kind)?.id
+    || registry.find(track => track.kind === kind)?.id;
+}
+export function trackLabel(id, doc = project) {
+  const tracks = timelineTracks(doc), track = tracks.find(track => track.id === id);
+  if (!track) return '';
+  return (track.kind === 'audio' ? '오디오 ' : '영상 ') + (tracks.filter(t => t.kind === track.kind).indexOf(track) + 1);
 }
 
-/** 시작 시각이 없는 이전 프로젝트만 연속 배치로 해석합니다. 조회 중에는 문서를 바꾸지 않습니다. */
+/** 구형 파일의 실제 시각은 보존하고, 자동 연결 정보만 제거합니다. */
+export function migrateTimeline(doc = project) {
+  pinClipPositions(doc);
+  doc.timelineTracks = timelineTracks(doc).map(track => ({ ...track }));
+  const groups = [['clip', doc.clips], ['graphic', doc.overlays], ['caption', doc.captions],
+    ['audio', doc.tracks || doc.audio?.tracks]];
+  for (const [type, items] of groups) for (const item of items || []) {
+    item.trackId = trackIdFor(type, item, doc);
+    if (type === 'audio') item.role ||= item.lane === 'voice' ? 'voice' : 'music';
+    delete item.anchor;
+  }
+}
+export function addTimelineTrack(kind) {
+  migrateTimeline();
+  if (!['visual', 'audio'].includes(kind)) throw new Error('지원하지 않는 트랙입니다.');
+  if (project.timelineTracks.filter(t => t.kind === kind).length >= MAX_TRACKS_PER_KIND) throw new Error('종류별로 24개 트랙까지 지원합니다.');
+  const prefix = kind === 'audio' ? 'a' : 'v';
+  let number = 1;
+  while (project.timelineTracks.some(t => t.id === prefix + number)) number++;
+  const track = { id: prefix + number, kind };
+  project.timelineTracks.push(track);
+  return track;
+}
+export function removeTimelineTrack(id) {
+  migrateTimeline();
+  const track = project.timelineTracks.find(t => t.id === id);
+  if (!track || project.timelineTracks.filter(t => t.kind === track.kind).length < 2) return false;
+  if (trackItems(id).length) throw new Error('빈 트랙만 삭제할 수 있습니다.');
+  project.timelineTracks = project.timelineTracks.filter(t => t.id !== id);
+  return true;
+}
+
+/** 가장 위에 있는 영상 트랙의 현재 미디어 클립입니다. */
+export function clipAt(t) {
+  const active = layersAt(t);
+  if (!active.length) return null;
+  const top = active.at(-1).trackId;
+  return active.filter(e => e.trackId === top).reduce((a, b) => !a || b.weight >= a.weight ? b : a, null);
+}
+
+/** 모든 종류의 항목을 공통 시각으로 조회합니다. 조회는 원본을 변경하지 않습니다. */
 export function buildLayout(doc = project) {
-  let cursor = 0;
-  const entries = (doc.clips || []).map((clip, index) => {
-    const duration = clipDuration(clip);
-    const next = doc.clips[index + 1];
-    const requested = Number(clip.transitionOut?.duration) || 0;
-    const legacyOverlap = next && ['dissolve', 'fade', 'flash'].includes(clip.transitionOut?.type)
-      ? Math.max(0, Math.min(2, requested, duration / 2, clipDuration(next) / 2)) : 0;
-    const start = Number.isFinite(clip.start) ? Math.max(0, clip.start) : cursor;
-    const entry = { clip, index, start, end: start + duration, duration, overlapIn: 0, overlapOut: 0 };
-    cursor = entry.end - legacyOverlap;
-    return entry;
-  }).sort((a, b) => a.start - b.start || a.index - b.index);
-  for (let i = 0; i < entries.length - 1; i++) {
-    const left = entries[i], right = entries[i + 1], transition = left.clip.transitionOut;
-    const overlap = Math.round((left.end - right.start) * 1e9) / 1e9;
-    const limit = Math.min(2, left.duration / 2, right.duration / 2);
-    if (['dissolve', 'fade', 'flash'].includes(transition?.type)
-      && (!transition.toId || transition.toId === right.clip.id)
-      && overlap > 1e-7 && overlap <= limit + 1e-6) {
-      left.overlapOut = overlap;
-      right.overlapIn = overlap;
+  const registry = timelineTracks(doc), entries = [];
+  for (const track of registry.filter(t => t.kind === 'visual')) {
+    const clips = (doc.clips || []).map((clip, index) => ({ clip, index }))
+      .filter(e => trackIdFor('clip', e.clip, doc) === track.id);
+    let cursor = 0;
+    for (let i = 0; i < clips.length; i++) {
+      const { clip, index } = clips[i], duration = clipDuration(clip), next = clips[i + 1]?.clip;
+      const legacyOverlap = next && ['dissolve', 'fade', 'flash'].includes(clip.transitionOut?.type)
+        ? Math.max(0, Math.min(2, Number(clip.transitionOut.duration) || 0, duration / 2, clipDuration(next) / 2)) : 0;
+      const start = Number.isFinite(clip.start) ? Math.max(0, clip.start) : cursor;
+      const entry = { clip, item: clip, id: clip.id, type: 'clip', trackId: track.id,
+        index, start, end: start + duration, duration, overlapIn: 0, overlapOut: 0 };
+      entries.push(entry);
+      cursor = entry.end - legacyOverlap;
+    }
+  }
+  entries.sort((a, b) => a.start - b.start || a.index - b.index);
+  const items = [...entries];
+  for (const [type, list] of [['graphic', doc.overlays], ['caption', doc.captions],
+    ['audio', doc.tracks || doc.audio?.tracks]]) {
+    for (const [index, item] of (list || []).entries()) {
+      const start = Number(item.start) || 0;
+      const duration = type === 'audio' ? Math.max(0, item.trimEnd - item.trimStart) : Math.max(0, item.end - start);
+      items.push({ item, type, id: item.id, trackId: trackIdFor(type, item, doc), index, start, end: start + duration, duration });
+    }
+  }
+  items.sort((a, b) => a.start - b.start || a.index - b.index);
+  for (const track of registry.filter(t => t.kind === 'visual')) {
+    const row = items.filter(e => e.trackId === track.id);
+    for (let i = 0; i < row.length - 1; i++) {
+      const left = row[i], right = row[i + 1];
+      if (left.type !== 'clip' || right.type !== 'clip') continue;
+      left.nextId = right.id;
+      const transition = left.clip.transitionOut;
+      const overlap = Math.round((left.end - right.start) * 1e9) / 1e9;
+      const limit = Math.min(2, left.duration / 2, right.duration / 2);
+      if (['dissolve', 'fade', 'flash'].includes(transition?.type)
+        && (!transition.toId || transition.toId === right.id)
+        && overlap > 1e-7 && overlap <= limit + 1e-6) {
+        left.overlapOut = overlap;
+        right.overlapIn = overlap;
+      }
     }
   }
   const videoEnd = Math.max(0, ...entries.map(e => e.end));
-  const tracks = doc.tracks || doc.audio?.tracks || [];
-  const total = Math.max(videoEnd,
-    ...(doc.overlays || []).map(item => Number(item.end) || 0),
-    ...(doc.captions || []).map(item => Number(item.end) || 0),
-    ...tracks.map(item => (Number(item.start) || 0) + Math.max(0, item.trimEnd - item.trimStart)));
-  return { entries, videoEnd, total };
+  const total = Math.max(0, ...items.map(e => e.end));
+  return { entries, items, tracks: registry, videoEnd, total };
+}
+export function trackItems(trackId, doc = project, layout = buildLayout(doc)) {
+  return layout.items.filter(e => e.trackId === trackId);
 }
 
-/** 편집 전에 이전 연속 배치를 절대 시각으로 고정해, 삭제·분할이 다른 클립을 밀지 않게 합니다. */
+/** 삭제·이동 전에 구형 연속 배치를 절대 시각으로 고정합니다. */
 export function pinClipPositions(doc = project) {
   const layout = buildLayout(doc);
-  for (const entry of layout.entries) entry.clip.start = entry.start;
-  for (let i = 0; i < layout.entries.length - 1; i++) {
-    const entry = layout.entries[i];
+  for (const entry of layout.entries) {
+    entry.clip.start = entry.start;
     if (entry.overlapOut > 0) entry.clip.transitionOut = {
-      ...entry.clip.transitionOut, duration: entry.overlapOut, toId: layout.entries[i + 1].clip.id,
+      ...entry.clip.transitionOut, duration: entry.overlapOut, toId: entry.nextId,
     };
   }
   return layout;
 }
 
-/** 같은 영상 트랙에서 실제로 맞닿거나 전환으로 겹치는 두 클립의 연결점입니다. */
+/** 같은 트랙에서 실제로 맞닿거나 전환으로 겹치는 두 미디어 클립의 연결점입니다. */
 export function transitionPairs(doc = project) {
-  const entries = buildLayout(doc).entries;
-  return entries.slice(0, -1).flatMap((left, index) => {
-    const right = entries[index + 1];
-    if (!left.overlapOut && Math.abs(left.end - right.start) > 1e-6) return [];
+  const layout = buildLayout(doc);
+  return layout.entries.flatMap(left => {
+    const right = layout.entries.find(e => e.id === left.nextId);
+    if (!right || (!left.overlapOut && Math.abs(left.end - right.start) > 1e-6)) return [];
     const duration = left.overlapOut;
-    return [{ left, right, duration, start: left.end - duration, end: left.end,
+    return [{ left, right, trackId: left.trackId, duration, start: left.end - duration, end: left.end,
       center: left.end - duration / 2, type: duration ? left.clip.transitionOut.type : 'cut' }];
   });
 }
 
-/** 미리보기·인코더·오디오가 공유하는 활성 레이어와 선형 교차 가중치. */
+/** 겹침 가중치는 트랙 안에서만 계산합니다. 위 트랙 때문에 아래 영상·오디오가 사라지지 않습니다. */
 export function layersAt(t, layout = buildLayout()) {
-  if (!layout.total) return [];
-  if (!Number.isFinite(t) || t < 0 || t > layout.total) return [];
-  // 마지막 프레임 표시만 허용합니다. 영상이 없는 구간을 마지막 영상으로 채우지 않습니다.
+  if (!layout.total || !Number.isFinite(t) || t < 0 || t > layout.total) return [];
   if (t === layout.total) t = Math.max(0, t - 1e-7);
-  let active = layout.entries.filter(e => t >= e.start && t < e.end);
-  if (active.length > 1 && !(active.length === 2 && active[0].overlapOut && active[1].overlapIn)) {
-    active = [active.at(-1)];
+  const result = [];
+  for (const track of (layout.tracks || timelineTracks()).filter(track => track.kind === 'visual')) {
+    let active = layout.entries.filter(e => e.trackId === track.id && t >= e.start && t < e.end);
+    if (active.length > 1 && !(active.length === 2 && active[0].overlapOut && active[1].overlapIn
+      && active[0].nextId === active[1].id)) active = [active.at(-1)];
+    result.push(...active.map(e => {
+      const local = t - e.start;
+      let weight = 1;
+      if (e.overlapIn > 0 && local < e.overlapIn) weight = local / e.overlapIn;
+      if (e.overlapOut > 0 && local > e.duration - e.overlapOut) weight = (e.duration - local) / e.overlapOut;
+      return { ...e, local, weight: Math.min(1, Math.max(0, weight)) };
+    }));
   }
-  return active.map(e => {
-    const local = t - e.start;
-    let weight = 1;
-    if (e.overlapIn > 0 && local < e.overlapIn) weight = local / e.overlapIn;
-    if (e.overlapOut > 0 && local > e.duration - e.overlapOut) weight = (e.duration - local) / e.overlapOut;
-    return { ...e, local, weight: Math.min(1, Math.max(0, weight)) };
-  });
+  return result;
 }
 
 export function clipFadeGain(clip, local, duration) {
@@ -253,27 +324,12 @@ export function clipFadeGain(clip, local, duration) {
   return Math.max(0, g);
 }
 
-/** 연결은 이동 관계이며 길이 제한이 아닙니다. 영상이 없어져도 다른 트랙을 삭제하지 않습니다. */
+/** 이전 파일의 자동 연결을 해제합니다. 보이는 시각과 길이는 절대로 바꾸지 않습니다. */
 export function syncAnchoredItems() {
-  const entries = new Map(buildLayout().entries.map(e => [e.clip.id, e]));
-  for (const item of [...project.overlays, ...project.captions]) {
-    if (!item.anchor) continue;
-    const e = entries.get(item.anchor.clipId);
-    if (!e) { delete item.anchor; continue; }
-    const sourceStart = e.clip.type === 'video' ? e.clip.trimStart : 0;
-    const start = e.start + item.anchor.sourceStart - sourceStart;
-    const duration = Math.max(0, item.anchor.sourceEnd - item.anchor.sourceStart);
-    item.start = Math.max(0, start);
-    item.end = item.start + duration;
-  }
+  for (const item of [...project.overlays, ...project.captions]) delete item.anchor;
 }
-
-export function anchorItem(item, clipId) {
-  const e = buildLayout().entries.find(e => e.clip.id === clipId);
-  if (!e) { delete item.anchor; return; }
-  const src = e.clip.type === 'video' ? e.clip.trimStart : 0;
-  item.anchor = { clipId, sourceStart: src + item.start - e.start, sourceEnd: src + item.end - e.start };
-}
+// 구형 진입점 호환용. 새 편집기는 자동 연결을 만들지 않습니다.
+export function anchorItem(item) { delete item.anchor; }
 
 /** 클립 내부 시각 -> 원본 파일 안의 시각 */
 export function sourceTime(clip, local) {

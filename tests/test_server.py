@@ -56,6 +56,16 @@ class ServerTests(unittest.TestCase):
         status,body,_=self.request('/js/timeline-edits.js')
         self.assertEqual(status,200)
         self.assertIn(b'export function planVideoPlacement',body)
+        for path,marker in (
+            ('/js/font-catalog.js',b'export const FONTS'),
+            ('/js/safe-areas.js',b'export const SAFE_AREAS'),
+            ('/js/sound-effects.js',b'export const SOUND_EFFECTS'),
+            ('/js/visual-transform.js',b'export function transformOf'),
+        ):
+            with self.subTest(module=path):
+                status,body,_=self.request(path)
+                self.assertEqual(status,200)
+                self.assertIn(marker,body)
         status,body,_=self.request('/api/ai/status')
         self.assertFalse(json.loads(body)['configured'])
         self.assertFalse(json.loads(body)['verified'])

@@ -74,7 +74,7 @@ export async function extractClipAudio(clip, signal) {
  */
 export async function mixTimeline({ onProgress, signal, includeBgm = true, includeVoice = false } = {}) {
   const total = totalDuration();
-  const wanted = includeBgm ? hasAnyAudio() : hasClipAudio() || (includeVoice && project.audio.tracks?.some(t => t.lane === 'voice' && !t.muted));
+  const wanted = includeBgm ? hasAnyAudio() : hasClipAudio() || (includeVoice && project.audio.tracks?.some(t => (t.role || t.lane) === 'voice' && !t.muted));
   if (total <= 0 || !wanted) return null;
 
   const length = Math.ceil(total * RATE);
@@ -109,7 +109,7 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
   // 통합 소재함의 독립 오디오. 자동자막에는 사용자 선택 시 보이스만 포함합니다.
   for (const track of project.audio.tracks || []) {
     if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
-    if (track.muted || !track.buffer || (!includeBgm && !(includeVoice && track.lane === 'voice'))) continue;
+    if (track.muted || !track.buffer || (!includeBgm && !(includeVoice && (track.role || track.lane) === 'voice'))) continue;
     const duration = Math.min(track.trimEnd - track.trimStart, total - track.start);
     if (!(duration > 0)) continue;
     const node = ctx.createBufferSource();

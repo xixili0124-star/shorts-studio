@@ -1,5 +1,5 @@
 // 편집 데이터와 미디어 자원을 분리합니다. 되돌리기는 DOM/File을 복제하지 않습니다.
-import { project, newClipDefaults, syncAnchoredItems, buildLayout, pinClipPositions } from './state.js';
+import { project, newClipDefaults, syncAnchoredItems, buildLayout, pinClipPositions, timelineTracks, trackIdFor, migrateTimeline, MAX_TRACKS_PER_KIND } from './state.js';
 import { createClip, disposeClip } from './media.js';
 import { decodeAudioFile } from './audio.js';
 import { uid } from './util.js';
@@ -11,21 +11,27 @@ let assetReady = () => {};
 export function onAssetReady(callback) { assetReady = callback; }
 export let documentName = '새 프로젝트';
 export function setDocumentName(name) { documentName = String(name).trim().slice(0, 100) || '새 프로젝트'; }
-const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut'];
-const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','aiGenerated'];
+const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop'];
+const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','role','trackId','aiGenerated'];
 const copy = value => JSON.parse(JSON.stringify(value));
 const pick = (object, keys) => Object.fromEntries(keys.filter(k => object[k] !== undefined).map(k => [k, object[k]]));
 
 export function captureDocument() {
   const entries = buildLayout().entries;
-  const timing = new Map(entries.map((entry, index) => [entry.clip.id, { start: entry.start,
-    transitionOut: entry.overlapOut ? { ...entry.clip.transitionOut, duration: entry.overlapOut, toId: entries[index + 1].clip.id } : { type: 'cut', duration: 0 } }]));
-  return copy({ version: 2, name: documentName,
+  const timing = new Map(entries.map(entry => [entry.clip.id, { start: entry.start, trackId: entry.trackId,
+    transitionOut: entry.overlapOut ? { ...entry.clip.transitionOut, duration: entry.overlapOut, toId: entry.nextId } : { type: 'cut', duration: 0 } }]));
+  const timed = (type, item) => {
+    const { anchor, ...rest } = item;
+    return { ...rest, trackId: trackIdFor(type, item) };
+  };
+  return copy({ version: 3, name: documentName, timelineTracks: timelineTracks(),
     settings: pick(project, ['width','height','fps','quality']),
     clips: project.clips.map(c => ({ ...pick(c, clipKeys), ...timing.get(c.id) })),
-    overlays: project.overlays, captions: project.captions,
+    overlays: project.overlays.map(item => timed('graphic', item)),
+    captions: project.captions.map(item => timed('caption', item)),
     captionStyle: project.captionStyle, template: project.template,
-    tracks: (project.audio.tracks || []).map(t => pick(t, audioKeys)),
+    tracks: (project.audio.tracks || []).map(t => ({ ...pick(t, audioKeys),
+      trackId: trackIdFor('audio', t), role: t.role || (t.lane === 'voice' ? 'voice' : 'music') })),
     originalVolume: project.audio.originalVolume,
   });
 }
@@ -36,15 +42,17 @@ export function restoreDocument(doc) {
     const runtime = clipRuntime.get(c.id);
     if (!runtime) throw new Error('프로젝트 소재를 먼저 불러와야 합니다.');
     return { ...runtime, ...copy(pick(c,clipKeys)), start: Number.isFinite(c.start) ? c.start : undefined,
-      motionDuration: c.motionDuration, motionOffset: c.motionOffset, fadeEnvelope: c.fadeEnvelope ? copy(c.fadeEnvelope) : undefined };
+      motionDuration: c.motionDuration, motionOffset: c.motionOffset, fadeEnvelope: c.fadeEnvelope ? copy(c.fadeEnvelope) : undefined,
+      trackId: c.trackId, transform: c.transform ? copy(c.transform) : undefined, crop: c.crop ? copy(c.crop) : undefined };
   });
   const tracks = (doc.tracks || []).map(t => {
     const runtime = audioRuntime.get(t.id);
     if (!runtime) throw new Error('프로젝트 오디오를 먼저 불러와야 합니다.');
-    return { ...runtime, ...copy(pick(t,audioKeys)), fadeEnvelope: t.fadeEnvelope ? copy(t.fadeEnvelope) : undefined };
+    return { ...runtime, ...copy(pick(t,audioKeys)), trackId: t.trackId, role: t.role, fadeEnvelope: t.fadeEnvelope ? copy(t.fadeEnvelope) : undefined };
   });
   setDocumentName(doc.name);
   Object.assign(project, pick(doc.settings || {}, ['width','height','fps','quality']));
+  project.timelineTracks = doc.timelineTracks ? copy(doc.timelineTracks) : undefined;
   project.clips = clips;
   project.audio.tracks = tracks;
   project.audio.bgm = null;
@@ -53,7 +61,7 @@ export function restoreDocument(doc) {
   project.captions = copy(doc.captions || []);
   project.captionStyle = copy(doc.captionStyle || project.captionStyle);
   project.template = copy(doc.template || project.template);
-  pinClipPositions();
+  migrateTimeline();
   syncAnchoredItems();
 }
 
@@ -124,7 +132,7 @@ export function makeAudio(assetId, overrides = {}) {
   const el = document.createElement('audio');el.src = asset.url;el.preload = 'auto';
   const track = { id, assetId, name: asset.file.name, file: asset.file, buffer: asset.buffer, el,
     start: 0, trimStart: 0, trimEnd: asset.duration, volume: .65, fadeIn: .15, fadeOut: .4,
-    muted: false, lane: asset.aiGenerated ? 'voice' : 'music', aiGenerated: !!asset.aiGenerated, ...overrides };
+    muted: false, lane: asset.aiGenerated ? 'voice' : 'music', role: overrides.role || overrides.lane || (asset.aiGenerated ? 'voice' : 'music'), aiGenerated: !!asset.aiGenerated, ...overrides };
   audioRuntime.set(id, track);
   return track;
 }
@@ -187,16 +195,46 @@ async function hydrate(doc, records) {
 }
 
 export function validateDocument(doc, records) {
-  if (!doc || ![1, 2].includes(doc.version) || !Array.isArray(records) || !Array.isArray(doc.clips) || !Array.isArray(doc.captions) || !Array.isArray(doc.overlays) || !Array.isArray(doc.tracks)) throw new Error('지원하지 않는 프로젝트 형식입니다.');
+  if (!doc || ![1, 2, 3].includes(doc.version) || !Array.isArray(records) || !Array.isArray(doc.clips) || !Array.isArray(doc.captions) || !Array.isArray(doc.overlays) || !Array.isArray(doc.tracks)) throw new Error('지원하지 않는 프로젝트 형식입니다.');
   if (doc.clips.length > 1000 || doc.tracks.length > 1000 || doc.captions.length > 5000 || doc.overlays.length > 1000 || records.length > 200) throw new Error('실험판의 프로젝트 크기 제한을 초과했습니다.');
   const safeId=id=>typeof id==='string' && /^[a-zA-Z0-9_-]{1,80}$/.test(id);
+  if (doc.version >= 3) {
+    if (!Array.isArray(doc.timelineTracks) || doc.timelineTracks.length < 2
+      || new Set(doc.timelineTracks.map(t => t?.id)).size !== doc.timelineTracks.length
+      || doc.timelineTracks.some(t => !t || !safeId(t.id) || !['visual','audio'].includes(t.kind))
+      || ['visual','audio'].some(kind => !doc.timelineTracks.some(t => t.kind === kind)
+        || doc.timelineTracks.filter(t => t.kind === kind).length > MAX_TRACKS_PER_KIND)) throw new Error('트랙 목록이 올바르지 않습니다.');
+    for (const [type, list] of [['clip',doc.clips],['graphic',doc.overlays],['caption',doc.captions],['audio',doc.tracks]]) {
+      for (const item of list) {
+        if (!item || !doc.timelineTracks.some(t => t.id === item.trackId && t.kind === (type === 'audio' ? 'audio' : 'visual'))) throw new Error('클립의 트랙 연결이 올바르지 않습니다.');
+      }
+    }
+    if (doc.tracks.some(t => !['voice','music','effect'].includes(t.role))) throw new Error('오디오 용도가 올바르지 않습니다.');
+  }
+  for (const item of [...doc.clips, ...doc.overlays, ...doc.captions]) {
+    if (!item) throw new Error('빈 화면 요소가 있습니다.');
+    if (item.transform !== undefined) {
+      const t = item.transform;
+      if (!t || typeof t !== 'object' || Array.isArray(t)) throw new Error('변형 정보가 올바르지 않습니다.');
+      const limits = { offsetX: [-3,3], offsetY: [-3,3], scaleX: [.05,10], scaleY: [.05,10], rotation: [-360,360], opacity: [0,1] };
+      for (const [key, [min,max]] of Object.entries(limits)) if (t[key] !== undefined
+        && (!Number.isFinite(t[key]) || t[key] < min || t[key] > max)) throw new Error('변형 값이 허용 범위를 벗어났습니다.');
+      for (const key of ['flipX','flipY']) if (t[key] !== undefined && typeof t[key] !== 'boolean') throw new Error('뒤집기 값이 올바르지 않습니다.');
+    }
+    if (item.crop !== undefined) {
+      const c = item.crop;
+      if (!c || typeof c !== 'object' || Array.isArray(c)
+        || ['left','right','top','bottom'].some(key => c[key] !== undefined && (!Number.isFinite(c[key]) || c[key] < 0 || c[key] > .95))
+        || (c.left || 0) + (c.right || 0) > .98 || (c.top || 0) + (c.bottom || 0) > .98) throw new Error('화면 자르기 범위가 올바르지 않습니다.');
+    }
+  }
   if(records.some(r=>!r || !safeId(r.id)) || new Set(records.map(r=>r.id)).size!==records.length)throw new Error('소재 식별자가 올바르지 않습니다.');
   const ids = new Set(records.map(r => r.id));
   const instanceIds = new Set();
   for(const clip of doc.clips) {
     if(!clip || !['video','image'].includes(clip.type) || !Number.isFinite(clip.scale) || !Number.isFinite(clip.offX) || !Number.isFinite(clip.offY) || !Number.isFinite(clip.trimStart) || !Number.isFinite(clip.trimEnd) || !Number.isFinite(clip.imgDuration))throw new Error('클립 속성이 올바르지 않습니다.');
     if(clip.scale<.1 || clip.scale>10 || Math.abs(clip.offX)>2 || Math.abs(clip.offY)>2)throw new Error('클립 배치가 허용 범위를 벗어났습니다.');
-    if(doc.version === 2 && (!Number.isFinite(clip.start) || clip.start < 0))throw new Error('영상 클립의 타임라인 위치가 올바르지 않습니다.');
+    if(doc.version >= 2 && (!Number.isFinite(clip.start) || clip.start < 0))throw new Error('영상 클립의 타임라인 위치가 올바르지 않습니다.');
   }
   for(const track of doc.tracks) {
     if(!track || !Number.isFinite(track.start) || !Number.isFinite(track.trimStart) || !Number.isFinite(track.trimEnd) || track.trimEnd<=track.trimStart || !['music','voice'].includes(track.lane))throw new Error('오디오 구간이 올바르지 않습니다.');
@@ -224,8 +262,11 @@ export function validateDocument(doc, records) {
   }
   if (!doc.settings || ![720,1080,1440].includes(doc.settings.width) || doc.settings.height !== doc.settings.width * 16/9 || ![24,30,60].includes(doc.settings.fps) || !['low','medium','high','very-high'].includes(doc.settings.quality)) throw new Error('출력 설정이 올바르지 않습니다.');
   const entries = buildLayout(doc).entries;
-  for(let i=0;i<entries.length-1;i++) {
-    if(entries[i].end > entries[i+1].start + 1e-6 && !entries[i].overlapOut)throw new Error('영상 클립이 전환 없이 겹쳐 있습니다.');
+  for (const track of timelineTracks(doc).filter(t => t.kind === 'visual')) {
+    const row = entries.filter(e => e.trackId === track.id);
+    for (let i = 0; i < row.length - 1; i++) {
+      if (row[i].end > row[i + 1].start + 1e-6 && (!row[i].overlapOut || row[i].nextId !== row[i + 1].id)) throw new Error('같은 트랙의 영상 클립이 전환 없이 겹쳐 있습니다.');
+    }
   }
 }
 

@@ -2,7 +2,7 @@
 
 > **이 브랜치는 디자인·편집 기능을 검토하는 실험판입니다.** 운영 `main`과 분리되어 있으며 아직 병합할 단계가 아닙니다.
 >
-> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 2026-08-28: 선택 클립 분할, 빈 구간 배치, 독립 자막·그래픽 이동, 전환 선택, 드래그 삽입 범위 표시를 추가했습니다.
+> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 2026-08-28: 확장 가능한 영상·오디오 트랙, 독립 이동, 공백 S 삭제, 변형·크롭·중앙 정렬, 플랫폼 안전영역, 한국어 폰트 30종·모션 20종·자막 16종·합성 효과음 20종을 추가했습니다.
 >
 > 먼저 [실험판 실행 안내](START-HERE.md)를 읽어 주세요. Windows에서는 `start-studio.cmd`를 실행한 뒤 `http://127.0.0.1:8787/studio.html`을 열면 됩니다. [변경 범위](CHANGELOG-LAB.md) · [검증 기록](VERIFICATION.md)
 >

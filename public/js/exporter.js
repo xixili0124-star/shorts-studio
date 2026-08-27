@@ -75,7 +75,8 @@ function pickRecorderMime() {
 export async function exportVideo({ engine, onProgress = () => {}, signal, player }) {
   const total = totalDuration();
   if (total <= 0) throw new Error('클립을 먼저 추가하세요.');
-  await loadFonts();
+  await loadFonts({ signal });
+  abortCheck(signal);
 
   if (engine.mode === 'recorder') {
     return recordFallback({ engine, onProgress, signal, player });

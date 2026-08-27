@@ -2,9 +2,12 @@
 // opts.source(clip, localTime) 가 그릴 이미지({img, w, h})를 돌려준다.
 //   미리보기 → <video> 엘리먼트 / 내보내기 → 디코딩된 VideoSample
 import {
-  project, layersAt, activeOverlays, activeCaption, FONTS, ACCENT,
+  project, layersAt, buildLayout, trackIdFor, timelineTracks, clipFadeGain, FONTS, ACCENT,
   videoBand, splitAccent,
 } from './state.js';
+import { withVisualTransform, visualCorners } from './visual-transform.js';
+import { safeAreaConfig, safeAreaRect } from './safe-areas.js';
+import { ensureFont } from './font-catalog.js';
 
 const REF_H = 1920; // 스타일 수치의 기준 높이 (해상도가 달라져도 같은 비율로 보이게)
 const plateCache = new WeakMap();
@@ -12,7 +15,7 @@ const plateCache = new WeakMap();
 function transitionPlates(canvas) {
   let plates = plateCache.get(canvas);
   if (!plates || plates[0].width !== canvas.width || plates[0].height !== canvas.height) {
-    plates = [0, 1].map(() => {
+    plates = [0, 1, 2, 3].map(() => {
       const c = document.createElement('canvas');
       c.width = canvas.width; c.height = canvas.height;
       return c;
@@ -23,76 +26,118 @@ function transitionPlates(canvas) {
 }
 
 export function renderFrame(ctx, t, opts = {}) {
-  const W = ctx.canvas.width, H = ctx.canvas.height;
-  const k = H / REF_H;
-
-  const tpl = project.template;
-  const band = videoBand(W, H);
-
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  ctx.globalAlpha = 1;
-  ctx.filter = 'none';
-  ctx.fillStyle = band ? tpl.bg : '#000';
-  ctx.fillRect(0, 0, W, H);
-
-  const paintLayer = (ctx, at) => {
-    ctx.setTransform(1, 0, 0, 1, 0, 0);
-    ctx.globalAlpha = 1;
-    ctx.filter = 'none';
-    ctx.fillStyle = band ? tpl.bg : '#000';
-    ctx.fillRect(0, 0, W, H);
-    const src = opts.source ? opts.source(at.clip, at.local) : null;
-    if (src?.img && src.w > 0 && src.h > 0) {
-      if (band) {
-        // 영상은 밴드 안에만 그린다. 밖으로 삐져나가면 잘라낸다.
-        ctx.save();
-        ctx.beginPath();
-        ctx.rect(band.x, band.y, band.w, band.h);
-        ctx.clip();
-        ctx.translate(band.x, band.y);
-        drawClipLayer(ctx, band.w, band.h, at, src);
-        ctx.restore();
-      } else {
-        drawClipLayer(ctx, W, H, at, src);
-      }
-    }
-    const f = fadeAlpha(at.clip, at.local, at.duration);
-    if (f > 0) {
-      ctx.fillStyle = `rgba(0,0,0,${f})`;
-      ctx.fillRect(0, 0, W, H);
-    }
+  const W=ctx.canvas.width,H=ctx.canvas.height,k=H/REF_H;
+  const tpl=project.template,band=videoBand(W,H),layout=opts.layout||buildLayout();
+  const visualTracks=layout.tracks.filter(track=>track.kind==='visual');
+  ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.filter='none';
+  ctx.fillStyle=band?tpl.bg:'#000';ctx.fillRect(0,0,W,H);
+  const atTime=t===layout.total?Math.max(0,t-1e-7):t;
+  const paintMedia=(target,at)=>{
+    const source=opts.source?.(at.clip,at.local);
+    if(!source?.img||source.w<=0||source.h<=0)return;
+    paintTransformed(target,'clip',at.clip,dest=>{
+      if(band&&at.trackId===visualTracks[0]?.id){
+        dest.save();dest.beginPath();dest.rect(band.x,band.y,band.w,band.h);dest.clip();
+        dest.translate(band.x,band.y);drawClipLayer(dest,band.w,band.h,at,source);dest.restore();
+      }else drawClipLayer(dest,W,H,at,source);
+    },clipFadeGain(at.clip,at.local,at.duration),at);
   };
-
-  const layers = layersAt(t, opts.layout);
-  if (layers.length === 1) paintLayer(ctx, layers[0]);
-  else if (layers.length > 1) {
-    // 불투명한 A 위에 B를 p만큼 덮어 정확한 선형 디졸브를 만듭니다.
-    // drawClipLayer가 alpha를 초기화하므로 별도 판에 먼저 완성해야 합니다.
-    const plates = transitionPlates(ctx.canvas);
-    layers.slice(0, 2).forEach((at, i) => paintLayer(plates[i].getContext('2d', { alpha: false }), at));
-    ctx.globalAlpha = 1;
-    ctx.drawImage(plates[0], 0, 0);
-    const p = layers[1].weight;
-    ctx.globalAlpha = p;
-    ctx.drawImage(plates[1], 0, 0);
-    ctx.globalAlpha = 1;
-    const type = layers[0].clip.transitionOut?.type;
-    if (type === 'fade' || type === 'flash') {
-      ctx.fillStyle = type === 'fade' ? '#000' : '#fff';
-      ctx.globalAlpha = Math.sin(Math.PI * p);
-      ctx.fillRect(0, 0, W, H);
-      ctx.globalAlpha = 1;
+  const clearPlate=canvas=>{
+    const target=canvas.getContext('2d');
+    target.setTransform(1,0,0,1,0,0);target.globalAlpha=1;target.globalCompositeOperation='source-over';
+    target.filter='none';target.clearRect(0,0,W,H);return target;
+  };
+  const paintTransformed=(target,type,item,painter,gain=1,timing=null)=>{
+    const alpha=(item.transform?.opacity??1)*gain;
+    if(alpha<=0)return;
+    const bounds=measureVisual(target,type,item,W,H,atTime,timing);
+    const opaqueItem={...item,transform:{...item.transform,opacity:1}};
+    if(alpha>=1){withVisualTransform(target,bounds,opaqueItem,W,H,()=>painter(target));return;}
+    // 배경·글자·테두리를 먼저 완성하고 요소 전체에 불투명도를 한 번만 적용합니다.
+    const plate=transitionPlates(ctx.canvas)[3],dest=clearPlate(plate);
+    withVisualTransform(dest,bounds,opaqueItem,W,H,()=>painter(dest));
+    target.save();target.globalAlpha*=alpha;target.drawImage(plate,0,0);target.restore();
+  };
+  const media=layersAt(t,layout);
+  for(const [index,track] of visualTracks.entries()){
+    const active=media.filter(e=>e.trackId===track.id);
+    if(active.length===1)paintMedia(ctx,active[0]);
+    else if(active.length===2){
+      // 두 투명 RGBA 레이어의 premultiplied 색과 알파를 선형 보간합니다.
+      // 아래 트랙을 먼저 칠한 뒤 일반 source-over 디졸브를 하면 배경이 과하게 비칩니다.
+      const plates=transitionPlates(ctx.canvas);
+      active.forEach((at,i)=>paintMedia(clearPlate(plates[i]),at));
+      const mixed=clearPlate(plates[2]),p=active[1].weight;
+      mixed.globalAlpha=1-p;mixed.drawImage(plates[0],0,0);
+      mixed.globalCompositeOperation='lighter';mixed.globalAlpha=p;mixed.drawImage(plates[1],0,0);
+      mixed.globalAlpha=1;
+      const type=active[0].clip.transitionOut?.type;
+      if(type==='fade'||type==='flash'){
+        mixed.globalCompositeOperation='source-atop';mixed.fillStyle=type==='fade'?'#000':'#fff';
+        mixed.globalAlpha=Math.sin(Math.PI*p);mixed.fillRect(0,0,W,H);
+      }
+      ctx.drawImage(plates[2],0,0);
+    }
+    if(index===0&&band)drawTemplate(ctx,W,H,tpl,k);
+    for(const entry of layout.items.filter(e=>e.trackId===track.id&&e.type!=='clip'&&atTime>=e.start&&atTime<e.end)){
+      const item=entry.item;
+      paintTransformed(ctx,entry.type,item,dest=>{
+        if(entry.type==='graphic')drawOverlay(dest,W,H,item,atTime,k);
+        if(entry.type==='caption'&&item.text.trim())drawCaption(dest,W,H,item,{...project.captionStyle,...item.style},k,atTime);
+      });
     }
   }
+  if(opts.safeArea)drawSafeArea(ctx,W,H,opts.safeArea);
+  if(opts.selection){
+    const selected=layout.items.find(e=>e.type===opts.selection.type&&e.id===opts.selection.id&&atTime>=e.start&&atTime<e.end);
+    if(selected&&selected.type!=='audio'){
+      const bounds=measureVisual(ctx,selected.type,selected.item,W,H,atTime);
+      drawSelection(ctx,visualCorners(bounds,selected.item,W,H),H);
+    }
+  }
+}
 
-  if (band) drawTemplate(ctx, W, H, tpl, k);
-
-  for (const o of activeOverlays(t)) drawOverlay(ctx, W, H, o, t, k);
-
-  const cap = activeCaption(t);
-  if (cap && cap.text.trim()) drawCaption(ctx, W, H, cap, { ...project.captionStyle, ...cap.style }, k, t);
-
-  if (opts.safeArea) drawSafeArea(ctx, W, H);
+/** 자르기는 원본 파일을 바꾸지 않고, 이 요소의 기본 경계 안에서만 적용합니다. */
+export function measureVisual(ctx,type,item,W,H,t=0,timing=null) {
+  const k=H/REF_H;
+  if(type==='clip'){
+    const isBase=trackIdFor('clip',item)===timelineTracks().find(track=>track.kind==='visual')?.id;
+    const band=isBase?videoBand(W,H):null,bw=band?.w||W,bh=band?.h||H;
+    const local=timing?.local??(t-(buildLayout().entries.find(e=>e.id===item.id)?.start||0));
+    const duration=item.motionDuration||(item.type==='image'?item.imgDuration:item.trimEnd-item.trimStart);
+    const g=clipGeometry(bw,bh,item.natW||W,item.natH||H,item,(local+(item.motionOffset||0))/Math.max(.001,duration));
+    return {x:g.dx+(band?.x||0),y:g.dy+(band?.y||0),w:g.dw,h:g.dh};
+  }
+  const st=type==='caption'?{...project.captionStyle,...item.style}:item;
+  const size=st.size*k,font=st.font,maxWidth=W*(type==='caption'?.86:.88);
+  ctx.save();ctx.font=(FONTS.find(f=>f.css===font)?.weight||700)+' '+size+'px '+font+', "Noto Sans KR", sans-serif';
+  const lines=wrapLines(ctx,String(item.text||' '),maxWidth);
+  const textWidth=Math.max(size,...lines.map(line=>ctx.measureText(line).width));
+  ctx.restore();
+  const lineHeight=lines.length*size*1.28;
+  if(type==='caption'){
+    const w=textWidth+size*.76,h=lineHeight+size*.32;
+    return {x:(W-w)/2,y:H*(1-st.bottom)-lineHeight-size*.16,w,h};
+  }
+  const x=(item.x??.5)*W,y=(item.y??.5)*H;
+  if(item.graphic){
+    if(item.graphic==='count')return {x:x-W*.43,y:y-size*1.3,w:W*.86,h:size*3.2};
+    if(item.graphic==='speedlines'||item.graphic==='burst')return {x:x-W*.48,y:y-W*.48,w:W*.96,h:W*.96};
+    const h=Math.max(size*2.7,lineHeight+size*.7);
+    const width=W*(item.graphic==='ribbon'?.97:.86);
+    return {x:x-width/2,y:y-h/2,w:width,h};
+  }
+  const w=textWidth+size*.76,h=lineHeight+size*.32;
+  const bx=item.align==='left'?Math.max(maxWidth*.02,x-maxWidth/2)-size*.38
+    :item.align==='right'?x+maxWidth/2-w+size*.38:x-w/2;
+  return {x:bx,y:y-h/2,w,h};
+}
+function drawSelection(ctx,corners,H){
+  ctx.save();ctx.strokeStyle='#d5ffa0';ctx.lineWidth=Math.max(2,H/650);ctx.setLineDash([]);
+  ctx.beginPath();corners.forEach((p,i)=>i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));ctx.closePath();ctx.stroke();
+  const r=Math.max(5,H/190);ctx.fillStyle='#172011';
+  for(const p of corners){ctx.fillRect(p.x-r/2,p.y-r/2,r,r);ctx.strokeRect(p.x-r/2,p.y-r/2,r,r);}
+  ctx.restore();
 }
 
 // ── 영상/이미지 레이어 ─────────────────────────────────
@@ -101,7 +146,7 @@ export function clipGeometry(W, H, sw, sh, clip, progress = 0) {
     ? Math.max(W / sw, H / sh)
     : Math.min(W / sw, H / sh);
 
-  let k = clip.scale, ox = clip.offX, oy = clip.offY;
+  let k = clip.scale ?? 1, ox = clip.offX || 0, oy = clip.offY || 0;
 
   if (clip.type === 'image' && clip.ken && clip.ken !== 'none') {
     const p = Math.min(1, Math.max(0, progress));
@@ -131,11 +176,11 @@ function drawClipLayer(ctx, W, H, at, src) {
   if (!covers) drawBackdrop(ctx, W, H, clip, src);
 
   ctx.filter = 'none';
-  ctx.globalAlpha = 1;
   drawSource(ctx, src, g.dx, g.dy, g.dw, g.dh);
 }
 
 function drawBackdrop(ctx, W, H, clip, src) {
+  if (clip.bg === 'transparent') return;
   if (clip.bg === 'black' || clip.bg === 'white') {
     ctx.fillStyle = clip.bg === 'white' ? '#fff' : '#000';
     ctx.fillRect(0, 0, W, H);
@@ -159,15 +204,6 @@ function drawSource(ctx, src, dx, dy, dw, dh) {
     if (typeof src.draw === 'function') src.draw(ctx, dx, dy, dw, dh);
     else ctx.drawImage(src.img, dx, dy, dw, dh);
   } catch { /* 아직 디코딩되지 않은 프레임은 조용히 건너뛴다 */ }
-}
-
-function fadeAlpha(clip, local, duration) {
-  let a = 0;
-  if (clip.fadeIn > 0 && local < clip.fadeIn) a = Math.max(a, 1 - local / clip.fadeIn);
-  if (clip.fadeOut > 0 && local > duration - clip.fadeOut) {
-    a = Math.max(a, 1 - (duration - local) / clip.fadeOut);
-  }
-  return Math.min(1, Math.max(0, a));
 }
 
 // ── 텍스트 ─────────────────────────────────────────────
@@ -238,10 +274,10 @@ function drawGraphic(ctx, W, H, o, t, k) {
   const accent = o.color || '#b8ee63';
   const title = (extra = {}) => drawTextBlock(ctx, {
     text: o.text, font: o.font, size, color: accent, stroke: '#101510', strokeW: 0,
-    align: 'center', x, y, maxWidth: w * .88, anchor: 'middle', alpha: Math.min(1, p * 3, q), ...extra,
+    align: 'center', x, y, maxWidth: w * .88, anchor: 'middle', alpha: 1, ...extra,
   });
   ctx.save();
-  ctx.globalAlpha = Math.min(1, p * 3, q);
+  ctx.globalAlpha *= Math.min(1, p * 3, q);
   if (o.graphic === 'kinetic') {
     const s = .68 + .32 * progress + Math.sin(p * Math.PI) * .065;
     ctx.translate(x, y); ctx.rotate(-.035 * (1 - p)); ctx.scale(s, s); ctx.translate(-x, -y);
@@ -280,11 +316,71 @@ function drawGraphic(ctx, W, H, o, t, k) {
     ctx.strokeStyle = accent;ctx.lineWidth = 8 * k;ctx.beginPath();ctx.arc(x,y,r,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.max(0,(o.end-t)/(o.end-o.start)));ctx.stroke();
     title({ text: String(Math.max(1,Math.ceil(o.end-t))), size: size * 1.5 });
     title({ text: o.text, size: size * .3, y:y+r+size*.5,color:'#fff' });
+  } else if (o.graphic === 'burst' || o.graphic === 'speedlines') {
+    const rays=o.graphic==='burst'?14:24;
+    ctx.strokeStyle=accent;ctx.lineWidth=(o.graphic==='burst'?8:3)*k;
+    for(let i=0;i<rays;i++){
+      const angle=i*Math.PI*2/rays+(o.graphic==='burst'?.12:0),inner=W*(.22+.04*Math.sin(i*3));
+      const outer=W*(.42+.05*Math.cos(i*7))*progress;
+      ctx.beginPath();ctx.moveTo(x+Math.cos(angle)*inner,y+Math.sin(angle)*inner);
+      ctx.lineTo(x+Math.cos(angle)*outer,y+Math.sin(angle)*outer);ctx.stroke();
+    }
+    const s=.6+.4*progress;ctx.translate(x,y);ctx.scale(s,s);ctx.translate(-x,-y);
+    title({color:'#fff',strokeW:7*k});
+  } else if (o.graphic === 'stomp') {
+    const s=1+1.5*Math.pow(1-progress,2);
+    ctx.translate(x,y);ctx.rotate((1-progress)*-.15);ctx.scale(s,s);ctx.translate(-x,-y);
+    title({color:accent,strokeW:8*k});
+    ctx.fillStyle=accent;ctx.fillRect(x-w*.3,y+size*.7,w*.6,6*k*progress);
+  } else if (o.graphic === 'typewriter') {
+    const h=Math.max(size*1.8,String(o.text).split('\n').length*size*1.5),elapsed=t-o.start;
+    ctx.fillStyle='#111916ed';roundRect(ctx,x-w/2,y-h/2,w,h,14*k);ctx.fill();
+    const count=Math.ceil([...o.text].length*Math.min(1,elapsed/Math.min(1.1,(o.end-o.start)*.6)));
+    title({text:[...o.text].slice(0,count).join('')+(Math.floor(elapsed*5)%2===0?'▌':''),size:size*.85});
+  } else if (o.graphic === 'glitch') {
+    const d=(1-progress)*size*.32+Math.sin((t-o.start)*70)*size*.018;
+    title({x:x-d,color:'#55eddf'});title({x:x+d,color:'#fc5f94'});title({color:accent});
+    if(p<.8){ctx.save();ctx.beginPath();ctx.rect(x-w/2,y-size*.1,w,size*.14);ctx.clip();title({x:x+size*.14,color:'#fff'});ctx.restore();}
+  } else if (o.graphic === 'underline' || o.graphic === 'marker') {
+    ctx.fillStyle=accent;
+    const h=o.graphic==='marker'?size*1.38:size*.15,by=o.graphic==='marker'?y-h/2:y+size*.62;
+    ctx.save();ctx.translate(x-w*.45,by);ctx.transform(1,0,-.09,1,0,0);ctx.fillRect(0,0,w*.9*progress,h);ctx.restore();
+    title({color:o.graphic==='marker'?'#182011':'#fff'});
+  } else if (o.graphic === 'ribbon') {
+    const h=size*1.6;
+    ctx.translate(0,(1-progress)*size);
+    ctx.fillStyle='#372a49';ctx.beginPath();ctx.moveTo(x-w/2,y);ctx.lineTo(x-w*.58,y+h*.7);ctx.lineTo(x-w*.25,y+h*.7);ctx.closePath();ctx.fill();
+    ctx.beginPath();ctx.moveTo(x+w/2,y);ctx.lineTo(x+w*.58,y+h*.7);ctx.lineTo(x+w*.25,y+h*.7);ctx.closePath();ctx.fill();
+    ctx.fillStyle=accent;ctx.fillRect(x-w/2,y-h/2,w,h);title({color:'#192012'});
+  } else if (o.graphic === 'chapter') {
+    ctx.strokeStyle=accent;ctx.lineWidth=3*k;ctx.beginPath();ctx.moveTo(x-w/2,y-size*.3);ctx.lineTo(x-w/2+w*progress,y-size*.3);ctx.stroke();
+    title({text:o.subtitle||'CHAPTER 01',font:o.font,size:size*.34,y:y-size*.95});
+    title({y:y+size*.48,color:'#fff'});
+  } else if (o.graphic === 'sticker') {
+    const s=.6+.4*progress+Math.sin(p*Math.PI)*.1;
+    ctx.translate(x,y);ctx.rotate(-.08);ctx.scale(s,s);ctx.translate(-x,-y);
+    ctx.fillStyle=accent;ctx.strokeStyle='#fff';ctx.lineWidth=9*k;
+    roundRect(ctx,x-w*.42,y-size*.9,w*.84,size*1.8,size*.6);ctx.fill();ctx.stroke();title({color:'#282331',size:size*.88});
+  } else if (o.graphic === 'zoom') {
+    const s=.2+.8*progress;ctx.translate(x,y);ctx.scale(s,s);ctx.translate(-x,-y);title({strokeW:7*k});
+  } else if (o.graphic === 'brackets') {
+    const h=size*1.85,bw=w*(.55+.45*progress);
+    ctx.strokeStyle=accent;ctx.lineWidth=6*k;
+    for(const sign of [-1,1]){const bx=x+sign*bw/2;ctx.beginPath();ctx.moveTo(bx-sign*size*.22,y-h/2);ctx.lineTo(bx,y-h/2);ctx.lineTo(bx,y+h/2);ctx.lineTo(bx-sign*size*.22,y+h/2);ctx.stroke();}
+    title({color:'#fff',size:size*.86});
+  } else if (o.graphic === 'bounce') {
+    const bounce=Math.abs(Math.sin((t-o.start)*13))*Math.exp(-(t-o.start)*7);
+    ctx.translate(x,y-size*.9*bounce);ctx.scale(1+bounce*.12,1-bounce*.12);ctx.translate(-x,-y);title({strokeW:7*k});
+  } else if (o.graphic === 'split') {
+    for(const sign of [-1,1]){
+      ctx.save();ctx.beginPath();ctx.rect(x-w/2,sign<0?y-H:y,w,H);ctx.clip();
+      title({x:x+sign*(1-progress)*W*.6,color:accent,strokeW:4*k});ctx.restore();
+    }
   } else {
     ctx.translate(0, (1 - progress) * H * .04);
     ctx.strokeStyle = accent;ctx.lineWidth = 2 * k;
     for (const sy of [-1,1]) {ctx.beginPath();ctx.moveTo(x-w*.35,y+sy*size*1.1);ctx.lineTo(x+w*.35,y+sy*size*1.1);ctx.stroke();}
-    title({ font: '"Noto Serif KR"', color: '#f2f3ec', size: size * .8 });
+    title({ color: '#f2f3ec', size: size * .8 });
   }
   ctx.restore();
 }
@@ -295,7 +391,7 @@ export function drawTextBlock(ctx, o) {
 
   const weight = (FONTS.find(f => f.css === o.font)?.weight) ?? 700;
   ctx.save();
-  ctx.globalAlpha = o.alpha ?? 1;
+  ctx.globalAlpha *= o.alpha ?? 1;
   ctx.font = `${weight} ${o.size}px ${o.font}, "Noto Sans KR", sans-serif`;
   ctx.textBaseline = 'alphabetic';
 
@@ -551,25 +647,42 @@ function avatarColor(name) {
 }
 
 // ── 안전영역 가이드 (미리보기 전용) ────────────────────
-function drawSafeArea(ctx, W, H) {
-  ctx.save();
-  ctx.strokeStyle = 'rgba(255,59,92,.75)';
-  ctx.setLineDash([12, 10]);
-  ctx.lineWidth = Math.max(2, W / 400);
-  const x = W * 0.05, top = H * 0.10, bottom = H * 0.82;
-  ctx.strokeRect(x, top, W - x * 2, bottom - top);
-  ctx.setLineDash([]);
-  ctx.fillStyle = 'rgba(255,59,92,.85)';
-  ctx.font = `700 ${Math.round(H / 70)}px "Noto Sans KR", sans-serif`;
-  ctx.textAlign = 'left';
-  ctx.fillText('안전영역 — 이 밖은 UI에 가려질 수 있어요', x + 8, top - 12);
+function drawSafeArea(ctx,W,H,config) {
+  const guide=config===true?safeAreaConfig():config,rect=safeAreaRect(guide,W,H);
+  ctx.save();ctx.fillStyle='rgba(8,10,12,.36)';
+  ctx.beginPath();ctx.rect(0,0,W,H);ctx.rect(rect.x,rect.y,rect.w,rect.h);ctx.fill('evenodd');
+  ctx.strokeStyle=guide.color;ctx.setLineDash([12,10]);ctx.lineWidth=Math.max(2,W/400);
+  ctx.strokeRect(rect.x,rect.y,rect.w,rect.h);ctx.setLineDash([]);
+  ctx.fillStyle=guide.color;ctx.font='700 '+Math.round(H/78)+'px "Noto Sans KR", sans-serif';
+  ctx.textAlign='left';ctx.textBaseline='bottom';ctx.fillText(guide.name+' · 참고영역',rect.x+8,rect.y-12);
   ctx.restore();
 }
 
-// ── 폰트 로딩 ──────────────────────────────────────────
-export async function loadFonts() {
-  if (!document.fonts) return;
-  await Promise.all(FONTS.map(f =>
-    document.fonts.load(`${f.weight} 80px ${f.css}`).catch(() => {})));
-  await document.fonts.ready;
+/** 실제 사용 중인 텍스트만 준비합니다. 내보내기는 폰트 실패를 숨기지 않습니다. */
+export async function loadFonts({signal}={}) {
+  if(typeof document==='undefined'||!document.fonts)return;
+  const used=new Map();
+  const add=(font,text,weight=null)=>{
+    if(!font||!text)return;
+    const key=font+':'+(weight||'default'),entry=used.get(key)||{font,weight,text:''};
+    entry.text+=text;used.set(key,entry);
+  };
+  for(const item of project.captions)add(item.style?.font||project.captionStyle.font,item.text);
+  for(const item of project.overlays){
+    add(item.font,item.text);
+    if(item.graphic==='count')add(item.font,'0123456789');
+    if(item.graphic==='typewriter')add(item.font,'▌');
+    if(item.graphic==='chapter')add(item.font,item.subtitle||'CHAPTER 01');
+    if(item.graphic==='lower')add('"Noto Sans KR"',item.subtitle||'SHORTS STUDIO');
+  }
+  if(project.template.mode==='band'){
+    const {hook,comment,credit}=project.template;
+    if(hook?.on)add(hook.font,hook.text);
+    if(comment?.on){
+      add('"Noto Sans KR"',comment.text+(comment.time||''),400);
+      add('"Noto Sans KR"','@'+(comment.name||'?')+'♥'+(comment.likes||''),700);
+    }
+    if(credit?.on)add('"Noto Sans KR"',credit.text,700);
+  }
+  await Promise.all([...used.values()].map(({font,text,weight})=>ensureFont(font,text,weight,{signal})));
 }

@@ -2,14 +2,18 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
-import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration} from '../public/js/state.js';
+import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack} from '../public/js/state.js';
 import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,packProject,unpackProject,validateDocument,clearAssets,waveformOf,demoSound} from '../public/js/project-store.js';
 import {encodeWav,transcriptionCaptions} from '../public/js/ai-client.js';
-import {renderFrame} from '../public/js/render.js';
+import {renderFrame,measureVisual,loadFonts} from '../public/js/render.js';
 import {Player} from '../public/js/player.js';
 import {GRAPHICS,CAPTIONS} from '../public/js/presets.js';
-import {frameTime,itemRange,splitAvailability,splitTimelineItem,setItemRange,planVideoPlacement,placeVideoClip,setTransition,planClipTrim,applyClipTrim,deleteTimelineItem} from '../public/js/timeline-edits.js';
+import {frameTime,itemRange,splitAvailability,splitTimelineItem,setItemRange,planVideoPlacement,placeVideoClip,setTransition,planClipTrim,applyClipTrim,deleteTimelineItem,planPlacement,placeTimelineItem,trackGaps,currentGap,closeTimelineGap,planItemTrim,applyItemTrim} from '../public/js/timeline-edits.js';
 import {Timeline} from '../public/js/timeline.js';
+import {transformOf,visualCorners,alignVisual,withVisualTransform,croppedBounds} from '../public/js/visual-transform.js';
+import {SAFE_AREAS,safeAreaConfig,safeAreaRect} from '../public/js/safe-areas.js';
+import {FONTS,ensureFont} from '../public/js/font-catalog.js';
+import {SOUND_EFFECTS,synthesizeEffect,createSoundEffect} from '../public/js/sound-effects.js';
 import {applyFade,mixTimeline} from '../public/js/audio.js';
 
 const require=createRequire(import.meta.url);
@@ -29,18 +33,22 @@ test('dissolve: 4s + 3s with 1s overlap is 6s; weights sum to one',()=>{
   assert.deepEqual(layersAt(6).map(l=>l.clip.id),['b']);
 });
 
-test('short clips never produce three active layers or audio gain over one',()=>{
+test('short clips never produce three active media or gain over one within a track',()=>{
   reset();project.clips=[clip('a',.4,2),clip('b',.2,2),clip('c',.4,2)];
   const layout=buildLayout();assert.equal(layout.entries[0].overlapOut,.1);assert.equal(layout.entries[1].overlapOut,.1);
-  for(let t=0;t<layout.total;t+=.001){const ls=layersAt(t);assert.ok(ls.length<=2);assert.ok(Math.abs(ls.reduce((s,l)=>s+l.weight,0)-1)<1e-8);}
+  project.clips.push({...clip('upper',1),start:0,trackId:'v2'});
+  for(let t=0;t<layout.total;t+=.001)for(const track of timelineTracks().filter(t=>t.kind==='visual')){const ls=layersAt(t).filter(l=>l.trackId===track.id);assert.ok(ls.length<=2);if(ls.length)near(ls.reduce((s,l)=>s+l.weight,0),1);}
 });
 
-test('optional anchors preserve duration during reorder/trim and detach when their video is deleted',()=>{
-  reset();const a={...clip('a',4),type:'video',trimStart:10,trimEnd:14};const b=clip('b',3);project.clips=[a,b];
-  const cap={id:'cap',text:'caption',start:1,end:2};project.captions=[cap];anchorItem(cap,'a');
-  project.clips=[b,a];syncAnchoredItems();assert.deepEqual([cap.start,cap.end],[4,5]);
-  a.trimStart=11.5;syncAnchoredItems();assert.deepEqual([cap.start,cap.end],[2.5,3.5]);
-  project.clips=[b];syncAnchoredItems();assert.deepEqual([cap.start,cap.end],[2.5,3.5]);assert.equal(cap.anchor,undefined);
+test('legacy anchors detach without moving captions or graphics during video edits',()=>{
+  reset();const a={...clip('a',4),type:'video',trimStart:10,trimEnd:14,srcDuration:18,start:0};const b={...clip('b',3),start:6};project.clips=[a,b];
+  const cap={id:'cap',text:'caption',start:1,end:2,anchor:{clipId:'a',sourceStart:11,sourceEnd:12}};
+  const graphic={id:'g',text:'graphic',start:.5,end:3,anchor:{clipId:'a',sourceStart:10.5,sourceEnd:13}};
+  project.captions=[cap];project.overlays=[graphic];migrateTimeline();
+  const before=captureDocument();
+  placeVideoClip(a,planPlacement(12,4,'v1','a'));applyClipTrim(planClipTrim('a','start',13));deleteTimelineItem({type:'clip',id:'a'},true);
+  assert.deepEqual(captureDocument().captions,before.captions);assert.deepEqual(captureDocument().overlays,before.overlays);
+  assert.equal(cap.anchor,undefined);assert.equal(graphic.anchor,undefined);
 });
 
 test('fade gain is clamped to half-duration and remains finite',()=>{
@@ -88,7 +96,9 @@ test('portable image project round-trip replaces old assets and retains edits', 
   const a=await addAsset(photo,{id:'saved-image'});project.clips=[await makeClip(a.id,{id:'saved-clip',start:2,imgDuration:5,scale:1.2,ken:'in',fadeIn:1})];
   await splitTimelineItem({type:'clip',id:'saved-clip'},4);
   project.clips.push(await makeClip(a.id,{id:'after-gap',start:10,imgDuration:2}));
-  project.captions=[{id:'saved-caption',text:'Round trip',start:1,end:2}];
+  project.captions=[{id:'saved-caption',text:'Round trip',start:1,end:2,trackId:'v2',transform:{rotation:12,offsetX:.1},crop:{left:.1}}];
+  migrateTimeline();addTimelineTrack('visual');addTimelineTrack('audio');
+  project.clips[0].transform={scaleX:.8,scaleY:1.1,opacity:.7,flipX:true};project.clips[0].crop={top:.12,bottom:.2};
   const expected=captureDocument(),packed=packProject();await addAsset(photo,{id:'unrelated-old-project'});
   project.clips[0].scale=2;
   await unpackProject(packed);assert.deepEqual(captureDocument(),expected);assert.deepEqual([...assets.keys()],['saved-image']);
@@ -147,7 +157,7 @@ test('shared renderer produces an opaque red/blue midpoint and real fade/flash',
   project.clips[0].transitionOut.type='flash';renderFrame(ctx,3.5,opts);assert.deepEqual([...ctx.getImageData(45,80,1,1).data],[255,255,255,255]);
 });
 
-test('all six graphics and eight caption presets render with the shared canvas path', {skip:!canvasModule},()=>{
+test('all graphics and caption presets render with the shared canvas path', {skip:!canvasModule},()=>{
   reset();project.clips=[clip('image',4)];const {createCanvas}=canvasModule,canvas=createCanvas(180,320),ctx=canvas.getContext('2d');
   renderFrame(ctx,1);const empty=Buffer.from(ctx.getImageData(0,0,180,320).data);
   for(const preset of GRAPHICS){
@@ -176,9 +186,12 @@ function fixtureAudio(id,duration=6,overrides={}){
 const near=(actual,expected)=>assert.ok(Math.abs(actual-expected)<1e-7,actual+' != '+expected);
 function assertValidLayout(){
   const entries=buildLayout().entries;
-  for(let i=0;i<entries.length;i++){
-    const e=entries[i];assert.ok(Number.isFinite(e.start)&&e.start>=0);assert.ok(e.duration>=1/project.fps-1e-7);
-    if(entries[i+1]&&e.end>entries[i+1].start+1e-6)assert.ok(e.overlapOut>0);
+  for(const track of timelineTracks()){
+    const row=entries.filter(e=>e.trackId===track.id);
+    for(let i=0;i<row.length;i++){
+      const e=row[i];assert.ok(Number.isFinite(e.start)&&e.start>=0);assert.ok(e.duration>=1/project.fps-1e-7);
+      if(row[i+1]&&e.end>row[i+1].start+1e-6)assert.ok(e.overlapOut>0&&e.nextId===row[i+1].id);
+    }
   }
 }
 
@@ -203,12 +216,12 @@ test('manual caption and graphic movement detaches anchors without clipping at v
   assert.equal(totalDuration(),10);
 });
 
-test('save/undo preserves explicit starts and migrates old contiguous projects to version 2',async()=>{
+test('save/undo preserves explicit starts and migrates old contiguous projects to version 3',async()=>{
   reset();project.clips=[await fixtureClip('a'),await fixtureClip('b',3)];
   project.clips[0].transitionOut={type:'dissolve',duration:1};
-  const legacy=captureDocument();legacy.version=1;for(const c of legacy.clips){delete c.start;delete c.transitionOut.toId;}
+  const legacy=captureDocument();legacy.version=1;delete legacy.timelineTracks;for(const c of legacy.clips){delete c.start;delete c.trackId;delete c.transitionOut.toId;}
   restoreDocument(legacy);
-  const before=captureDocument();assert.equal(before.version,2);assert.deepEqual(before.clips.map(c=>c.start),[0,3]);assert.equal(before.clips[0].transitionOut.toId,'b');
+  const before=captureDocument();assert.equal(before.version,3);assert.deepEqual(before.clips.map(c=>c.start),[0,3]);assert.equal(before.clips[0].transitionOut.toId,'b');
   assert.equal(new History().push(before,'no change'),false);
   const history=new History();placeVideoClip(project.clips[1],planVideoPlacement(9,3,'b'));history.push(before,'move');
   assert.deepEqual(captureDocument().clips.map(c=>c.start),[0,9]);history.undo();assert.deepEqual(captureDocument(),before);
@@ -218,7 +231,6 @@ test('save/undo preserves explicit starts and migrates old contiguous projects t
 test('S splits only the selected video while caption, graphic and audio timing stays intact',async()=>{
   reset();project.clips=[await fixtureClip('video',6,'video',{start:2})];
   project.captions=[{id:'caption',text:'whole caption',start:2,end:8}];project.overlays=[{id:'graphic',text:'whole graphic',start:2,end:8}];
-  anchorItem(project.captions[0],'video');anchorItem(project.overlays[0],'video');
   project.audio.tracks=[fixtureAudio('music',10,{start:0})];
   const before=captureDocument(),history=new History();
   const result=await splitTimelineItem({type:'clip',id:'video'},4);syncAnchoredItems();
@@ -301,17 +313,17 @@ test('transitions belong to adjacent pairs and update the right side only, inclu
   project.captions=[{id:'c1',text:'independent',start:3,end:12}];
   assert.deepEqual(transitionPairs().map(p=>[p.left.clip.id,p.right.clip.id]),[['a','b']]);
   const pair=setTransition('a','b','dissolve',1);assert.deepEqual([pair.start,pair.end,pair.center],[3,4,3.5]);
-  assert.deepEqual(project.clips.map(c=>c.start),[0,3,9]);assert.deepEqual(project.captions[0],{id:'c1',text:'independent',start:3,end:12});
+  assert.deepEqual(project.clips.map(c=>c.start),[0,3,9]);assert.deepEqual(project.captions[0],{id:'c1',text:'independent',start:3,end:12,trackId:'v3'});
   assert.throws(()=>setTransition('b','c','dissolve',.5),/맞닿은/);
   setTransition('a','b','flash',.5);assert.deepEqual(project.clips.map(c=>c.start),[0,3.5,9.5]);
   setTransition('a','b','dissolve',0);assert.equal(transitionPairs()[0].type,'cut');assert.deepEqual(project.clips.map(c=>c.start),[0,4,10]);
 });
 
-test('Delete leaves a gap; ripple delete closes time on just the selected track/lane',()=>{
+test('Delete leaves a gap; ripple delete closes time on just the selected numbered track',()=>{
   for(const ripple of [false,true]){
     reset();project.clips=[{...clip('a',3),start:0},{...clip('b',3),start:3},{...clip('c',3),start:6}];
     project.captions=[{id:'cap',text:'keep',start:4,end:8}];project.audio.tracks=[{id:'audio',lane:'music',start:1,trimStart:0,trimEnd:8}];
-    const others=JSON.stringify([project.captions,project.audio.tracks]);deleteTimelineItem({type:'clip',id:'b'},ripple);
+    migrateTimeline();const others=JSON.stringify([project.captions,project.audio.tracks]);deleteTimelineItem({type:'clip',id:'b'},ripple);
     assert.deepEqual(buildLayout().entries.map(e=>e.start),[0,ripple?3:6]);assert.equal(JSON.stringify([project.captions,project.audio.tracks]),others);assertValidLayout();
   }
   reset();project.audio.tracks=[{id:'a',lane:'music',start:0,trimStart:1,trimEnd:3},{id:'b',lane:'music',start:4,trimStart:0,trimEnd:2},{id:'voice',lane:'voice',start:4,trimStart:0,trimEnd:2}];
@@ -323,10 +335,10 @@ test('Delete leaves a gap; ripple delete closes time on just the selected track/
 test('deleting a video between two dissolves keeps a valid gap or closes the effective span',()=>{
   for(const ripple of [false,true]){
     reset();project.clips=[clip('a',4,1),clip('b',4,1),clip('c',4)];pinClipPositions();
-    project.overlays=[{id:'g',text:'keep',start:4,end:7}];anchorItem(project.overlays[0],'b');
+    project.overlays=[{id:'g',text:'keep',start:4,end:7}];
     deleteTimelineItem({type:'clip',id:'b'},ripple);
     assert.deepEqual(buildLayout().entries.map(e=>e.start),[0,ripple?4:6]);assertValidLayout();
-    assert.deepEqual(project.overlays[0],{id:'g',text:'keep',start:4,end:7});
+    assert.deepEqual(project.overlays[0],{id:'g',text:'keep',start:4,end:7,trackId:'v2'});
   }
 });
 
@@ -340,17 +352,19 @@ test('trimming fixes the opposite edge, honors media bounds, and leaves neighbor
   const extendLeft=planClipTrim('video','start',0);applyClipTrim(extendLeft);assert.equal(project.clips[0].start,3);assert.equal(project.clips[0].trimStart,0);
 });
 
-test('drag metadata produces a full-duration ghost with the exact committed placement',async()=>{
+test('drag metadata keeps the compatible destination track and exact full-duration ghost',async()=>{
   reset();project.clips=[await fixtureClip('a',4,'image',{start:0}),await fixtureClip('b',4,'image',{start:4})];
-  await fixtureClip('source-video',7.25,'video');await fixtureClip('source-image',9);
-  const timeline=Object.create(Timeline.prototype);Object.assign(timeline,{zoom:100,time:0,snapping:false,canvas:{getBoundingClientRect:()=>({left:0})}});
-  timeline.external={kind:'asset',id:'asset-source-image'};const imagePlan=timeline.externalPlan(900,'clips');assert.deepEqual([imagePlan.start,imagePlan.end],[9,12]);
-  timeline.external={kind:'asset',id:'asset-source-video'};const videoPlan=timeline.externalPlan(400,'audio');
-  assert.equal(videoPlan.lane,'clips');assert.equal(videoPlan.end-videoPlan.start,7.25);
-  const inserted=await makeClip('asset-source-video');const actual=placeVideoClip(inserted,videoPlan.placement);assert.deepEqual([actual.start,actual.end],[videoPlan.start,videoPlan.end]);
-  timeline.external={kind:'preset',id:'g:pop'};assert.equal(timeline.externalPlan(1800,'voice').end,21);
-  timeline.external={kind:'preset',id:'c:pill'};assert.equal(timeline.externalPlan(1800,'clips').lane,'captions');
-  timeline.external={kind:'preset',id:'t:dissolve'};assert.equal(timeline.externalPlan(1800,'clips'),null);
+  await fixtureClip('source-video',7.25,'video');await fixtureClip('source-image',9);fixtureAudio('sfx',.65);
+  const timeline=Object.create(Timeline.prototype);Object.assign(timeline,{zoom:100,time:0,snapping:false,callbacks:{graphic:id=>GRAPHICS.find(g=>g.id===id),sound:id=>SOUND_EFFECTS.find(s=>s.id===id)},canvas:{getBoundingClientRect:()=>({left:0})}});
+  timeline.external={kind:'asset',id:'asset-source-image'};const imagePlan=timeline.externalPlan(900,'v1');assert.deepEqual([imagePlan.start,imagePlan.end],[9,12]);
+  timeline.external={kind:'asset',id:'asset-source-video'};assert.equal(timeline.externalPlan(400,'a1'),null);
+  const videoPlan=timeline.externalPlan(400,'v2');assert.equal(videoPlan.trackId,'v2');near(videoPlan.end-videoPlan.start,7.25);
+  const inserted=await makeClip('asset-source-video');const actual=placeVideoClip(inserted,videoPlan.placement);
+  assert.deepEqual([actual.trackId,actual.start,actual.end],[videoPlan.trackId,videoPlan.start,videoPlan.end]);assert.deepEqual(project.clips.slice(0,2).map(c=>c.start),[0,4]);
+  timeline.external={kind:'preset',id:'g:burst'};const graphic=timeline.externalPlan(1800,'v3');near(graphic.end,19);assert.equal(timeline.externalPlan(1800,'a2'),null);
+  timeline.external={kind:'preset',id:'c:pill'};assert.equal(timeline.externalPlan(1800,'v1').lane,'v1');
+  timeline.external={kind:'preset',id:'sfx:whoosh'};const sound=timeline.externalPlan(1800,'a2');near(sound.end,18.65);assert.equal(timeline.externalPlan(1800,'v1'),null);
+  timeline.external={kind:'preset',id:'t:dissolve'};assert.equal(timeline.externalPlan(1800,'v1'),null);
   assertValidLayout();
 });
 
@@ -403,4 +417,252 @@ test('deterministic mixed edits never create an unapproved video overlap',()=>{
     else{const pairs=transitionPairs();if(pairs.length){const pair=pairs[Math.floor(random()*pairs.length)];setTransition(pair.left.clip.id,pair.right.clip.id,random()>.5?'dissolve':'cut',random());}}
     assertValidLayout();
   }
+});
+
+test('numbered tracks expand without coupling clip kind or narration role',()=>{
+  reset();project.clips=[{...clip('media',3),start:0}];
+  project.overlays=[{id:'g',text:'G',start:1,end:2}];project.captions=[{id:'c',text:'C',start:1,end:2}];
+  project.audio.tracks=[fixtureAudio('voice',4,{lane:'voice'}),fixtureAudio('music',4)];
+  migrateTimeline();
+  assert.deepEqual([project.clips[0].trackId,project.overlays[0].trackId,project.captions[0].trackId],['v1','v2','v3']);
+  assert.deepEqual(project.audio.tracks.map(t=>[t.trackId,t.role]),[['a2','voice'],['a1','music']]);
+  const visual=addTimelineTrack('visual'),audio=addTimelineTrack('audio');
+  assert.equal(trackLabel(visual.id),'영상 4');assert.equal(trackLabel(audio.id),'오디오 3');
+  assert.throws(()=>removeTimelineTrack('v1'),/빈 트랙/);assert.equal(removeTimelineTrack(visual.id),true);
+  assert.equal(project.clips[0].trackId,'v1');
+});
+
+test('mixed visual insertion and cross-track movement shift only destination-track items',()=>{
+  reset();project.clips=[{...clip('a',4),start:0,trackId:'v1'},{...clip('b',3),start:4,trackId:'v1'}];
+  project.captions=[{id:'c',text:'same track',start:8,end:9,trackId:'v1'},{id:'other',text:'other track',start:8,end:9,trackId:'v3'}];
+  const graphic={id:'g',text:'insert',start:0,end:2,trackId:'v2'};
+  const plan=planPlacement(2,2,'v1');assert.equal(plan.start,4);
+  assert.deepEqual(plan.shifts.map(s=>[s.type,s.id,s.start]),[['clip','b',6],['caption','c',10]]);
+  placeTimelineItem('graphic',graphic,plan);
+  assert.deepEqual([graphic.trackId,graphic.start,graphic.end],['v1',4,6]);
+  assert.deepEqual(project.captions.map(c=>c.start),[10,8]);
+  const before=captureDocument();placeTimelineItem('graphic',graphic,planPlacement(1,2,'v2','g'));
+  assert.deepEqual(captureDocument().clips,before.clips);assert.deepEqual(captureDocument().captions,before.captions);
+  assert.deepEqual([graphic.trackId,graphic.start,graphic.end],['v2',1,3]);assertValidLayout();
+});
+
+test('simultaneous transitions on separate tracks retain all four media instances',()=>{
+  reset();project.clips=[
+    {...clip('a',4,1),start:0,trackId:'v1'},{...clip('b',4),start:3,trackId:'v1'},
+    {...clip('c',4,1),start:0,trackId:'v2'},{...clip('d',4),start:3,trackId:'v2'},
+  ];
+  migrateTimeline();assert.equal(transitionPairs().length,2);
+  const active=layersAt(3.5);assert.equal(active.length,4);
+  for(const id of ['v1','v2'])near(active.filter(e=>e.trackId===id).reduce((n,e)=>n+e.weight,0),1);
+  setTransition('a','b','cut',0);assert.equal(project.clips.find(c=>c.id==='b').start,4);
+  assert.equal(project.clips.find(c=>c.id==='d').start,3);assert.equal(transitionPairs().find(p=>p.trackId==='v2').duration,1);
+  placeVideoClip(project.clips[0],planPlacement(10,4,'v3','a'));
+  assert.equal(transitionPairs().find(p=>p.trackId==='v2').duration,1);assertValidLayout();
+});
+
+test('gap closure handles mixed content, leading gaps and stale selections without touching other tracks',()=>{
+  reset();project.clips=[{...clip('v',2),start:0,trackId:'v1'},{...clip('other',2),start:4,trackId:'v2'}];
+  project.captions=[{id:'c',text:'caption',start:5,end:6,trackId:'v1'}];
+  project.overlays=[{id:'g',text:'graphic',start:8,end:9,trackId:'v1'}];
+  project.audio.tracks=[fixtureAudio('audio',3,{start:7,trackId:'a1'})];migrateTimeline();
+  const gap=trackGaps('v1')[0];assert.deepEqual([gap.start,gap.end],[2,5]);
+  const others=captureDocument().tracks;assert.equal(closeTimelineGap(gap),true);
+  assert.deepEqual([project.captions[0].start,project.overlays[0].start],[2,5]);assert.equal(project.clips[1].start,4);
+  assert.deepEqual(captureDocument().tracks,others);assert.equal(currentGap(gap),null);assert.equal(closeTimelineGap(gap),false);
+  const leading=trackGaps('v2')[0];assert.deepEqual([leading.start,leading.end],[0,4]);closeTimelineGap(leading);
+  assert.equal(project.clips[1].start,0);assert.equal(project.overlays[0].start,5);
+  deleteTimelineItem(trackGaps('a1')[0]);assert.equal(project.audio.tracks[0].start,0);
+});
+
+test('gap detection uses occupied unions and exposes no unbounded trailing gap',()=>{
+  reset();project.overlays=[{id:'a',text:'A',start:1,end:4,trackId:'v2'},{id:'b',text:'B',start:3,end:7,trackId:'v2'},{id:'c',text:'C',start:9,end:10,trackId:'v2'}];
+  assert.deepEqual(trackGaps('v2').map(g=>[g.start,g.end]),[[0,1],[7,9]]);
+  assert.deepEqual(trackGaps('v1'),[]);
+});
+
+test('ripple deletion shifts other visual kinds on the same track but leaves matching kinds elsewhere',()=>{
+  reset();project.clips=[{...clip('v',2),start:0,trackId:'v1'}];
+  project.captions=[{id:'c',text:'C',start:3,end:4,trackId:'v1'},{id:'other',text:'O',start:3,end:4,trackId:'v3'}];
+  project.overlays=[{id:'g',text:'G',start:5,end:6,trackId:'v1'}];
+  deleteTimelineItem({type:'clip',id:'v'},true);
+  assert.deepEqual(project.captions.map(c=>c.start),[1,3]);assert.equal(project.overlays[0].start,3);
+});
+
+test('audio and text trim share neighbor limits and keep the opposite timeline edge fixed',()=>{
+  reset();project.audio.tracks=[fixtureAudio('a',8,{start:2,trimStart:1,trimEnd:3,trackId:'a1'}),fixtureAudio('b',3,{start:5,trackId:'a1'})];
+  applyItemTrim(planItemTrim('audio','a','end',10));
+  assert.deepEqual([project.audio.tracks[0].start,project.audio.tracks[0].trimStart,project.audio.tracks[0].trimEnd],[2,1,4]);
+  applyItemTrim(planItemTrim('audio','a','start',3));
+  assert.deepEqual([project.audio.tracks[0].start,project.audio.tracks[0].trimStart,project.audio.tracks[0].trimEnd],[3,2,4]);
+  near(itemRange('audio','a').end,5);assert.equal(project.audio.tracks[1].start,5);
+  project.captions=[{id:'c',text:'C',start:0,end:2,trackId:'v1'}];project.overlays=[{id:'g',text:'G',start:3,end:5,trackId:'v1'}];
+  applyItemTrim(planItemTrim('caption','c','end',8));assert.equal(project.captions[0].end,3);
+});
+
+test('v2 explicit timing and legacy anchors restore into v3 without a position jump',async()=>{
+  reset();project.clips=[await fixtureClip('a',4,'image',{start:6})];
+  project.captions=[{id:'c',text:'keep',start:7,end:9}];
+  const legacy=captureDocument();legacy.version=2;delete legacy.timelineTracks;
+  for(const item of [...legacy.clips,...legacy.captions])delete item.trackId;
+  legacy.captions[0].anchor={clipId:'a',sourceStart:1,sourceEnd:3};
+  restoreDocument(legacy);assert.deepEqual([project.clips[0].start,project.captions[0].start,project.captions[0].end],[6,7,9]);
+  placeVideoClip(project.clips[0],planPlacement(0,4,'v2','a'));
+  assert.deepEqual([project.captions[0].start,project.captions[0].end,project.captions[0].anchor],[7,9,undefined]);
+  const saved=captureDocument();assert.equal(saved.version,3);assert.equal(saved.clips[0].trackId,'v2');
+});
+
+test('v3 validates track compatibility and finite transform/crop ranges while accepting cross-track overlap',async()=>{
+  reset();project.clips=[await fixtureClip('a',3,'image',{start:0,trackId:'v1'}),await fixtureClip('b',3,'image',{start:0,trackId:'v2'})];
+  const valid=captureDocument(),records=[...assets.keys()].map(id=>({id}));assert.doesNotThrow(()=>validateDocument(valid,records));
+  for(const change of [{trackId:'missing'},{trackId:'a1'},{transform:{rotation:NaN}},{transform:{scaleX:0}},{crop:{left:.6,right:.6}}]){
+    const doc=structuredClone(valid);Object.assign(doc.clips[0],change);assert.throws(()=>validateDocument(doc,records));
+  }
+  const duplicated=structuredClone(valid);duplicated.timelineTracks.push({...duplicated.timelineTracks[0]});assert.throws(()=>validateDocument(duplicated,records));
+});
+
+test('centering uses the visible crop and preserves rotation, flips and independent scales',()=>{
+  const item={transform:{scaleX:1.3,scaleY:.7,rotation:37,flipX:true,offsetX:.4,offsetY:-.2},crop:{left:.3,top:.1,right:.05,bottom:.2}};
+  const bounds={x:100,y:300,w:600,h:900},original={...item.transform};
+  alignVisual(item,bounds,1080,1920,'x');alignVisual(item,bounds,1080,1920,'y');
+  const corners=visualCorners(bounds,item,1080,1920);
+  near(corners.reduce((n,p)=>n+p.x,0)/4,540);near(corners.reduce((n,p)=>n+p.y,0)/4,960);
+  assert.equal(item.transform.rotation,original.rotation);assert.equal(item.transform.flipX,true);assert.equal(item.transform.scaleY,.7);
+});
+
+test('three visual tracks composite in stable order and preserve uncovered lower pixels',{skip:!canvasModule},()=>{
+  reset();const {createCanvas}=canvasModule,W=90,H=160,out=createCanvas(W,H),ctx=out.getContext('2d');
+  const sources={};for(const [id,color] of [['red','#ff0000'],['blue','#0000ff'],['green','#00ff00']]){
+    const canvas=createCanvas(W,H),g=canvas.getContext('2d');g.fillStyle=color;g.fillRect(0,0,W,H);sources[id]=canvas;
+  }
+  project.clips=[
+    {...clip('red',4),start:0,trackId:'v1',natW:W,natH:H},
+    {...clip('blue',4),start:0,trackId:'v2',natW:W,natH:H,bg:'transparent',crop:{right:.5}},
+    {...clip('green',4),start:0,trackId:'v3',natW:W,natH:H,bg:'transparent',crop:{right:.5,bottom:.5}},
+  ];
+  const opts={source:c=>({img:sources[c.id],w:W,h:H})};renderFrame(ctx,1,opts);
+  assert.deepEqual([...ctx.getImageData(20,30,1,1).data],[0,255,0,255]);
+  assert.deepEqual([...ctx.getImageData(20,120,1,1).data],[0,0,255,255]);
+  assert.deepEqual([...ctx.getImageData(70,30,1,1).data],[255,0,0,255]);
+  migrateTimeline();project.timelineTracks=[...project.timelineTracks.filter(t=>t.kind==='visual').reverse(),...project.timelineTracks.filter(t=>t.kind==='audio')];
+  renderFrame(ctx,1,opts);assert.deepEqual([...ctx.getImageData(20,30,1,1).data],[255,0,0,255]);
+});
+
+test('transparent dissolve weights do not double-attenuate the lower track',{skip:!canvasModule},()=>{
+  reset();const {createCanvas}=canvasModule,W=90,H=160,out=createCanvas(W,H),ctx=out.getContext('2d'),sources={};
+  for(const [id,color] of [['base','#00ff00'],['a','#ff0000'],['b','#0000ff']]){
+    const c=createCanvas(W,H),g=c.getContext('2d');g.fillStyle=color;g.fillRect(0,0,W,H);sources[id]=c;
+  }
+  project.clips=[
+    {...clip('base',4),start:0,trackId:'v1',natW:W,natH:H},
+    {...clip('a',2,.5),start:0,trackId:'v2',natW:W,natH:H,bg:'transparent',crop:{right:.5}},
+    {...clip('b',2),start:1.5,trackId:'v2',natW:W,natH:H,bg:'transparent',crop:{left:.5}},
+  ];
+  renderFrame(ctx,1.75,{source:c=>({img:sources[c.id],w:W,h:H})});
+  const left=[...ctx.getImageData(20,80,1,1).data],right=[...ctx.getImageData(70,80,1,1).data];
+  assert.ok(Math.abs(left[0]-128)<=1&&Math.abs(left[1]-128)<=1);assert.equal(left[2],0);
+  assert.ok(Math.abs(right[1]-128)<=1&&Math.abs(right[2]-128)<=1);assert.equal(right[0],0);
+});
+
+test('clip opacity applies once to the completed source and backdrop group',{skip:!canvasModule},()=>{
+  reset();const {createCanvas}=canvasModule,W=90,H=160,out=createCanvas(W,H),ctx=out.getContext('2d');
+  const base=createCanvas(W,H),top=createCanvas(90,90);base.getContext('2d').fillStyle='#ff0000';base.getContext('2d').fillRect(0,0,W,H);
+  top.getContext('2d').fillStyle='#0000ff';top.getContext('2d').fillRect(0,0,90,90);
+  project.clips=[{...clip('base',4),start:0,trackId:'v1',natW:W,natH:H},{...clip('top',4),start:0,trackId:'v2',fit:'contain',bg:'black',natW:90,natH:90,transform:{opacity:.5}}];
+  renderFrame(ctx,1,{source:c=>({img:c.id==='base'?base:top,w:90,h:c.id==='base'?H:90})});
+  const center=[...ctx.getImageData(45,80,1,1).data],bar=[...ctx.getImageData(45,5,1,1).data];
+  assert.ok(Math.abs(center[0]-128)<=1&&Math.abs(center[2]-128)<=1);assert.equal(center[1],0);
+  assert.ok(Math.abs(bar[0]-128)<=1);assert.deepEqual(bar.slice(1),[0,0,255]);
+});
+
+test('multiple captions render simultaneously and transform/crop leave time ranges unchanged',{skip:!canvasModule},()=>{
+  reset();const {createCanvas}=canvasModule,canvas=createCanvas(270,480),ctx=canvas.getContext('2d');
+  project.captions=[{id:'a',text:'UPPER',start:0,end:3,trackId:'v1',style:{...CAPTIONS[0].style,bottom:.7}},
+    {id:'b',text:'LOWER',start:0,end:3,trackId:'v2',style:{...CAPTIONS[0].style,bottom:.2}}];
+  renderFrame(ctx,1);const both=Buffer.from(ctx.getImageData(0,0,270,480).data);
+  const top=project.captions.shift();renderFrame(ctx,1);const lower=Buffer.from(ctx.getImageData(0,0,270,480).data);assert.notDeepEqual(both,lower);
+  project.captions=[top];renderFrame(ctx,1);assert.notDeepEqual(both,Buffer.from(ctx.getImageData(0,0,270,480).data));
+  top.transform={rotation:25,scaleX:.8,scaleY:.8,flipX:true,opacity:.6};top.crop={left:.1};
+  renderFrame(ctx,1);assert.deepEqual([top.start,top.end],[0,3]);assert.notDeepEqual(both,Buffer.from(ctx.getImageData(0,0,270,480).data));
+});
+
+test('rendered visual fade survives a split inside its envelope',{skip:!canvasModule},async()=>{
+  reset();const {createCanvas}=canvasModule,W=90,H=160,bitmap=createCanvas(W,H),out=createCanvas(W,H),ctx=out.getContext('2d');
+  bitmap.getContext('2d').fillStyle='#0000ff';bitmap.getContext('2d').fillRect(0,0,W,H);
+  assets.set('image',{id:'image',kind:'image',file:new File(['fixture'],'image.png',{type:'image/png'}),duration:4,base:{...clip('base',4),bitmap,natW:W,natH:H}});
+  project.clips=[await makeClip('image',{id:'split',start:0,fadeIn:1})];
+  const opts={source:()=>({img:bitmap,w:W,h:H})};renderFrame(ctx,.75,opts);const before=[...ctx.getImageData(45,80,1,1).data];
+  await splitTimelineItem({type:'clip',id:'split'},.5);renderFrame(ctx,.75,opts);assert.deepEqual([...ctx.getImageData(45,80,1,1).data],before);
+});
+
+test('voice transcription follows purpose after movement between numbered audio tracks',async()=>{
+  reset();project.audio.tracks=[fixtureAudio('voice',2,{start:1,role:'voice',trackId:'a1',fadeIn:0,fadeOut:0}),fixtureAudio('music',3,{start:1,role:'music',trackId:'a2'})];
+  placeTimelineItem('audio',project.audio.tracks[0],planPlacement(6,2,'a2','voice'));
+  const previous=globalThis.OfflineAudioContext,starts=[];
+  globalThis.OfflineAudioContext=class{
+    constructor(){this.destination={};}
+    createGain(){return {gain:{value:1,setValueAtTime(){},linearRampToValueAtTime(){}},connect(target){return target;}};}
+    createBufferSource(){return {connect(target){return target;},start(...args){starts.push(args);}};}
+    startRendering(){return Promise.resolve({});}
+  };
+  try{await mixTimeline({includeBgm:false,includeVoice:true});assert.deepEqual(starts,[[6,0,2]]);}
+  finally{globalThis.OfflineAudioContext=previous;}
+});
+
+test('built-in sound effects are deterministic, distinct, bounded non-silent WAV files',async()=>{
+  const signatures=new Set();
+  for(const effect of SOUND_EFFECTS){
+    const samples=synthesizeEffect(effect.id,8000),again=synthesizeEffect(effect.id,8000);
+    assert.equal(samples.length,Math.round(effect.duration*8000));assert.deepEqual(samples,again);
+    let peak=0,power=0;for(const value of samples){assert.ok(Number.isFinite(value));peak=Math.max(peak,Math.abs(value));power+=value*value;}
+    assert.ok(peak>.7&&peak<.83);assert.ok(power>1);near(samples[0],0);
+    signatures.add(Buffer.from(samples.buffer).toString('base64'));
+    const wav=new DataView(await createSoundEffect(effect.id).arrayBuffer());assert.equal(wav.getUint32(24,true),48000);
+    assert.equal(wav.getUint32(40,true),Math.round(effect.duration*48000)*2);
+  }
+  assert.equal(signatures.size,SOUND_EFFECTS.length);assert.throws(()=>synthesizeEffect('missing'));
+});
+
+test('platform guides form bounded editable rectangles and never affect default export frames',{skip:!canvasModule},()=>{
+  reset();for(const preset of SAFE_AREAS){
+    const r=safeAreaRect(preset,1080,1920);assert.ok(r.x>=0&&r.y>=0&&r.w>0&&r.h>0&&r.x+r.w<=1080&&r.y+r.h<=1920);
+  }
+  const cfg=safeAreaConfig('shorts');cfg.margins.top=.3;assert.equal(SAFE_AREAS[0].margins.top,.1);
+  const {createCanvas}=canvasModule,canvas=createCanvas(90,160),ctx=canvas.getContext('2d');
+  renderFrame(ctx,0);const exported=Buffer.from(ctx.getImageData(0,0,90,160).data);
+  renderFrame(ctx,0,{safeArea:cfg});assert.notDeepEqual(Buffer.from(ctx.getImageData(0,0,90,160).data),exported);
+  renderFrame(ctx,0);assert.deepEqual(Buffer.from(ctx.getImageData(0,0,90,160).data),exported);
+});
+
+test('font preparation loads actual generated text and weights without requesting the whole catalog',async()=>{
+  reset();const previous=globalThis.document,requests=[],loads=[];
+  globalThis.document={fonts:{load(descriptor,text){loads.push({descriptor,text});return Promise.resolve([{}]);}},
+    createElement(){return {remove(){}};},head:{append(link){requests.push(link.href);queueMicrotask(()=>link.onload());}}};
+  try{
+    await loadFonts();assert.equal(requests.length,0);
+    project.overlays=[
+      {...GRAPHICS.find(g=>g.id==='chapter'),graphic:'chapter',start:0,end:2,subtitle:'MY PRIVATE CHAPTER'},
+      {...GRAPHICS.find(g=>g.id==='count'),graphic:'count',start:0,end:2},
+      {...GRAPHICS.find(g=>g.id==='typewriter'),graphic:'typewriter',start:0,end:2},
+    ];
+    project.template.mode='band';project.template.credit.on=true;project.template.credit.text='Credit';
+    await loadFonts();
+    assert.ok(loads.some(l=>l.text.includes('MY PRIVATE CHAPTER')));
+    assert.ok(loads.some(l=>l.text.includes('0123456789')));assert.ok(loads.some(l=>l.text.includes('▌')));
+    assert.ok(loads.some(l=>l.descriptor.startsWith('400 ')&&l.text.includes(project.template.comment.text)));
+    assert.ok(loads.some(l=>l.descriptor.startsWith('700 ')&&l.text.includes('Credit')));
+    assert.ok(requests.length<FONTS.length);assert.ok(requests.every(url=>!url.includes('PRIVATE')&&!url.includes('text=')));
+  }finally{globalThis.document=previous;}
+});
+
+test('font binary failure and cancellation reject export preparation instead of silently falling back',async()=>{
+  reset();const previous=globalThis.document;
+  globalThis.document={fonts:{load(){return Promise.reject(new Error('font binary failed'));}},
+    createElement(){return {remove(){}};},head:{append(link){queueMicrotask(()=>link.onload());}}};
+  try{
+    project.captions=[{id:'c',text:'caption',start:0,end:2,style:{font:'"Orbit"'}}];
+    await assert.rejects(()=>loadFonts(),/font binary failed/);
+    document.fonts.load=()=>new Promise(()=>{});
+    const controller=new AbortController(),pending=loadFonts({signal:controller.signal});
+    queueMicrotask(()=>controller.abort());await assert.rejects(()=>pending,error=>error.name==='AbortError');
+  }finally{globalThis.document=previous;}
 });

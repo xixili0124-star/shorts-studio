@@ -39,17 +39,23 @@ git add -A && git commit
 
 무섭게 생겼지만 파일 안의 표시된 부분만 고르면 된다.
 
-## 배포는 한 사람만
+## 배포
 
-지금은 **직접 업로드** 방식이라 `git push` 만으로는 사이트가 바뀌지 않는다.
-아래 명령을 실행한 사람의 로컬 파일이 그대로 올라간다.
+**`main` 에 합쳐지면 Cloudflare 가 알아서 배포한다.** 따로 할 일이 없다.
 
-```bash
-npx wrangler pages deploy public --project-name shorts-studio --branch main
+```
+PR 승인 -> main 병합 -> 자동 배포 -> https://shorts-studio-75p.pages.dev
 ```
 
-**둘이 번갈아 배포하면 안 된다.** 상대가 아직 안 받은 변경을 덮어쓴다.
-배포는 한 사람이 맡거나, 배포 전에 반드시 `git pull` 로 최신을 받는다.
+배포 상태는 여기서 본다.
+
+```bash
+npx wrangler pages deployment list --project-name shorts-studio
+```
+
+**`wrangler pages deploy` 로 직접 올리지 않는다.** Git 연결이 돼 있으므로
+직접 업로드를 섞으면 어느 쪽이 현재 사이트인지 추적이 안 된다.
+(연결 여부는 `npx wrangler pages project list` 의 `Git Provider` 열로 확인한다)
 
 ## 건드리면 안 되는 것
 

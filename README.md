@@ -215,28 +215,32 @@ npx serve public
 
 ## 배포
 
-Cloudflare Pages 에 직접 업로드하는 방식으로 올라가 있다. 빌드 단계가 없으므로 이걸로 충분하다.
+GitHub 저장소가 Cloudflare Pages 에 연결돼 있다. **`main` 에 푸시하면 자동으로 배포된다.**
+
+| | |
+|---|---|
+| 저장소 | https://github.com/xixili0124-star/shorts-studio |
+| 사이트 | https://shorts-studio-75p.pages.dev |
+| 프로덕션 브랜치 | `main` |
+| Build command | 없음 (빌드 단계가 없는 정적 사이트) |
+| Output directory | `public` |
 
 ```bash
-npx wrangler pages deploy public --project-name shorts-studio --branch main
+# 배포 이력 보기
+npx wrangler pages deployment list --project-name shorts-studio
+
+# Git 연결 여부 확인 (Git Provider 열이 Yes 면 연결됨)
+npx wrangler pages project list
 ```
 
-프로젝트 이름은 `shorts-studio`, 주소는 https://shorts-studio-75p.pages.dev 다.
+**`wrangler pages deploy` 는 쓰지 않는다.** Git 연결과 직접 업로드를 섞으면
+어느 쪽이 현재 배포본인지 알 수 없게 된다.
 
-### GitHub 에 연결하려면 (선택)
-
-푸시할 때마다 자동 배포되게 하려면 저장소를 만들어 연결한다.
+`stt-worker/` 는 Pages 와 별개라 이쪽은 여전히 수동으로 배포한다.
 
 ```bash
-git remote add origin https://github.com/xixili0124-star/shorts-studio.git
-git push -u origin main
+cd stt-worker && npx wrangler deploy
 ```
-
-그다음 Cloudflare 대시보드 > Workers & Pages > shorts-studio > Settings > Builds 에서
-Git 저장소를 연결하고, Build command 는 비우고 Output directory 를 `public` 으로 둔다.
-
-**주의**: Git 연결로 바꾸면 위의 직접 업로드(`wrangler pages deploy`)와 섞어 쓰지 않는 게 좋다.
-둘을 번갈아 쓰면 어느 쪽이 마지막 배포인지 헷갈린다.
 
 ### 유튜브 OAuth 원본 등록
 

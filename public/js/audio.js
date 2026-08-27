@@ -1,6 +1,6 @@
 // 오디오 믹싱 — 클립 원본 소리 + 배경음악을 하나의 AudioBuffer 로 합친다.
 import { Input, BlobSource, ALL_FORMATS, AudioBufferSink } from '../vendor/mediabunny.min.js';
-import { project, clipDuration, clipStartTime, totalDuration } from './state.js';
+import { project, clipDuration, clipStartTime, totalDuration, buildLayout } from './state.js';
 
 const RATE = 48000;
 
@@ -20,7 +20,7 @@ export function hasClipAudio() {
 }
 
 export function hasAnyAudio() {
-  return Boolean(project.audio.bgm?.buffer) || hasClipAudio();
+  return Boolean(project.audio.bgm?.buffer) || hasClipAudio() || (project.audio.tracks || []).some(t => t.buffer && !t.muted);
 }
 
 /** 영상 클립에서 트림 구간만큼의 오디오를 뽑아 AudioBuffer 로 만든다 */
@@ -72,9 +72,9 @@ export async function extractClipAudio(clip, signal) {
  * 타임라인 전체 오디오 믹스.
  * @returns {Promise<AudioBuffer|null>}
  */
-export async function mixTimeline({ onProgress, signal, includeBgm = true } = {}) {
+export async function mixTimeline({ onProgress, signal, includeBgm = true, includeVoice = false } = {}) {
   const total = totalDuration();
-  const wanted = includeBgm ? hasAnyAudio() : hasClipAudio();
+  const wanted = includeBgm ? hasAnyAudio() : hasClipAudio() || (includeVoice && project.audio.tracks?.some(t => t.lane === 'voice' && !t.muted));
   if (total <= 0 || !wanted) return null;
 
   const length = Math.ceil(total * RATE);
@@ -99,9 +99,25 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true } = {}
     const gain = ctx.createGain();
     const vol = (clip.volume ?? 1) * project.audio.originalVolume;
     applyFade(gain.gain, vol, at, dur, clip.fadeIn, clip.fadeOut);
-
-    node.connect(gain).connect(master);
+    const e = buildLayout().entries.find(e => e.clip.id === clip.id);
+    const crossfade = ctx.createGain();
+    applyFade(crossfade.gain, 1, at, dur, e?.overlapIn || 0, e?.overlapOut || 0);
+    node.connect(gain).connect(crossfade).connect(master);
     node.start(at, 0, Math.min(dur, buf.duration));
+  }
+
+  // 통합 소재함의 독립 오디오. 자동자막에는 사용자 선택 시 보이스만 포함합니다.
+  for (const track of project.audio.tracks || []) {
+    if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+    if (track.muted || !track.buffer || (!includeBgm && !(includeVoice && track.lane === 'voice'))) continue;
+    const duration = Math.min(track.trimEnd - track.trimStart, total - track.start);
+    if (!(duration > 0)) continue;
+    const node = ctx.createBufferSource();
+    node.buffer = track.buffer;
+    const gain = ctx.createGain();
+    applyFade(gain.gain, track.volume ?? 1, track.start, duration, track.fadeIn, track.fadeOut);
+    node.connect(gain).connect(master);
+    node.start(track.start, track.trimStart, duration);
   }
 
   // 2) 배경음악

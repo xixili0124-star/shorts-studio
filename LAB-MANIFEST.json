@@ -1,0 +1,43 @@
+{
+  "baseline": "9eb4ef137222d393d247cf79f6f2a1b4b7713368",
+  "referenceUnmodified": true,
+  "changedTrackedFiles": [
+    ".gitignore",
+    "README.md",
+    "public/js/audio.js",
+    "public/js/exporter.js",
+    "public/js/player.js",
+    "public/js/render.js",
+    "public/js/state.js"
+  ],
+  "addedFiles": [
+    "CHANGELOG-LAB.md",
+    "CREDITS.md",
+    "LAB-MANIFEST.json",
+    "START-HERE.md",
+    "VERIFICATION.md",
+    "public/demo/seoul-01.jpg",
+    "public/demo/seoul-02.jpg",
+    "public/demo/seoul-03.jpg",
+    "public/js/ai-client.js",
+    "public/js/presets.js",
+    "public/js/project-store.js",
+    "public/js/studio-app.js",
+    "public/js/timeline.js",
+    "public/og.png",
+    "public/studio.css",
+    "public/studio.html",
+    "start-studio.cmd",
+    "studio_server.py",
+    "tests/core.test.mjs",
+    "tests/test_server.py"
+  ],
+  "localEntry": "http://127.0.0.1:8787/studio.html",
+  "tests": {
+    "node": 16,
+    "python": 7,
+    "browserWorkflow": "not-run",
+    "realMediaExport": "not-run",
+    "paidAi": "not-run"
+  }
+}

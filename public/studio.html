@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="원본 서비스와 분리된 숏츠 스튜디오 실험판. 통합 소재함, 멀티트랙 타임라인, 모션 그래픽과 자막.">
+  <meta name="theme-color" content="#141517">
+  <link rel="icon" href="data:,">
+  <meta property="og:image" content="http://127.0.0.1:8787/og.png">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta property="og:title" content="Shorts Studio — 작은 화면, 큰 이야기">
+  <meta property="og:description" content="브라우저에서 완성하는 나만의 숏츠 편집실. 원본과 분리된 로컬 실험판입니다.">
+  <title>Shorts Studio · 로컬 실험판</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Black+Han+Sans&family=Do+Hyeon&family=Gugi&family=Jua&family=Nanum+Gothic:wght@400;700;800&family=Nanum+Pen+Script&family=Noto+Sans+KR:wght@400;500;600;700;900&family=Noto+Serif+KR:wght@600;900&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="studio.css">
+</head>
+<body>
+  <header class="appbar">
+    <a class="brand" href="studio.html" aria-label="숏츠 스튜디오"><span class="brand-mark">S</span><span>SHORTS<span class="brand-light"> STUDIO</span></span></a>
+    <span class="lab-tag">LAB</span>
+    <div class="project-title"><input id="projectName" aria-label="프로젝트 이름" value="서울의 밤, 짧은 기록"><span id="saveStatus" class="save-status">샘플 프로젝트</span></div>
+    <div class="app-actions">
+      <button id="undo" class="icon-button" title="실행 취소 · Ctrl+Z" aria-label="실행 취소">↶</button>
+      <button id="redo" class="icon-button" title="다시 실행 · Ctrl+Shift+Z" aria-label="다시 실행">↷</button>
+      <span class="divider"></span>
+      <button id="saveProject" class="button subtle">저장</button>
+      <button id="openProject" class="button subtle">열기</button>
+      <button id="openExport" class="button primary"><span>↗</span> 내보내기</button>
+    </div>
+  </header>
+
+  <main class="workbench" id="workbench">
+    <nav class="tool-rail" aria-label="편집 도구">
+      <button class="rail-item active" data-view="media" aria-pressed="true"><span class="rail-symbol">▧</span><span>소재</span></button>
+      <button class="rail-item" data-view="captions" aria-pressed="false"><span class="rail-symbol type-symbol">T<span>t</span></span><span>자막</span></button>
+      <button class="rail-item" data-view="graphics" aria-pressed="false"><span class="rail-symbol">✧</span><span>그래픽</span></button>
+      <button class="rail-item" data-view="transitions" aria-pressed="false"><span class="rail-symbol">◩</span><span>전환</span></button>
+      <button class="rail-item" data-view="voice" aria-pressed="false"><span class="rail-symbol voice-symbol">≋</span><span>AI 음성</span></button>
+      <div class="rail-spacer"></div>
+      <button class="rail-item" id="helpButton"><span class="rail-symbol help-symbol">?</span><span>도움말</span></button>
+    </nav>
+
+    <section class="library" id="library" aria-label="소재 및 효과 라이브러리">
+      <div class="section-heading"><h1 id="libraryTitle">소재 라이브러리</h1><span class="small-tag" id="libraryCount">03</span></div>
+      <div id="libraryContent" class="library-content">
+        <button class="import-zone" id="importFiles"><span class="import-plus">＋</span><strong>파일 가져오기</strong><span>영상 · 이미지 · 오디오를 한곳에</span><small>또는 여기에 파일을 놓아주세요</small></button>
+        <div class="filter-tabs" aria-label="소재 종류"><button class="active" data-filter="all">전체</button><button data-filter="video">영상</button><button data-filter="image">이미지</button><button data-filter="audio">오디오</button></div>
+        <label class="search-box"><span>⌕</span><input id="mediaSearch" type="search" placeholder="소재 검색" aria-label="소재 검색"><kbd>/</kbd></label>
+        <div id="assetGrid" class="asset-grid"></div>
+        <p class="library-hint">소재를 더블클릭하거나 타임라인에 끌어 넣으세요.</p>
+      </div>
+      <div class="library-footer"><span class="status-dot"></span> 원본 파일은 변경하지 않아요</div>
+    </section>
+
+    <section class="viewer" aria-label="영상 미리보기">
+      <div class="viewer-heading"><span>프로그램 모니터</span><div><span class="format-chip">9:16</span><span class="muted" id="previewResolution">1080 × 1920</span><button id="toggleInspector" class="icon-button" aria-label="속성 패널 열기/닫기" title="속성 패널">☷</button></div></div>
+      <div class="viewer-stage" id="viewerStage">
+        <canvas id="preview" width="1080" height="1920" aria-label="편집 중인 세로 영상"></canvas>
+        <div class="empty-preview" id="emptyPreview" hidden><span>YOUR NEXT STORY</span><h2>작은 화면, 큰 이야기.</h2><p>파일을 가져오고, 나만의 숏츠를 만들어보세요.</p><button id="emptyImport" class="button primary">＋ 파일 가져오기</button><button id="loadDemo" class="button subtle">샘플 프로젝트 열기</button></div>
+        <span class="preview-label" id="previewLabel">SAMPLE PROJECT</span>
+      </div>
+      <div class="transport-bar">
+        <span id="timecode" class="timecode">00:00:00<span>:00</span></span>
+        <div class="play-controls"><button id="prevFrame" class="icon-button" aria-label="이전 프레임" title="이전 프레임 · ←">|◂</button><button id="play" class="play-button" aria-label="재생" title="재생 / 일시정지 · Space">▶</button><button id="nextFrame" class="icon-button" aria-label="다음 프레임" title="다음 프레임 · →">▸|</button></div>
+        <div class="viewer-options"><button id="safeArea" class="icon-button" aria-pressed="false" aria-label="안전영역 표시" title="안전영역">⌗</button><button id="loop" class="icon-button" aria-pressed="false" aria-label="반복 재생" title="반복 재생">↻</button><span class="zoom-label">맞춤</span></div>
+      </div>
+    </section>
+
+    <aside class="inspector" id="inspector" aria-label="선택 항목 속성">
+      <div class="section-heading"><h2>속성</h2><span id="selectionBadge" class="small-tag">클립</span></div>
+      <div id="inspectorContent" class="inspector-content"><div class="inspector-empty">타임라인의 항목을 선택하면<br>여기서 세부 설정을 바꿀 수 있어요.</div></div>
+    </aside>
+
+    <section class="timeline-panel" aria-label="편집 타임라인">
+      <div class="timeline-toolbar">
+        <div class="timeline-title"><span class="timeline-indicator"></span><strong>타임라인</strong><span id="sequenceInfo" class="muted">시퀀스 01</span></div>
+        <div class="edit-tools"><button id="splitClip" class="tool-button" title="재생 위치에서 분할 · S">✂ <span>분할</span></button><button id="duplicateClip" class="tool-button" title="선택 항목 복제 · Ctrl+D">▣ <span>복제</span></button><button id="deleteClip" class="tool-button" title="선택 항목 삭제 · Delete">× <span>삭제</span></button><span class="divider"></span><button id="snap" class="tool-button active" aria-pressed="true" title="스냅 · N">⌁ <span>스냅</span></button></div>
+        <div class="timeline-zoom"><span id="totalDuration">00:09</span><button id="zoomOut" class="icon-button" aria-label="타임라인 축소">−</button><input id="timelineZoom" type="range" min="18" max="180" value="70" aria-label="타임라인 확대"><button id="zoomIn" class="icon-button" aria-label="타임라인 확대">＋</button><button id="fitTimeline" class="button subtle" title="전체 타임라인 보기">맞춤</button></div>
+      </div>
+      <div class="timeline-body">
+        <div class="track-heads"><div class="ruler-spacer">트랙</div><div class="track-head graphics-head"><span class="track-code">G1</span><strong>그래픽</strong><span>✧</span></div><div class="track-head caption-head"><span class="track-code">C1</span><strong>자막</strong><span>T</span></div><div class="track-head video-head"><span class="track-code">V1</span><strong>영상</strong><span>▧</span></div><div class="track-head audio-head"><span class="track-code">A1</span><strong>오디오</strong><span>♫</span></div><div class="track-head audio-head voice-head"><span class="track-code">A2</span><strong>보이스</strong><span>≋</span></div></div>
+        <div id="timelineScroll" class="timeline-scroll"><div id="timelineCanvas" class="timeline-canvas"><div id="ruler" class="ruler"></div><div id="graphicTrack" class="track graphic-track" data-track="graphics"></div><div id="captionTrack" class="track caption-track" data-track="captions"></div><div id="videoTrack" class="track video-track" data-track="clips"></div><div id="audioTrack" class="track audio-track" data-track="audio"></div><div id="voiceTrack" class="track audio-track voice-track" data-track="voice"></div><div id="playhead" class="playhead"><span></span></div></div></div>
+      </div>
+      <footer class="statusbar"><span><span class="status-dot"></span> 로컬 실험판 <span class="status-separator">/</span> 원본 서비스와 분리됨</span><span id="interactionHint">Space 재생 <span>·</span> S 분할 <span>·</span> Ctrl+Z 실행 취소</span><span id="engineLabel">엔진 확인 중</span></footer>
+    </section>
+  </main>
+
+  <input type="file" id="fileInput" accept="video/*,image/*,audio/*,.mkv,.ts,.srt,.vtt" multiple hidden>
+  <input type="file" id="projectInput" accept=".shorts" hidden>
+  <dialog id="exportDialog" class="modal"><form method="dialog" class="modal-heading"><div><span class="eyebrow">READY TO SHARE</span><h2>이야기를 완성하세요.</h2></div><button class="icon-button" aria-label="닫기">×</button></form><div class="modal-body"><div class="export-summary"><span class="export-icon">↗</span><div><strong id="exportProjectName">서울의 밤, 짧은 기록</strong><p id="exportSummary">세로 영상 · 9:16</p></div></div><label class="field-label">해상도<select id="exportResolution"><option value="1080x1920">1080 × 1920 · Full HD</option><option value="720x1280">720 × 1280 · 가볍게</option><option value="1440x2560">1440 × 2560 · 고해상도</option></select></label><div class="field-grid"><label class="field-label">프레임<select id="exportFps"><option value="30">30 fps</option><option value="24">24 fps</option><option value="60">60 fps</option></select></label><label class="field-label">화질<select id="exportQuality"><option value="high">높음</option><option value="very-high">매우 높음</option><option value="medium">보통</option></select></label></div><p class="note">영상은 이 브라우저에서 만들어집니다. 완성 파일은 다운로드만 하며, 외부 플랫폼에 게시하지 않습니다.</p><div id="exportProgress" hidden><progress id="exportBar" value="0" max="1"></progress><p id="exportMessage" role="status"></p></div><video id="exportPreview" controls hidden></video><a id="downloadVideo" class="button primary wide" hidden download>완성 영상 다운로드</a><button id="startExport" class="button primary wide">영상 만들기</button><button id="cancelExport" class="button subtle wide" hidden>내보내기 취소</button></div></dialog>
+  <dialog id="helpDialog" class="modal"><form method="dialog" class="modal-heading"><h2>작게, 빠르게, 제대로.</h2><button class="icon-button" aria-label="닫기">×</button></form><div class="modal-body"><p class="note">소재를 한곳에서 불러오고, 아래 타임라인에 끌어 넣으세요. 클립 양 끝을 끌면 길이를, 가운데를 끌면 순서를 바꿉니다.</p><div class="shortcut-list"><span>재생 / 정지</span><kbd>Space</kbd><span>이전 / 다음 프레임</span><kbd>← / →</kbd><span>재생 위치에서 분할</span><kbd>S</kbd><span>실행 취소</span><kbd>Ctrl Z</kbd><span>다시 실행</span><kbd>Ctrl Shift Z</kbd><span>선택 항목 복제</span><kbd>Ctrl D</kbd><span>프로젝트 저장</span><kbd>Ctrl S</kbd><span>스냅 켜기 / 끄기</span><kbd>N</kbd></div><p class="note">프로젝트 파일에는 편집 정보와 소재가 함께 저장됩니다. AI 음성·자동 자막은 별도 연결 및 API 이용료가 필요하며, 실행 전에 외부 전송을 확인합니다.</p><button id="newProject" class="button secondary wide">빈 프로젝트 시작</button><button id="resetDemo" class="button subtle wide">샘플 프로젝트 다시 열기</button><p class="asset-credit">샘플 사진: Stéphan Valentin · Andrea De Santis / Unsplash.<br>샘플 오디오는 이 실험판에서 생성한 테스트 사운드입니다.</p></div></dialog>
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <div id="dropOverlay" class="drop-overlay" hidden><div><span>＋</span><h2>여기에 놓으면 준비 끝.</h2><p>영상 · 이미지 · 오디오를 한 번에 추가하세요.</p></div></div>
+  <script type="module" src="js/studio-app.js"></script>
+</body>
+</html>

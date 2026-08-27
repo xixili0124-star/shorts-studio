@@ -2,11 +2,25 @@
 // opts.source(clip, localTime) 가 그릴 이미지({img, w, h})를 돌려준다.
 //   미리보기 → <video> 엘리먼트 / 내보내기 → 디코딩된 VideoSample
 import {
-  project, clipAt, activeOverlays, activeCaption, FONTS, ACCENT,
+  project, layersAt, activeOverlays, activeCaption, FONTS, ACCENT,
   videoBand, splitAccent,
 } from './state.js';
 
 const REF_H = 1920; // 스타일 수치의 기준 높이 (해상도가 달라져도 같은 비율로 보이게)
+const plateCache = new WeakMap();
+
+function transitionPlates(canvas) {
+  let plates = plateCache.get(canvas);
+  if (!plates || plates[0].width !== canvas.width || plates[0].height !== canvas.height) {
+    plates = [0, 1].map(() => {
+      const c = document.createElement('canvas');
+      c.width = canvas.width; c.height = canvas.height;
+      return c;
+    });
+    plateCache.set(canvas, plates);
+  }
+  return plates;
+}
 
 export function renderFrame(ctx, t, opts = {}) {
   const W = ctx.canvas.width, H = ctx.canvas.height;
@@ -21,8 +35,12 @@ export function renderFrame(ctx, t, opts = {}) {
   ctx.fillStyle = band ? tpl.bg : '#000';
   ctx.fillRect(0, 0, W, H);
 
-  const at = clipAt(t);
-  if (at?.clip) {
+  const paintLayer = (ctx, at) => {
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalAlpha = 1;
+    ctx.filter = 'none';
+    ctx.fillStyle = band ? tpl.bg : '#000';
+    ctx.fillRect(0, 0, W, H);
     const src = opts.source ? opts.source(at.clip, at.local) : null;
     if (src?.img && src.w > 0 && src.h > 0) {
       if (band) {
@@ -43,6 +61,28 @@ export function renderFrame(ctx, t, opts = {}) {
       ctx.fillStyle = `rgba(0,0,0,${f})`;
       ctx.fillRect(0, 0, W, H);
     }
+  };
+
+  const layers = layersAt(t, opts.layout);
+  if (layers.length === 1) paintLayer(ctx, layers[0]);
+  else if (layers.length > 1) {
+    // 불투명한 A 위에 B를 p만큼 덮어 정확한 선형 디졸브를 만듭니다.
+    // drawClipLayer가 alpha를 초기화하므로 별도 판에 먼저 완성해야 합니다.
+    const plates = transitionPlates(ctx.canvas);
+    layers.slice(0, 2).forEach((at, i) => paintLayer(plates[i].getContext('2d', { alpha: false }), at));
+    ctx.globalAlpha = 1;
+    ctx.drawImage(plates[0], 0, 0);
+    const p = layers[1].weight;
+    ctx.globalAlpha = p;
+    ctx.drawImage(plates[1], 0, 0);
+    ctx.globalAlpha = 1;
+    const type = layers[0].clip.transitionOut?.type;
+    if (type === 'fade' || type === 'flash') {
+      ctx.fillStyle = type === 'fade' ? '#000' : '#fff';
+      ctx.globalAlpha = Math.sin(Math.PI * p);
+      ctx.fillRect(0, 0, W, H);
+      ctx.globalAlpha = 1;
+    }
   }
 
   if (band) drawTemplate(ctx, W, H, tpl, k);
@@ -50,7 +90,7 @@ export function renderFrame(ctx, t, opts = {}) {
   for (const o of activeOverlays(t)) drawOverlay(ctx, W, H, o, t, k);
 
   const cap = activeCaption(t);
-  if (cap && cap.text.trim()) drawCaption(ctx, W, H, cap, project.captionStyle, k);
+  if (cap && cap.text.trim()) drawCaption(ctx, W, H, cap, { ...project.captionStyle, ...cap.style }, k, t);
 
   if (opts.safeArea) drawSafeArea(ctx, W, H);
 }
@@ -132,6 +172,7 @@ function fadeAlpha(clip, local, duration) {
 const easeOut = p => 1 - Math.pow(1 - p, 3);
 
 function drawOverlay(ctx, W, H, o, t, k) {
+  if (o.graphic) { drawGraphic(ctx, W, H, o, t, k); return; }
   const ANIM = 0.35;
   const inP = Math.min(1, Math.max(0, (t - o.start) / ANIM));
   const outP = Math.min(1, Math.max(0, (o.end - t) / ANIM));
@@ -162,17 +203,88 @@ function drawOverlay(ctx, W, H, o, t, k) {
   ctx.restore();
 }
 
-function drawCaption(ctx, W, H, cap, st, k) {
+function drawCaption(ctx, W, H, cap, st, k, t) {
+  const p = Math.min(1, Math.max(0, (t - cap.start) / .18));
+  ctx.save();
+  if (st.anim === 'pop') {
+    const s = .86 + .14 * easeOut(p);
+    ctx.translate(W / 2, H * (1 - st.bottom));
+    ctx.scale(s, s);
+    ctx.translate(-W / 2, -H * (1 - st.bottom));
+  }
   drawTextBlock(ctx, {
     text: cap.text,
     font: st.font, size: st.size * k, color: st.color,
     stroke: st.stroke, strokeW: st.strokeW * k,
-    box: st.box, align: 'center',
+    box: st.box, boxColor: st.boxColor, glow: st.glow, align: 'center',
     x: W / 2, y: H * (1 - st.bottom),
     maxWidth: W * 0.86,
     anchor: 'bottom',
-    alpha: 1,
+    alpha: st.anim === 'fade' ? p : 1,
   });
+  ctx.restore();
+}
+
+/** 액션 프리셋도 같은 캔버스 렌더러에서 그려 내보내기에 그대로 들어갑니다. */
+function drawGraphic(ctx, W, H, o, t, k) {
+  const p = Math.min(1, Math.max(0, (t - o.start) / .42));
+  const q = Math.min(1, Math.max(0, (o.end - t) / .24));
+  if (p <= 0 || q <= 0) return;
+  const progress = easeOut(p);
+  const x = o.x * W, y = o.y * H, w = W * .82;
+  const size = o.size * k;
+  const accent = o.color || '#b8ee63';
+  const title = (extra = {}) => drawTextBlock(ctx, {
+    text: o.text, font: o.font, size, color: accent, stroke: '#101510', strokeW: 0,
+    align: 'center', x, y, maxWidth: w * .88, anchor: 'middle', alpha: Math.min(1, p * 3, q), ...extra,
+  });
+  ctx.save();
+  ctx.globalAlpha = Math.min(1, p * 3, q);
+  if (o.graphic === 'kinetic') {
+    const s = .68 + .32 * progress + Math.sin(p * Math.PI) * .065;
+    ctx.translate(x, y); ctx.rotate(-.035 * (1 - p)); ctx.scale(s, s); ctx.translate(-x, -y);
+    const h = size * (String(o.text).includes('\n') ? 2.75 : 1.7);
+    ctx.fillStyle = '#101810e8';
+    ctx.fillRect(x - w / 2, y - h / 2, w, h);
+    ctx.strokeStyle = accent; ctx.lineWidth = 4 * k;
+    ctx.strokeRect(x - w / 2, y - h / 2, w, h);
+    title({ strokeW: 2 * k });
+  } else if (o.graphic === 'lower') {
+    const dx = -(1 - progress) * W * .45;
+    ctx.translate(dx, 0);
+    const h = size * 2.2;
+    ctx.fillStyle = '#101813ed'; roundRect(ctx, x - w / 2, y - h / 2, w, h, 8 * k); ctx.fill();
+    ctx.fillStyle = accent; ctx.fillRect(x - w / 2, y - h / 2, 8 * k, h);
+    title({ color: '#f0f5eb', size: size * .85, y: y - size * .28 });
+    title({ text: o.subtitle || 'SHORTS STUDIO', color: accent, font: '"Noto Sans KR"', size: size * .3, y: y + size * .55 });
+  } else if (o.graphic === 'swipe') {
+    ctx.translate(-(1 - progress) * W, 0);
+    const h = size * 1.7;
+    ctx.fillStyle = accent;
+    ctx.beginPath();ctx.moveTo(x - w / 2 + 20 * k, y - h / 2);ctx.lineTo(x + w / 2, y - h / 2);ctx.lineTo(x + w / 2 - 20 * k, y + h / 2);ctx.lineTo(x - w / 2, y + h / 2);ctx.closePath();ctx.fill();
+    title({ color: '#13210d', size: size * .87 });
+  } else if (o.graphic === 'focus') {
+    const h = size * 2.35;
+    ctx.strokeStyle = accent;ctx.lineWidth = 5 * k;
+    const arm = 38 * k * progress;
+    for (const sx of [-1, 1]) for (const sy of [-1, 1]) {
+      const cx = x + sx * w / 2, cy = y + sy * h / 2;
+      ctx.beginPath();ctx.moveTo(cx - sx * arm, cy);ctx.lineTo(cx, cy);ctx.lineTo(cx, cy - sy * arm);ctx.stroke();
+    }
+    title({ color: '#fff', strokeW: 6 * k });
+  } else if (o.graphic === 'count') {
+    const r = size * 1.15;
+    ctx.fillStyle = '#101510cd';ctx.beginPath();ctx.arc(x,y,r,0,Math.PI*2);ctx.fill();
+    ctx.strokeStyle = accent;ctx.lineWidth = 8 * k;ctx.beginPath();ctx.arc(x,y,r,-Math.PI/2,-Math.PI/2+Math.PI*2*Math.max(0,(o.end-t)/(o.end-o.start)));ctx.stroke();
+    title({ text: String(Math.max(1,Math.ceil(o.end-t))), size: size * 1.5 });
+    title({ text: o.text, size: size * .3, y:y+r+size*.5,color:'#fff' });
+  } else {
+    ctx.translate(0, (1 - progress) * H * .04);
+    ctx.strokeStyle = accent;ctx.lineWidth = 2 * k;
+    for (const sy of [-1,1]) {ctx.beginPath();ctx.moveTo(x-w*.35,y+sy*size*1.1);ctx.lineTo(x+w*.35,y+sy*size*1.1);ctx.stroke();}
+    title({ font: '"Noto Serif KR"', color: '#f2f3ec', size: size * .8 });
+  }
+  ctx.restore();
 }
 
 export function drawTextBlock(ctx, o) {
@@ -213,7 +325,7 @@ export function drawTextBlock(ctx, o) {
       const bh = lineH + padY * 2 - lineH * 0.12;
       ctx.fillStyle = o.box === 'dark' ? 'rgba(0,0,0,.62)'
         : o.box === 'white' ? 'rgba(255,255,255,.92)'
-          : ACCENT;
+          : (o.boxColor || ACCENT);
       roundRect(ctx, bx, by, bw, bh, o.size * 0.18);
       ctx.fill();
     } else {
@@ -234,6 +346,7 @@ export function drawTextBlock(ctx, o) {
     ctx.shadowBlur = 0;
     ctx.shadowOffsetY = 0;
     ctx.fillStyle = o.box === 'white' ? '#111' : o.color;
+    if (o.glow) { ctx.shadowColor = o.glow; ctx.shadowBlur = o.size * .28; }
     ctx.fillText(line, cx, baseline);
   });
 

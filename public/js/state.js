@@ -39,6 +39,7 @@ export const project = {
   audio: {
     originalVolume: 1,
     bgm: null, // { name, file, buffer(AudioBuffer), volume, offset, fadeIn, fadeOut, loop }
+    tracks: [], // 소재함과 연결되는 독립 오디오 클립
   },
 
   // 템플릿 — 영상을 화면 가운데 밴드에 넣고 위아래를 단색으로 채우는 구성.
@@ -135,6 +136,7 @@ export function newClipDefaults(type) {
     volume: 1,
     muted: type === 'image',
     hasAudio: false,
+    transitionOut: { type: 'cut', duration: 0 },
   };
 }
 
@@ -147,27 +149,78 @@ export function clipDuration(c) {
 }
 
 export function totalDuration() {
-  return project.clips.reduce((s, c) => s + clipDuration(c), 0);
+  return buildLayout().total;
 }
 
 export function clipStartTime(index) {
-  let t = 0;
-  for (let i = 0; i < index; i++) t += clipDuration(project.clips[i]);
-  return t;
+  return buildLayout().entries[index]?.start ?? 0;
 }
 
 /** 전체 타임라인 시각 t 에서 재생 중인 클립과 그 내부 시각 */
 export function clipAt(t) {
-  let start = 0;
-  for (let i = 0; i < project.clips.length; i++) {
-    const c = project.clips[i];
-    const d = clipDuration(c);
-    if (t < start + d || i === project.clips.length - 1) {
-      return { clip: c, index: i, start, local: Math.min(Math.max(0, t - start), d), duration: d };
-    }
-    start += d;
+  return layersAt(t).reduce((a, b) => !a || b.weight >= a.weight ? b : a, null);
+}
+
+/** 전환 겹침을 포함한 유일한 시간표. 인접 클립 절반 이내라 세 장면이 겹치지 않습니다. */
+export function buildLayout(doc = project) {
+  let start = 0, overlapIn = 0;
+  const entries = doc.clips.map((clip, index) => {
+    const duration = clipDuration(clip);
+    const next = doc.clips[index + 1];
+    const requested = Number(clip.transitionOut?.duration) || 0;
+    const overlapOut = next && ['dissolve', 'fade', 'flash'].includes(clip.transitionOut?.type)
+      ? Math.max(0, Math.min(2, requested, duration / 2, clipDuration(next) / 2)) : 0;
+    const entry = { clip, index, start, end: start + duration, duration, overlapIn, overlapOut };
+    start += duration - overlapOut;
+    overlapIn = overlapOut;
+    return entry;
+  });
+  return { entries, total: entries.at(-1)?.end || 0 };
+}
+
+/** 미리보기·인코더·오디오가 공유하는 활성 레이어와 선형 교차 가중치. */
+export function layersAt(t, layout = buildLayout()) {
+  if (!layout.total) return [];
+  t = Math.max(0, Math.min(t, layout.total - 1e-7));
+  return layout.entries.filter(e => t >= e.start && t < e.end).map(e => {
+    const local = t - e.start;
+    let weight = 1;
+    if (e.overlapIn > 0 && local < e.overlapIn) weight = local / e.overlapIn;
+    if (e.overlapOut > 0 && local > e.duration - e.overlapOut) weight = (e.duration - local) / e.overlapOut;
+    return { ...e, local, weight: Math.min(1, Math.max(0, weight)) };
+  });
+}
+
+export function clipFadeGain(clip, local, duration) {
+  let g = 1;
+  const fadeIn = Math.min(clip.fadeIn || 0, duration / 2);
+  const fadeOut = Math.min(clip.fadeOut || 0, duration / 2);
+  if (fadeIn > 0 && local < fadeIn) g = Math.min(g, local / fadeIn);
+  if (fadeOut > 0 && local > duration - fadeOut) g = Math.min(g, (duration - local) / fadeOut);
+  return Math.max(0, g);
+}
+
+/** 연결된 자막/그래픽만 원본 시각을 따라갑니다. SRT 등 시퀀스 기준 항목은 그대로 둡니다. */
+export function syncAnchoredItems() {
+  const entries = new Map(buildLayout().entries.map(e => [e.clip.id, e]));
+  for (const item of [...project.overlays, ...project.captions]) {
+    if (!item.anchor) continue;
+    const e = entries.get(item.anchor.clipId);
+    if (!e) { item.start = item.end = 0; continue; }
+    const sourceStart = e.clip.type === 'video' ? e.clip.trimStart : 0;
+    const s = Math.max(0, item.anchor.sourceStart - sourceStart);
+    const end = Math.min(e.duration, item.anchor.sourceEnd - sourceStart);
+    item.start = e.start + Math.min(e.duration, s);
+    item.end = e.start + Math.max(s, end);
+    if (s >= e.duration || end <= 0) item.end = item.start;
   }
-  return null;
+}
+
+export function anchorItem(item, clipId) {
+  const e = buildLayout().entries.find(e => e.clip.id === clipId);
+  if (!e) { delete item.anchor; return; }
+  const src = e.clip.type === 'video' ? e.clip.trimStart : 0;
+  item.anchor = { clipId, sourceStart: src + item.start - e.start, sourceEnd: src + item.end - e.start };
 }
 
 /** 클립 내부 시각 -> 원본 파일 안의 시각 */

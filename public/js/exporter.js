@@ -1,7 +1,7 @@
 // 내보내기 — WebCodecs(mediabunny)로 프레임을 직접 인코딩한다.
 // 브라우저가 WebCodecs 인코딩을 못 하면 MediaRecorder 실시간 녹화로 자동 폴백.
 import * as MB from '../vendor/mediabunny.min.js';
-import { project, clipAt, clipStartTime, totalDuration } from './state.js';
+import { project, buildLayout, layersAt, totalDuration } from './state.js';
 import { renderFrame, loadFonts } from './render.js';
 import { mixTimeline, sliceBuffer } from './audio.js';
 import { clamp } from './util.js';
@@ -134,38 +134,45 @@ export async function exportVideo({ engine, onProgress = () => {}, signal, playe
     }
 
     // ── 프레임 ──
-    const frameCount = Math.max(1, Math.round(total * fps));
-    const owner = new Array(frameCount);
-    for (let f = 0; f < frameCount; f++) owner[f] = clipAt(f / fps)?.index ?? 0;
-
-    let done = 0;
-    const addFrame = async (f, src) => {
-      renderFrame(ctx, f / fps, { source: () => src });
-      await videoSource.add(f / fps, 1 / fps);
-      done++;
-      if (done % 3 === 0 || done === frameCount) {
-        onProgress(0.2 + 0.78 * (done / frameCount), `영상 만드는 중… ${done}/${frameCount} 프레임`);
+    const layout = buildLayout();
+    const frameCount = Math.max(1, Math.ceil(total * fps - 1e-8));
+    const providers = new Map();
+    try {
+      for (let f = 0; f < frameCount; f++) {
+        abortCheck(signal);
+        const t = f / fps;
+        const layers = layersAt(t, layout);
+        const sources = new Map();
+        for (const at of layers) {
+          const c = at.clip;
+          if (c.type === 'image') {
+            sources.set(c.id, { img: c.bitmap, w: c.natW, h: c.natH });
+            continue;
+          }
+          let provider = providers.get(c.id);
+          if (!provider) {
+            provider = await videoProvider(at, fps);
+            providers.set(c.id, provider);
+          }
+          const next = await provider.iterator.next();
+          if (next.value && next.value !== provider.last) {
+            provider.last?.close();
+            provider.last = next.value;
+          }
+          const sample = provider.last;
+          if (!sample) throw new Error(`${c.name}: 영상 프레임을 읽지 못했습니다.`);
+          sources.set(c.id, { img: sample, w: sample.displayWidth, h: sample.displayHeight, draw: (context, ...args) => sample.draw(context, ...args) });
+        }
+        renderFrame(ctx, t, { layout, source: clip => sources.get(clip.id) });
+        await videoSource.add(t, Math.min(1 / fps, total - t));
+        for (const [id, provider] of providers) {
+          if (provider.end <= t + 1 / fps) { await closeProvider(provider); providers.delete(id); }
+        }
+        if (f % 3 === 0 || f === frameCount - 1) onProgress(.2 + .78 * (f + 1) / frameCount, `영상 만드는 중… ${f + 1}/${frameCount} 프레임`);
+        if (f % 6 === 0) await yieldToUi();
       }
-      if (done % 6 === 0) await yieldToUi(); // UI 가 숨 쉴 틈
-      abortCheck(signal);
-    };
-
-    let f = 0;
-    while (f < frameCount) {
-      const idx = owner[f];
-      const frames = [];
-      while (f < frameCount && owner[f] === idx) frames.push(f++);
-
-      const clip = project.clips[idx];
-      if (!clip) continue;
-      const start = clipStartTime(idx);
-
-      if (clip.type === 'image') {
-        const src = { img: clip.bitmap, w: clip.natW, h: clip.natH };
-        for (const n of frames) await addFrame(n, src);
-      } else {
-        await renderVideoClip({ clip, frames, start, fps, addFrame, signal });
-      }
+    } finally {
+      for (const provider of providers.values()) await closeProvider(provider);
     }
 
     onProgress(0.99, '파일 마무리 중…');
@@ -177,44 +184,29 @@ export async function exportVideo({ engine, onProgress = () => {}, signal, playe
   }
 }
 
-async function renderVideoClip({ clip, frames, start, fps, addFrame, signal }) {
-  let input = null;
-  let last = null;
-  const srcOf = () => (last
-    ? { img: last, w: last.displayWidth, h: last.displayHeight, draw: (c, ...a) => last.draw(c, ...a) }
-    : null);
-
+async function videoProvider(at, fps) {
+  const { clip } = at;
+  const input = new MB.Input({ formats: MB.ALL_FORMATS, source: new MB.BlobSource(clip.file) });
   try {
-    input = new MB.Input({ formats: MB.ALL_FORMATS, source: new MB.BlobSource(clip.file) });
     const track = await input.getPrimaryVideoTrack();
-    if (!track) {
-      for (const n of frames) await addFrame(n, null);
-      return;
-    }
+    if (!track) throw new Error(`${clip.name}: 영상 트랙이 없습니다.`);
     const limit = Math.max(0, (clip.srcDuration || Infinity) - 1 / (fps * 2));
-    const stamps = frames.map(n => clamp(clip.trimStart + (n / fps - start), 0, limit));
-
-    const sink = new MB.VideoSampleSink(track);
-    let i = 0;
-    for await (const sample of sink.samplesAtTimestamps(stamps)) {
-      abortCheck(signal);
-      if (sample && sample !== last) {
-        last?.close();
-        last = sample;
-      }
-      if (i >= frames.length) break;
-      await addFrame(frames[i++], srcOf());
+    const stamps = [];
+    for (let n = Math.ceil(at.start * fps - 1e-8); n / fps < at.end - 1e-8; n++) {
+      stamps.push(clamp(clip.trimStart + n / fps - at.start, 0, limit));
     }
-    // 샘플이 모자라면 마지막 화면으로 채운다
-    while (i < frames.length) await addFrame(frames[i++], srcOf());
+    const sink = new MB.VideoSampleSink(track);
+    return { input, iterator: sink.samplesAtTimestamps(stamps)[Symbol.asyncIterator](), last: null, end: at.end };
   } catch (e) {
-    if (e?.name === 'AbortError') throw e;
-    console.warn('[export] 클립 디코딩 실패:', clip.name, e);
-    throw new Error(`${clip.name}: 영상을 디코딩하지 못했습니다. 다른 형식(MP4/H.264)으로 변환 후 시도해 주세요.`);
-  } finally {
-    last?.close();
-    try { input?.dispose?.(); } catch { /* noop */ }
+    input.dispose?.();
+    throw e;
   }
+}
+
+async function closeProvider(provider) {
+  try { await provider.iterator.return?.(); } catch { /* 이미 종료된 디코더 */ }
+  provider.last?.close();
+  try { provider.input.dispose?.(); } catch { /* 이미 해제된 입력 */ }
 }
 
 /**

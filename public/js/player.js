@@ -1,5 +1,5 @@
 // 미리보기 재생기 — <video> 엘리먼트를 타임라인에 맞춰 몰고 다니면서 캔버스에 그린다.
-import { project, clipAt, totalDuration } from './state.js';
+import { project, layersAt, totalDuration, clipFadeGain } from './state.js';
 import { renderFrame } from './render.js';
 import { clamp } from './util.js';
 
@@ -16,6 +16,10 @@ export class Player {
     this._startWall = 0;
     this._startTime = 0;
     this.bgmEl = null;
+    this.previewMuted = false;
+    this.trackElements = new Map();
+    // undo는 클립 데이터를 교체하므로 비동기 디코더 상태는 sink에 연결합니다.
+    this.sinkStates = new WeakMap();
 
     // 탭이 가려지면 requestAnimationFrame 이 멈춘다.
     // 그대로 두면 돌아왔을 때 시간이 훌쩍 뛰므로 그냥 일시정지한다.
@@ -42,21 +46,28 @@ export class Player {
    * 비동기라서, 도착할 때까지는 직전 프레임을 계속 보여준다.
    */
   _sinkSource(clip, t) {
-    const held = clip._frame;
+    const held = this._sinkState(clip).frame;
     if (!held || Math.abs(held.t - t) > 0.06) this._requestSinkFrame(clip, t);
     return held ? { img: held.canvas, w: held.canvas.width, h: held.canvas.height } : null;
   }
 
+  _sinkState(clip) {
+    let state=this.sinkStates.get(clip.sink);
+    if(!state){state={frame:null,pending:false,queued:null};this.sinkStates.set(clip.sink,state);}
+    return state;
+  }
+
   _requestSinkFrame(clip, t) {
-    if (clip._pending) { clip._queued = t; return; }   // 한 번에 하나만
-    clip._pending = true;
+    const state=this._sinkState(clip);
+    if (state.pending) { state.queued = t; return; }   // 한 번에 하나만
+    state.pending = true;
     clip.sink.getCanvas(t)
-      .then(w => { if (w) clip._frame = { t: w.timestamp, canvas: w.canvas }; })
+      .then(w => { if (w) state.frame = { t: w.timestamp, canvas: w.canvas }; })
       .catch(() => { /* 디코딩 실패한 지점은 직전 프레임 유지 */ })
       .finally(() => {
-        clip._pending = false;
-        const next = clip._queued;
-        clip._queued = null;
+        state.pending = false;
+        const next = state.queued;
+        state.queued = null;
         if (next != null) this._requestSinkFrame(clip, next);
         else if (!this.playing) this.draw();
       });
@@ -70,6 +81,7 @@ export class Player {
   invalidate() {
     if (!this.playing) {
       this._syncVideos(true);
+      this._syncTracks();
       this.draw();
       this.onTick(this.time);
     }
@@ -84,6 +96,7 @@ export class Player {
     }
     this._syncVideos(!this.playing);
     this._syncBgm();
+    this._syncTracks();
     if (redraw) this.draw();
     this.onTick(this.time);
   }
@@ -120,6 +133,8 @@ export class Player {
       }
       this.time = t;
       this._syncVideos(false);
+      this._syncBgm();
+      this._syncTracks();
       this.draw();
       this.onTick(this.time);
       this._raf = requestAnimationFrame(tick);
@@ -133,24 +148,25 @@ export class Player {
     this._raf = null;
     for (const c of project.clips) { try { c.el?.pause(); } catch { /* noop */ } }
     try { this.bgmEl?.pause(); } catch { /* noop */ }
+    for (const el of this.trackElements.values()) el.pause();
   }
 
   toggle() { this.playing ? this.pause() : this.play(); }
 
   // ── 내부: 비디오 동기화 ──────────────────────────────
   _syncVideos(exact) {
-    const at = clipAt(this.time);
-    const active = at?.clip;
+    const active = new Map(layersAt(this.time).map(at => [at.clip.id, at]));
 
     for (const c of project.clips) {
       if (c.type !== 'video' || !c.el) continue;
-      if (c !== active) {
+      const at = active.get(c.id);
+      if (!at) {
         if (!c.el.paused) c.el.pause();
         continue;
       }
       const want = c.trimStart + at.local;
-      c.el.muted = !!c.muted;
-      c.el.volume = clamp((c.volume ?? 1) * project.audio.originalVolume, 0, 1);
+      c.el.muted = !!c.muted || this.previewMuted;
+      c.el.volume = clamp((c.volume ?? 1) * project.audio.originalVolume * at.weight * clipFadeGain(c, at.local, at.duration), 0, 1);
 
       if (this.playing) {
         if (Math.abs(c.el.currentTime - want) > 0.22) c.el.currentTime = want;
@@ -182,7 +198,30 @@ export class Player {
     if (len > 0) pos = bgm.loop ? pos % len : Math.min(pos, len - 0.05);
     if (isFinite(pos) && Math.abs(el.currentTime - pos) > 0.25) el.currentTime = Math.max(0, pos);
     el.volume = clamp(bgm.volume * bgmFadeGain(bgm, this.time, this.duration), 0, 1);
+    el.muted = this.previewMuted;
     if (this.playing && el.paused) el.play().catch(() => {});
+  }
+
+  _syncTracks() {
+    const tracks = project.audio.tracks || [];
+    const ids = new Set(tracks.map(t => t.id));
+    for (const [id, el] of this.trackElements) {
+      if (!ids.has(id)) { el.pause(); this.trackElements.delete(id); }
+    }
+    for (const track of tracks) {
+      const el = track.el;
+      if (!el) continue;
+      this.trackElements.set(track.id, el);
+      const duration = track.trimEnd - track.trimStart;
+      const local = this.time - track.start;
+      if (local < 0 || local >= duration || track.muted) { el.pause(); continue; }
+      const desired = track.trimStart + local;
+      if (Math.abs(el.currentTime - desired) > (this.playing ? .2 : .02)) el.currentTime = desired;
+      el.muted = this.previewMuted || !!track.muted;
+      el.volume = clamp((track.volume ?? 1) * clipFadeGain(track, local, duration), 0, 1);
+      if (this.playing && el.paused) el.play().catch(() => {});
+      if (!this.playing && !el.paused) el.pause();
+    }
   }
 }
 

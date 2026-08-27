@@ -1,6 +1,7 @@
 {
   "baseline": "9eb4ef137222d393d247cf79f6f2a1b4b7713368",
   "referenceUnmodified": true,
+  "release": "timeline-editing-2026-08-28",
   "changedTrackedFiles": [
     ".gitignore",
     "README.md",
@@ -23,6 +24,7 @@
     "public/js/presets.js",
     "public/js/project-store.js",
     "public/js/studio-app.js",
+    "public/js/timeline-edits.js",
     "public/js/timeline.js",
     "public/og.png",
     "public/studio.css",
@@ -33,8 +35,9 @@
     "tests/test_server.py"
   ],
   "localEntry": "http://127.0.0.1:8787/studio.html",
+  "sharedPreview": "https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html",
   "tests": {
-    "node": 16,
+    "node": 36,
     "python": 7,
     "browserWorkflow": "not-run",
     "realMediaExport": "not-run",

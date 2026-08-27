@@ -1,6 +1,6 @@
 // 오디오 믹싱 — 클립 원본 소리 + 배경음악을 하나의 AudioBuffer 로 합친다.
 import { Input, BlobSource, ALL_FORMATS, AudioBufferSink } from '../vendor/mediabunny.min.js';
-import { project, clipDuration, clipStartTime, totalDuration, buildLayout } from './state.js';
+import { project, clipDuration, totalDuration, buildLayout, clipFadeGain } from './state.js';
 
 const RATE = 48000;
 
@@ -91,14 +91,14 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
     const buf = await extractClipAudio(clip, signal);
     if (!buf) continue;
 
-    const at = clipStartTime(project.clips.indexOf(clip));
+    const at = buildLayout().entries.find(entry => entry.clip.id === clip.id)?.start || 0;
     const dur = clipDuration(clip);
     const node = ctx.createBufferSource();
     node.buffer = buf;
 
     const gain = ctx.createGain();
     const vol = (clip.volume ?? 1) * project.audio.originalVolume;
-    applyFade(gain.gain, vol, at, dur, clip.fadeIn, clip.fadeOut);
+    applyFade(gain.gain, vol, at, dur, clip.fadeIn, clip.fadeOut, clip.fadeEnvelope);
     const e = buildLayout().entries.find(e => e.clip.id === clip.id);
     const crossfade = ctx.createGain();
     applyFade(crossfade.gain, 1, at, dur, e?.overlapIn || 0, e?.overlapOut || 0);
@@ -115,7 +115,7 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
     const node = ctx.createBufferSource();
     node.buffer = track.buffer;
     const gain = ctx.createGain();
-    applyFade(gain.gain, track.volume ?? 1, track.start, duration, track.fadeIn, track.fadeOut);
+    applyFade(gain.gain, track.volume ?? 1, track.start, duration, track.fadeIn, track.fadeOut, track.fadeEnvelope);
     node.connect(gain).connect(master);
     node.start(track.start, track.trimStart, duration);
   }
@@ -143,7 +143,15 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
   return ctx.startRendering();
 }
 
-function applyFade(param, volume, start, duration, fadeIn = 0, fadeOut = 0) {
+export function applyFade(param, volume, start, duration, fadeIn = 0, fadeOut = 0, envelope = null) {
+  if (envelope) {
+    const gainAt = t => clipFadeGain({ fadeEnvelope: envelope }, t, duration) * volume;
+    const points = [...new Set([0, duration, -envelope.offset, envelope.duration-envelope.offset, Math.min(envelope.fadeIn, envelope.duration / 2) - envelope.offset,
+      envelope.duration - Math.min(envelope.fadeOut, envelope.duration / 2) - envelope.offset])].filter(t => t >= 0 && t <= duration).sort((a,b) => a-b);
+    param.setValueAtTime(gainAt(0), start);
+    for (const point of points.slice(1)) param.linearRampToValueAtTime(gainAt(point), start + point);
+    return;
+  }
   const end = start + duration;
   fadeIn = Math.min(fadeIn, duration / 2);
   fadeOut = Math.min(fadeOut, duration / 2);

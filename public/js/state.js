@@ -144,8 +144,8 @@ export function newClipDefaults(type) {
 export function clipDuration(c) {
   if (!c) return 0;
   return c.type === 'video'
-    ? Math.max(0.05, c.trimEnd - c.trimStart)
-    : Math.max(0.1, c.imgDuration);
+    ? Math.max(0.000001, c.trimEnd - c.trimStart)
+    : Math.max(0.000001, c.imgDuration);
 }
 
 export function totalDuration() {
@@ -153,7 +153,7 @@ export function totalDuration() {
 }
 
 export function clipStartTime(index) {
-  return buildLayout().entries[index]?.start ?? 0;
+  return buildLayout().entries.find(entry => entry.index === index)?.start ?? 0;
 }
 
 /** 전체 타임라인 시각 t 에서 재생 중인 클립과 그 내부 시각 */
@@ -161,28 +161,76 @@ export function clipAt(t) {
   return layersAt(t).reduce((a, b) => !a || b.weight >= a.weight ? b : a, null);
 }
 
-/** 전환 겹침을 포함한 유일한 시간표. 인접 클립 절반 이내라 세 장면이 겹치지 않습니다. */
+/** 시작 시각이 없는 이전 프로젝트만 연속 배치로 해석합니다. 조회 중에는 문서를 바꾸지 않습니다. */
 export function buildLayout(doc = project) {
-  let start = 0, overlapIn = 0;
-  const entries = doc.clips.map((clip, index) => {
+  let cursor = 0;
+  const entries = (doc.clips || []).map((clip, index) => {
     const duration = clipDuration(clip);
     const next = doc.clips[index + 1];
     const requested = Number(clip.transitionOut?.duration) || 0;
-    const overlapOut = next && ['dissolve', 'fade', 'flash'].includes(clip.transitionOut?.type)
+    const legacyOverlap = next && ['dissolve', 'fade', 'flash'].includes(clip.transitionOut?.type)
       ? Math.max(0, Math.min(2, requested, duration / 2, clipDuration(next) / 2)) : 0;
-    const entry = { clip, index, start, end: start + duration, duration, overlapIn, overlapOut };
-    start += duration - overlapOut;
-    overlapIn = overlapOut;
+    const start = Number.isFinite(clip.start) ? Math.max(0, clip.start) : cursor;
+    const entry = { clip, index, start, end: start + duration, duration, overlapIn: 0, overlapOut: 0 };
+    cursor = entry.end - legacyOverlap;
     return entry;
+  }).sort((a, b) => a.start - b.start || a.index - b.index);
+  for (let i = 0; i < entries.length - 1; i++) {
+    const left = entries[i], right = entries[i + 1], transition = left.clip.transitionOut;
+    const overlap = Math.round((left.end - right.start) * 1e9) / 1e9;
+    const limit = Math.min(2, left.duration / 2, right.duration / 2);
+    if (['dissolve', 'fade', 'flash'].includes(transition?.type)
+      && (!transition.toId || transition.toId === right.clip.id)
+      && overlap > 1e-7 && overlap <= limit + 1e-6) {
+      left.overlapOut = overlap;
+      right.overlapIn = overlap;
+    }
+  }
+  const videoEnd = Math.max(0, ...entries.map(e => e.end));
+  const tracks = doc.tracks || doc.audio?.tracks || [];
+  const total = Math.max(videoEnd,
+    ...(doc.overlays || []).map(item => Number(item.end) || 0),
+    ...(doc.captions || []).map(item => Number(item.end) || 0),
+    ...tracks.map(item => (Number(item.start) || 0) + Math.max(0, item.trimEnd - item.trimStart)));
+  return { entries, videoEnd, total };
+}
+
+/** 편집 전에 이전 연속 배치를 절대 시각으로 고정해, 삭제·분할이 다른 클립을 밀지 않게 합니다. */
+export function pinClipPositions(doc = project) {
+  const layout = buildLayout(doc);
+  for (const entry of layout.entries) entry.clip.start = entry.start;
+  for (let i = 0; i < layout.entries.length - 1; i++) {
+    const entry = layout.entries[i];
+    if (entry.overlapOut > 0) entry.clip.transitionOut = {
+      ...entry.clip.transitionOut, duration: entry.overlapOut, toId: layout.entries[i + 1].clip.id,
+    };
+  }
+  return layout;
+}
+
+/** 같은 영상 트랙에서 실제로 맞닿거나 전환으로 겹치는 두 클립의 연결점입니다. */
+export function transitionPairs(doc = project) {
+  const entries = buildLayout(doc).entries;
+  return entries.slice(0, -1).flatMap((left, index) => {
+    const right = entries[index + 1];
+    if (!left.overlapOut && Math.abs(left.end - right.start) > 1e-6) return [];
+    const duration = left.overlapOut;
+    return [{ left, right, duration, start: left.end - duration, end: left.end,
+      center: left.end - duration / 2, type: duration ? left.clip.transitionOut.type : 'cut' }];
   });
-  return { entries, total: entries.at(-1)?.end || 0 };
 }
 
 /** 미리보기·인코더·오디오가 공유하는 활성 레이어와 선형 교차 가중치. */
 export function layersAt(t, layout = buildLayout()) {
   if (!layout.total) return [];
-  t = Math.max(0, Math.min(t, layout.total - 1e-7));
-  return layout.entries.filter(e => t >= e.start && t < e.end).map(e => {
+  if (!Number.isFinite(t) || t < 0 || t > layout.total) return [];
+  // 마지막 프레임 표시만 허용합니다. 영상이 없는 구간을 마지막 영상으로 채우지 않습니다.
+  if (t === layout.total) t = Math.max(0, t - 1e-7);
+  let active = layout.entries.filter(e => t >= e.start && t < e.end);
+  if (active.length > 1 && !(active.length === 2 && active[0].overlapOut && active[1].overlapIn)) {
+    active = [active.at(-1)];
+  }
+  return active.map(e => {
     const local = t - e.start;
     let weight = 1;
     if (e.overlapIn > 0 && local < e.overlapIn) weight = local / e.overlapIn;
@@ -192,6 +240,11 @@ export function layersAt(t, layout = buildLayout()) {
 }
 
 export function clipFadeGain(clip, local, duration) {
+  if (clip.fadeEnvelope) {
+    local += clip.fadeEnvelope.offset;
+    duration = clip.fadeEnvelope.duration;
+    clip = clip.fadeEnvelope;
+  }
   let g = 1;
   const fadeIn = Math.min(clip.fadeIn || 0, duration / 2);
   const fadeOut = Math.min(clip.fadeOut || 0, duration / 2);
@@ -200,19 +253,18 @@ export function clipFadeGain(clip, local, duration) {
   return Math.max(0, g);
 }
 
-/** 연결된 자막/그래픽만 원본 시각을 따라갑니다. SRT 등 시퀀스 기준 항목은 그대로 둡니다. */
+/** 연결은 이동 관계이며 길이 제한이 아닙니다. 영상이 없어져도 다른 트랙을 삭제하지 않습니다. */
 export function syncAnchoredItems() {
   const entries = new Map(buildLayout().entries.map(e => [e.clip.id, e]));
   for (const item of [...project.overlays, ...project.captions]) {
     if (!item.anchor) continue;
     const e = entries.get(item.anchor.clipId);
-    if (!e) { item.start = item.end = 0; continue; }
+    if (!e) { delete item.anchor; continue; }
     const sourceStart = e.clip.type === 'video' ? e.clip.trimStart : 0;
-    const s = Math.max(0, item.anchor.sourceStart - sourceStart);
-    const end = Math.min(e.duration, item.anchor.sourceEnd - sourceStart);
-    item.start = e.start + Math.min(e.duration, s);
-    item.end = e.start + Math.max(s, end);
-    if (s >= e.duration || end <= 0) item.end = item.start;
+    const start = e.start + item.anchor.sourceStart - sourceStart;
+    const duration = Math.max(0, item.anchor.sourceEnd - item.anchor.sourceStart);
+    item.start = Math.max(0, start);
+    item.end = item.start + duration;
   }
 }
 
@@ -252,7 +304,7 @@ export function newOverlay(t) {
     id: null,
     text: '여기에 훅 문구',
     start: t,
-    end: Math.min(t + 3, Math.max(t + 1, totalDuration())),
+    end: t + 3,
     font: '"Black Han Sans"',
     size: 78,
     color: '#ffffff',

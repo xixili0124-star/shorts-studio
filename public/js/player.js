@@ -88,8 +88,8 @@ export class Player {
   }
 
   // ── 이동 ─────────────────────────────────────────────
-  seek(t, { redraw = true } = {}) {
-    this.time = clamp(t, 0, Math.max(0, this.duration - 0.001));
+  seek(t, { redraw = true, allowBeyond = false } = {}) {
+    this.time = clamp(t, 0, allowBeyond ? 86400 : Math.max(0, this.duration - 0.001));
     if (this.playing) {
       this._startWall = performance.now() / 1000;
       this._startTime = this.time;
@@ -103,12 +103,13 @@ export class Player {
 
   step(frames) {
     this.pause();
-    this.seek(this.time + frames / project.fps);
+    this.seek(this.time + frames / project.fps, { allowBeyond: true });
   }
 
   // ── 재생 ─────────────────────────────────────────────
   play() {
     if (this.playing || this.duration <= 0) return;
+    if (this.time >= this.duration) this.time = 0;
     this.playing = true;
     this._startWall = performance.now() / 1000;
     this._startTime = this.time;

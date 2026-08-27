@@ -122,7 +122,9 @@ export function clipGeometry(W, H, sw, sh, clip, progress = 0) {
 
 function drawClipLayer(ctx, W, H, at, src) {
   const clip = at.clip;
-  const progress = at.duration > 0 ? at.local / at.duration : 0;
+  const duration = clip.type === 'image' ? clip.motionDuration || at.duration : at.duration;
+  const offset = clip.type === 'image' ? clip.motionOffset || 0 : 0;
+  const progress = duration > 0 ? (at.local + offset) / duration : 0;
   const g = clipGeometry(W, H, src.w, src.h, clip, progress);
 
   const covers = g.dx <= 0.5 && g.dy <= 0.5 && g.dx + g.dw >= W - 0.5 && g.dy + g.dh >= H - 0.5;

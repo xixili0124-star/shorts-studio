@@ -2,6 +2,8 @@
 
 > **이 브랜치는 디자인·편집 기능을 검토하는 실험판입니다.** 운영 `main`과 분리되어 있으며 아직 병합할 단계가 아닙니다.
 >
+> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 2026-08-28: 선택 클립 분할, 빈 구간 배치, 독립 자막·그래픽 이동, 전환 선택, 드래그 삽입 범위 표시를 추가했습니다.
+>
 > 먼저 [실험판 실행 안내](START-HERE.md)를 읽어 주세요. Windows에서는 `start-studio.cmd`를 실행한 뒤 `http://127.0.0.1:8787/studio.html`을 열면 됩니다. [변경 범위](CHANGELOG-LAB.md) · [검증 기록](VERIFICATION.md)
 >
 > 아래 설명은 기준 버전의 원본 안내입니다. 실험판 UI의 진입점은 `public/studio.html`이고, TTS는 별도 API 설정이 필요합니다. 브라우저 전체 조작·실제 MP4 출력·한국어 TTS 음질 검수는 아직 남아 있습니다.

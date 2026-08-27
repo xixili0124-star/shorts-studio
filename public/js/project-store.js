@@ -1,5 +1,5 @@
 // 편집 데이터와 미디어 자원을 분리합니다. 되돌리기는 DOM/File을 복제하지 않습니다.
-import { project, newClipDefaults, syncAnchoredItems } from './state.js';
+import { project, newClipDefaults, syncAnchoredItems, buildLayout, pinClipPositions } from './state.js';
 import { createClip, disposeClip } from './media.js';
 import { decodeAudioFile } from './audio.js';
 import { uid } from './util.js';
@@ -11,15 +11,18 @@ let assetReady = () => {};
 export function onAssetReady(callback) { assetReady = callback; }
 export let documentName = '새 프로젝트';
 export function setDocumentName(name) { documentName = String(name).trim().slice(0, 100) || '새 프로젝트'; }
-const clipKeys = ['id','assetId','type','name','trimStart','trimEnd','imgDuration','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','volume','muted','transitionOut'];
-const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','muted','lane','aiGenerated'];
+const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut'];
+const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','aiGenerated'];
 const copy = value => JSON.parse(JSON.stringify(value));
 const pick = (object, keys) => Object.fromEntries(keys.filter(k => object[k] !== undefined).map(k => [k, object[k]]));
 
 export function captureDocument() {
-  return copy({ version: 1, name: documentName,
+  const entries = buildLayout().entries;
+  const timing = new Map(entries.map((entry, index) => [entry.clip.id, { start: entry.start,
+    transitionOut: entry.overlapOut ? { ...entry.clip.transitionOut, duration: entry.overlapOut, toId: entries[index + 1].clip.id } : { type: 'cut', duration: 0 } }]));
+  return copy({ version: 2, name: documentName,
     settings: pick(project, ['width','height','fps','quality']),
-    clips: project.clips.map(c => pick(c, clipKeys)),
+    clips: project.clips.map(c => ({ ...pick(c, clipKeys), ...timing.get(c.id) })),
     overlays: project.overlays, captions: project.captions,
     captionStyle: project.captionStyle, template: project.template,
     tracks: (project.audio.tracks || []).map(t => pick(t, audioKeys)),
@@ -32,12 +35,13 @@ export function restoreDocument(doc) {
   const clips = doc.clips.map(c => {
     const runtime = clipRuntime.get(c.id);
     if (!runtime) throw new Error('프로젝트 소재를 먼저 불러와야 합니다.');
-    return { ...runtime, ...copy(pick(c,clipKeys)) };
+    return { ...runtime, ...copy(pick(c,clipKeys)), start: Number.isFinite(c.start) ? c.start : undefined,
+      motionDuration: c.motionDuration, motionOffset: c.motionOffset, fadeEnvelope: c.fadeEnvelope ? copy(c.fadeEnvelope) : undefined };
   });
   const tracks = (doc.tracks || []).map(t => {
     const runtime = audioRuntime.get(t.id);
     if (!runtime) throw new Error('프로젝트 오디오를 먼저 불러와야 합니다.');
-    return { ...runtime, ...copy(pick(t,audioKeys)) };
+    return { ...runtime, ...copy(pick(t,audioKeys)), fadeEnvelope: t.fadeEnvelope ? copy(t.fadeEnvelope) : undefined };
   });
   setDocumentName(doc.name);
   Object.assign(project, pick(doc.settings || {}, ['width','height','fps','quality']));
@@ -49,6 +53,7 @@ export function restoreDocument(doc) {
   project.captions = copy(doc.captions || []);
   project.captionStyle = copy(doc.captionStyle || project.captionStyle);
   project.template = copy(doc.template || project.template);
+  pinClipPositions();
   syncAnchoredItems();
 }
 
@@ -182,7 +187,7 @@ async function hydrate(doc, records) {
 }
 
 export function validateDocument(doc, records) {
-  if (!doc || doc.version !== 1 || !Array.isArray(records) || !Array.isArray(doc.clips) || !Array.isArray(doc.captions) || !Array.isArray(doc.overlays) || !Array.isArray(doc.tracks)) throw new Error('지원하지 않는 프로젝트 형식입니다.');
+  if (!doc || ![1, 2].includes(doc.version) || !Array.isArray(records) || !Array.isArray(doc.clips) || !Array.isArray(doc.captions) || !Array.isArray(doc.overlays) || !Array.isArray(doc.tracks)) throw new Error('지원하지 않는 프로젝트 형식입니다.');
   if (doc.clips.length > 1000 || doc.tracks.length > 1000 || doc.captions.length > 5000 || doc.overlays.length > 1000 || records.length > 200) throw new Error('실험판의 프로젝트 크기 제한을 초과했습니다.');
   const safeId=id=>typeof id==='string' && /^[a-zA-Z0-9_-]{1,80}$/.test(id);
   if(records.some(r=>!r || !safeId(r.id)) || new Set(records.map(r=>r.id)).size!==records.length)throw new Error('소재 식별자가 올바르지 않습니다.');
@@ -191,6 +196,7 @@ export function validateDocument(doc, records) {
   for(const clip of doc.clips) {
     if(!clip || !['video','image'].includes(clip.type) || !Number.isFinite(clip.scale) || !Number.isFinite(clip.offX) || !Number.isFinite(clip.offY) || !Number.isFinite(clip.trimStart) || !Number.isFinite(clip.trimEnd) || !Number.isFinite(clip.imgDuration))throw new Error('클립 속성이 올바르지 않습니다.');
     if(clip.scale<.1 || clip.scale>10 || Math.abs(clip.offX)>2 || Math.abs(clip.offY)>2)throw new Error('클립 배치가 허용 범위를 벗어났습니다.');
+    if(doc.version === 2 && (!Number.isFinite(clip.start) || clip.start < 0))throw new Error('영상 클립의 타임라인 위치가 올바르지 않습니다.');
   }
   for(const track of doc.tracks) {
     if(!track || !Number.isFinite(track.start) || !Number.isFinite(track.trimStart) || !Number.isFinite(track.trimEnd) || track.trimEnd<=track.trimStart || !['music','voice'].includes(track.lane))throw new Error('오디오 구간이 올바르지 않습니다.');
@@ -198,11 +204,18 @@ export function validateDocument(doc, records) {
   for (const item of [...doc.clips, ...(doc.tracks || [])]) {
     if (!item || !ids.has(item.assetId) || !safeId(item.id) || instanceIds.has(item.id)) throw new Error('프로젝트 소재 연결이 올바르지 않습니다.');
     instanceIds.add(item.id);
-    for (const key of ['start','trimStart','trimEnd','imgDuration','scale','offX','offY','volume','fadeIn','fadeOut']) {
+    for (const key of ['start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','scale','offX','offY','volume','fadeIn','fadeOut']) {
       if (item[key] !== undefined && (!Number.isFinite(item[key]) || Math.abs(item[key]) > 86400)) throw new Error('프로젝트 시간 또는 속성 값이 올바르지 않습니다.');
     }
     if (item.trimStart < 0 || item.trimEnd < item.trimStart || item.imgDuration <= 0 || item.start < 0 || item.scale <= 0) throw new Error('클립 구간이 올바르지 않습니다.');
+    if (item.type === 'video' && item.trimEnd <= item.trimStart) throw new Error('영상 클립의 길이가 올바르지 않습니다.');
+    if (item.motionDuration < 0 || item.motionOffset < 0) throw new Error('이미지 모션 구간이 올바르지 않습니다.');
+    if (item.fadeEnvelope) {
+      const env = item.fadeEnvelope;
+      if (['offset','duration','fadeIn','fadeOut'].some(key => !Number.isFinite(env[key]) || Math.abs(env[key]) > 86400) || env.duration <= 0 || env.fadeIn < 0 || env.fadeOut < 0) throw new Error('페이드 구간이 올바르지 않습니다.');
+    }
     if (item.transitionOut && (!['cut','dissolve','fade','flash'].includes(item.transitionOut.type) || !Number.isFinite(item.transitionOut.duration) || item.transitionOut.duration<0 || item.transitionOut.duration>2)) throw new Error('전환 정보가 올바르지 않습니다.');
+    if (item.transitionOut?.toId && !safeId(item.transitionOut.toId)) throw new Error('전환 연결이 올바르지 않습니다.');
   }
   for (const item of [...doc.captions, ...doc.overlays]) {
     if (!item || !safeId(item.id) || instanceIds.has(item.id) || typeof item.text !== 'string' || item.text.length > 10000 || !Number.isFinite(item.start) || !Number.isFinite(item.end) || item.start < 0 || item.end < item.start || item.end > 86400) throw new Error('자막 또는 그래픽 정보가 올바르지 않습니다.');
@@ -210,6 +223,10 @@ export function validateDocument(doc, records) {
     if(item.anchor && (!safeId(item.anchor.clipId) || !Number.isFinite(item.anchor.sourceStart) || !Number.isFinite(item.anchor.sourceEnd)))throw new Error('자막 연결 시각이 올바르지 않습니다.');
   }
   if (!doc.settings || ![720,1080,1440].includes(doc.settings.width) || doc.settings.height !== doc.settings.width * 16/9 || ![24,30,60].includes(doc.settings.fps) || !['low','medium','high','very-high'].includes(doc.settings.quality)) throw new Error('출력 설정이 올바르지 않습니다.');
+  const entries = buildLayout(doc).entries;
+  for(let i=0;i<entries.length-1;i++) {
+    if(entries[i].end > entries[i+1].start + 1e-6 && !entries[i].overlapOut)throw new Error('영상 클립이 전환 없이 겹쳐 있습니다.');
+  }
 }
 
 export function packProject() {

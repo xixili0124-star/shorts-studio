@@ -1,6 +1,8 @@
 // 드래그 중에는 잡은 DOM을 유지하고, 놓을 때 한 번만 편집 명령을 적용합니다.
 import { project, buildLayout, totalDuration, transitionPairs, syncAnchoredItems, timelineTracks, trackIdFor, trackLabel, trackItems, trackKind, TRACK_ROLES } from './state.js';
 import { assets, captureDocument } from './project-store.js';
+import { trackBadge } from './state.js';
+import { TRANSITIONS } from './presets.js';
 import { frameTime, itemRange, planVideoPlacement, placeVideoClip, planClipTrim, applyClipTrim, setItemRange, planPlacement, placeTimelineItem, trackGaps, planItemTrim, applyItemTrim } from './timeline-edits.js';
 import { clamp } from './util.js';
 import { selectionKey, selectionRefs, combineSelection, marqueeHits, planBatchMove, applyBatchMove } from './batch-edits.js';
@@ -146,14 +148,14 @@ export class Timeline {
     $('trackHeaders').innerHTML=rows.map(track=>{
       const count=trackItems(track.id,project,layout).length;
       const active=track.id===this.activeHeaderId,role=TRACK_ROLES.find(role=>role.id===track.role);
-      return '<div class="track-head '+track.kind+'-head '+track.role+'-head"><button class="track-selector '+(active?'active':'')+'" data-track-select="'+track.id+'" aria-pressed="'+active+'" title="이 용도의 새 클립을 추가할 트랙"><span class="track-code">'+role.code+'</span><strong>'+trackLabel(track.id)+'</strong><small>'+count+'</small></button><button class="add-track" data-add-track="'+track.id+'" aria-label="'+trackLabel(track.id)+(track.kind==='visual'?' 바로 위에 ':' 바로 아래에 ')+role.label+' 트랙 추가" title="'+(track.kind==='visual'?'바로 위에':'바로 아래에')+' '+role.label+' 트랙 추가" '+(registry.filter(t=>t.kind===track.kind).length>=24?'disabled':'')+'>+</button><button class="remove-track" data-remove-track="'+track.id+'" aria-label="'+trackLabel(track.id)+' 빈 트랙 삭제" '+(count||registry.filter(t=>t.role===track.role).length<2?'disabled':'')+'>×</button></div>';
+      return '<div class="track-head '+track.kind+'-head '+track.role+'-head"><button class="track-selector '+(active?'active':'')+'" data-track-select="'+track.id+'" aria-pressed="'+active+'" title="이 용도의 새 클립을 추가할 트랙"><span class="track-code">'+trackBadge(track.id)+'</span><strong>'+trackLabel(track.id)+'</strong><small>'+count+'</small></button><button class="add-track" data-add-track="'+track.id+'" aria-label="'+trackLabel(track.id)+(track.kind==='visual'?' 바로 위에 ':' 바로 아래에 ')+role.label+' 트랙 추가" title="'+(track.kind==='visual'?'바로 위에':'바로 아래에')+' '+role.label+' 트랙 추가" '+(registry.filter(t=>t.kind===track.kind).length>=24?'disabled':'')+'>+</button><button class="remove-track" data-remove-track="'+track.id+'" aria-label="'+trackLabel(track.id)+' 빈 트랙 삭제" '+(count||(!role.optional&&registry.filter(t=>t.role===track.role).length<2)?'disabled':'')+'>×</button></div>';
     }).join('');
     $('trackHeaders').style.transform='translateY(-'+this.scroll.scrollTop+'px)';
     $('totalDuration').textContent=stamp(layout.total);$('sequenceInfo').textContent=layout.items.length+' 클립 · '+layout.total.toFixed(1)+'초';
     this.tick(this.time);this.paintSelection();this.updateSettingButtons();
   }
   transitionButton(pair){
-    const name={cut:'바로 연결',dissolve:'디졸브',fade:'검정 페이드',flash:'화이트 플래시'}[pair.type];
+    const name=TRANSITIONS.find(transition=>transition.id===pair.type)?.name||'전환';
     const label=(pair.left.clip.name||'앞 클립')+' ↔ '+(pair.right.clip.name||'뒤 클립')+' · '+name+(pair.duration?' '+pair.duration.toFixed(2)+'초':'');
     const band=pair.duration?'<span class="transition-band" style="left:'+pair.start*this.zoom+'px;width:'+pair.duration*this.zoom+'px"></span>':'';
     return band+'<button type="button" class="transition-chip '+(pair.duration?'':'cut-connector')+'" data-type="transition" data-id="'+pair.left.clip.id+'" data-transition="'+pair.left.clip.id+'" data-right="'+pair.right.clip.id+'" aria-label="'+esc(label)+' 전환 편집" aria-pressed="false" style="left:'+pair.center*this.zoom+'px" title="'+esc(label)+' · 클릭하여 편집">'+'<span class="'+(pair.duration?'transition-symbol':'plus-symbol')+'" aria-hidden="true"></span></button>';
@@ -202,16 +204,23 @@ export class Timeline {
   showPreview(plan,label){
     this.clearPreview();if(!plan)return;
     const track=$('track-'+(plan.trackId||plan.lane));if(!track)return;
-    track.classList.add('drop-target');this.ensureWidth(plan.end);
-    const ghost=document.createElement('div');ghost.className='timeline-insert-preview '+(plan.type==='transition'?'connection-preview':'');
+    const invalid=plan.placement?.ok===false,swap=plan.placement?.swap;
+    track.classList.add('drop-target');this.ensureWidth(Math.max(plan.end,swap?.end||0));
+    const ghost=document.createElement('div');ghost.className='timeline-insert-preview '+(invalid?'invalid ':'')+(plan.type==='transition'?'connection-preview':'');
     ghost.style.left=plan.start*this.zoom+'px';ghost.style.width=Math.max(12,(plan.end-plan.start)*this.zoom)+'px';
     ghost.setAttribute('aria-hidden','true');ghost.textContent=plan.name||'';track.append(ghost);
+    if(swap){
+      const other=document.createElement('div');other.className='timeline-insert-preview swap-preview'+(invalid?' invalid':'');
+      other.style.left=swap.start*this.zoom+'px';other.style.width=Math.max(12,swap.duration*this.zoom)+'px';
+      other.setAttribute('aria-hidden','true');other.textContent='↔ '+swap.name;track.append(other);
+    }
     const guide=document.createElement('div');guide.className='insertion-guide';guide.style.left=plan.start*this.zoom+'px';this.canvas.append(guide);
     const text=document.createElement('div');text.className='insertion-label';
     text.style.top=(this.scroll.scrollTop+2)+'px';
     text.style.left=clamp(plan.start*this.zoom,this.scroll.scrollLeft+4,Math.max(this.scroll.scrollLeft+4,this.scroll.scrollLeft+this.scroll.clientWidth-290))+'px';
     const shifted=plan.placement?.shifts?.length?' · 뒤 '+plan.placement.shifts.length+'개 +'+plan.placement.shift.toFixed(2)+'초':'';
-    text.textContent=label||trackLabel(plan.trackId||plan.lane)+' · '+precise(plan.start)+' → '+precise(plan.end)+' · '+(plan.end-plan.start).toFixed(2)+'초'+shifted;
+    text.textContent=invalid?plan.placement.reason:label||trackLabel(plan.trackId||plan.lane)+' · '+precise(plan.start)+' → '+precise(plan.end)+' · '+(plan.end-plan.start).toFixed(2)+'초'+(swap?' · 두 클립만 자리 교환':shifted);
+    const notice=$('timelineNotice');if(notice)notice.textContent=text.textContent;
     this.canvas.append(text);this.preview=plan;
   }
   clearPreview(){
@@ -249,7 +258,7 @@ export class Timeline {
       if(top<this.scroll.scrollTop+27)this.scroll.scrollTop=Math.max(0,top-27);
       else if(top+(row?.offsetHeight||54)>this.scroll.scrollTop+this.scroll.clientHeight)this.scroll.scrollTop=top+(row?.offsetHeight||54)-this.scroll.clientHeight;
       node.classList.add('just-added');setTimeout(()=>node.classList.remove('just-added'),1600);}
-    const notice=$('timelineNotice');if(notice)notice.textContent=(result.type==='transition'?'전환 선택':'클립 배치')+': '+precise(result.start||0)+(result.end!=null?'부터 '+(result.end-result.start).toFixed(2)+'초':'');
+    const notice=$('timelineNotice');if(notice)notice.textContent=(result.type==='transition'?'전환 선택':result.mode==='swap'?'두 클립 자리 교환':'클립 배치')+': '+precise(result.start||0)+(result.end!=null?'부터 '+(result.end-result.start).toFixed(2)+'초':'');
   }
   trackScroll(event,update){
     this.scrollPoint={x:event.clientX,y:event.clientY};this.scrollUpdate=update;
@@ -377,7 +386,7 @@ export class Timeline {
         const time=this.snapTime(range.start+delta,id,range.duration);
         pending=target===range.trackId&&Math.abs(time-range.start)<1e-6
           ?{start:range.start,end:range.end,trackId:target,noop:true}
-          :planPlacement(time,range.duration,target,id);
+          :planPlacement(time,range.duration,target,id,project,{targetTime:this.xTime(lastEvent.clientX)});
       }else{
         const time=this.snapTime((edge==='end'?range.end:range.start)+delta,id);
         pending={...planItemTrim(type,id,edge,time),trackId:range.trackId};
@@ -395,8 +404,8 @@ export class Timeline {
           if(JSON.stringify(captureDocument())!==JSON.stringify(before))throw new Error('드래그 중 편집 내용이 변경되었습니다. 다시 시도해 주세요.');
           if(!edge)placeTimelineItem(type,range.item,pending);
           else applyItemTrim(pending);
-          syncAnchoredItems();this.callbacks.commit(before,edge?'클립 구간 조절':'클립 위치 이동');
-          this.reveal({type,id,trackId:pending.trackId,start:pending.start,end:pending.end});
+          syncAnchoredItems();this.callbacks.commit(before,edge?'클립 구간 조절':pending.swap?'클립 자리 교환':'클립 위치 이동');
+          this.reveal({type,id,trackId:pending.trackId,start:pending.start,end:pending.end,mode:pending.mode});
         }catch(error){this.callbacks.error?.(error.message);this.render();}
       }else this.render();
     };

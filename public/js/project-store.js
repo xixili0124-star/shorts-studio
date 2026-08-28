@@ -4,6 +4,9 @@ import { createClip, disposeClip } from './media.js';
 import { decodeAudioFile } from './audio.js';
 import { uid } from './util.js';
 import { validMosaics } from './mosaic.js';
+import { TRANSITIONS } from './presets.js';
+import { validateKeyframes } from './keyframes.js';
+import { validCropTracking } from './crop-tracking.js';
 
 export const assets = new Map();
 const clipRuntime = new Map();
@@ -12,8 +15,8 @@ let assetReady = () => {};
 export function onAssetReady(callback) { assetReady = callback; }
 export let documentName = '새 프로젝트';
 export function setDocumentName(name) { documentName = String(name).trim().slice(0, 100) || '새 프로젝트'; }
-const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop','mosaics'];
-const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','role','trackId','aiGenerated'];
+const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop','mosaics','keyframes','cropTracking'];
+const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','role','trackId','aiGenerated','keyframes'];
 const copy = value => JSON.parse(JSON.stringify(value));
 const pick = (object, keys) => Object.fromEntries(keys.filter(k => object[k] !== undefined).map(k => [k, object[k]]));
 
@@ -45,12 +48,13 @@ export function restoreDocument(doc) {
     return { ...runtime, ...copy(pick(c,clipKeys)), start: Number.isFinite(c.start) ? c.start : undefined,
       motionDuration: c.motionDuration, motionOffset: c.motionOffset, fadeEnvelope: c.fadeEnvelope ? copy(c.fadeEnvelope) : undefined,
       trackId: c.trackId, transform: c.transform ? copy(c.transform) : undefined, crop: c.crop ? copy(c.crop) : undefined,
-      mosaics: c.mosaics ? copy(c.mosaics) : undefined };
+      mosaics: c.mosaics ? copy(c.mosaics) : undefined, keyframes:c.keyframes?copy(c.keyframes):undefined,
+      cropTracking:c.cropTracking?copy(c.cropTracking):undefined };
   });
   const tracks = (doc.tracks || []).map(t => {
     const runtime = audioRuntime.get(t.id);
     if (!runtime) throw new Error('프로젝트 오디오를 먼저 불러와야 합니다.');
-    return { ...runtime, ...copy(pick(t,audioKeys)), trackId: t.trackId, role: t.role, fadeEnvelope: t.fadeEnvelope ? copy(t.fadeEnvelope) : undefined };
+    return { ...runtime, ...copy(pick(t,audioKeys)), trackId: t.trackId, role: t.role, fadeEnvelope: t.fadeEnvelope ? copy(t.fadeEnvelope) : undefined, keyframes:t.keyframes?copy(t.keyframes):undefined };
   });
   setDocumentName(doc.name);
   Object.assign(project, pick(doc.settings || {}, ['width','height','fps','quality']));
@@ -209,9 +213,24 @@ async function hydrate(doc, records) {
   disposeResources(oldAssets,oldClips,oldAudio);
 }
 
+function validateTextStyle(style) {
+  if(style===undefined)return;
+  if(!style||typeof style!=='object'||Array.isArray(style))throw new Error('글자 스타일 정보가 올바르지 않습니다.');
+  const nonnegative=new Set(['size','strokeW','boxPaddingX','boxPaddingY','boxRadius','shadowBlur','inDuration','outDuration']);
+  for(const key of [...nonnegative,'boxOpacity','shadowOpacity','shadowX','shadowY','bottom']){
+    const value=style[key];if(value===undefined)continue;
+    if(!Number.isFinite(value)||Math.abs(value)>86400||(nonnegative.has(key)&&value<0)
+      ||(['boxOpacity','shadowOpacity'].includes(key)&&(value<0||value>1)))throw new Error('글자 스타일의 숫자 값이 올바르지 않습니다.');
+  }
+  if(style.shadowEnabled!==undefined&&typeof style.shadowEnabled!=='boolean')throw new Error('그림자 설정이 올바르지 않습니다.');
+}
+
 export function validateDocument(doc, records) {
   if (!doc || ![1, 2, 3, 4].includes(doc.version) || !Array.isArray(records) || !Array.isArray(doc.clips) || !Array.isArray(doc.captions) || !Array.isArray(doc.overlays) || !Array.isArray(doc.tracks)) throw new Error('지원하지 않는 프로젝트 형식입니다.');
   if (doc.clips.length > 1000 || doc.tracks.length > 1000 || doc.captions.length > 5000 || doc.overlays.length > 1000 || records.length > 200) throw new Error('실험판의 프로젝트 크기 제한을 초과했습니다.');
+  validateTextStyle(doc.captionStyle);
+  for(const caption of doc.captions)validateTextStyle(caption?.style);
+  for(const overlay of doc.overlays)validateTextStyle(overlay);
   const safeId=id=>typeof id==='string' && /^[a-zA-Z0-9_-]{1,80}$/.test(id);
   if (doc.version >= 3) {
     if (!Array.isArray(doc.timelineTracks) || doc.timelineTracks.length < 2
@@ -244,11 +263,16 @@ export function validateDocument(doc, records) {
         || (c.left || 0) + (c.right || 0) > .98 || (c.top || 0) + (c.bottom || 0) > .98) throw new Error('화면 자르기 범위가 올바르지 않습니다.');
     }
   }
+  for(const item of [...doc.clips,...doc.overlays,...doc.captions,...doc.tracks]){
+    const duration=item.type==='image'?item.imgDuration:item.trimEnd!==undefined?item.trimEnd-item.trimStart:item.end-item.start;
+    if(!validateKeyframes(item.keyframes,duration))throw new Error('키프레임 정보가 올바르지 않습니다.');
+  }
   if(records.some(r=>!r || !safeId(r.id)) || new Set(records.map(r=>r.id)).size!==records.length)throw new Error('소재 식별자가 올바르지 않습니다.');
   const ids = new Set(records.map(r => r.id));
   const instanceIds = new Set();
   for(const clip of doc.clips) {
     if (!validMosaics(clip?.mosaics)) throw new Error('모자이크 추적 정보가 올바르지 않습니다.');
+    if(!validCropTracking(clip?.cropTracking,clip?.trimEnd-clip?.trimStart)||(clip.cropTracking&&clip.type!=='video'))throw new Error('크롭 추적 정보가 올바르지 않습니다.');
     if(!clip || !['video','image'].includes(clip.type) || !Number.isFinite(clip.scale) || !Number.isFinite(clip.offX) || !Number.isFinite(clip.offY) || !Number.isFinite(clip.trimStart) || !Number.isFinite(clip.trimEnd) || !Number.isFinite(clip.imgDuration))throw new Error('클립 속성이 올바르지 않습니다.');
     if(clip.scale<.1 || clip.scale>10 || Math.abs(clip.offX)>2 || Math.abs(clip.offY)>2)throw new Error('클립 배치가 허용 범위를 벗어났습니다.');
     if(doc.version >= 2 && (!Number.isFinite(clip.start) || clip.start < 0))throw new Error('영상 클립의 타임라인 위치가 올바르지 않습니다.');
@@ -269,7 +293,8 @@ export function validateDocument(doc, records) {
       const env = item.fadeEnvelope;
       if (['offset','duration','fadeIn','fadeOut'].some(key => !Number.isFinite(env[key]) || Math.abs(env[key]) > 86400) || env.duration <= 0 || env.fadeIn < 0 || env.fadeOut < 0) throw new Error('페이드 구간이 올바르지 않습니다.');
     }
-    if (item.transitionOut && (!['cut','dissolve','fade','flash'].includes(item.transitionOut.type) || !Number.isFinite(item.transitionOut.duration) || item.transitionOut.duration<0 || item.transitionOut.duration>2)) throw new Error('전환 정보가 올바르지 않습니다.');
+    if(item.volume!==undefined&&(!Number.isFinite(item.volume)||item.volume<0||item.volume>3))throw new Error('음량은 0~300% 범위여야 합니다.');
+    if (item.transitionOut && (!TRANSITIONS.some(effect=>effect.id===item.transitionOut.type) || !Number.isFinite(item.transitionOut.duration) || item.transitionOut.duration<0 || item.transitionOut.duration>2)) throw new Error('전환 정보가 올바르지 않습니다.');
     if (item.transitionOut?.toId && !safeId(item.transitionOut.toId)) throw new Error('전환 연결이 올바르지 않습니다.');
   }
   for (const item of [...doc.captions, ...doc.overlays]) {

@@ -1,5 +1,5 @@
 // 자동 편집 패널은 결과를 먼저 보여주고, 사용자가 적용한 순간에만 프로젝트를 바꿉니다.
-import { project, clipDuration, totalDuration, trackLabel, timelineTracks, addTimelineTrack, MAX_TRACKS_PER_KIND } from './state.js';
+import { project, clipDuration, clipFadeGain, totalDuration, trackLabel, timelineTracks, addTimelineTrack, ensureAutoCaptionTrack, MAX_TRACKS_PER_KIND } from './state.js';
 import { captureDocument, addAsset, makeAudio } from './project-store.js';
 import { itemRange, planSilenceCuts, applySilenceCuts, placeTimelineItem, planPlacement } from './timeline-edits.js';
 import { extractClipAudio, mixTimeline, findUncaptioned } from './audio.js';
@@ -7,6 +7,10 @@ import { encodeWav } from './ai-client.js';
 import { analyzeSilence, monoPcm } from './silence.js';
 import { normalizedRect, mosaicAt, redactSource, unresolvedMosaics, MAX_MOSAICS } from './mosaic.js';
 import { videoFrameReader, trackMosaic } from './video-analysis.js';
+import { trackCrop, cropTrackingAt, cropTrackingGeometry, cropTrackingWarnings, validCropTracking } from './crop-tracking.js';
+import { clipGeometry, drawClipLayer } from './render.js';
+import { evaluateItem } from './keyframes.js';
+import { withVisualTransform } from './visual-transform.js';
 import { TTS_MODEL, runLocalAI, whisperCaptions, installedVoices, speakInstalled } from './local-ai.js';
 import { isPcVoiceOrigin, pcVoiceStatus, saveVoiceReference, deleteVoiceReference, generatePcVoice, decodeVoiceReference, recordVoiceReference } from './pc-voice.js';
 import { isPcAsrOrigin, pcAsrStatus, pcAsrDeviceLabel, pcAsrCaptions, transcribePcAudio, PC_ASR_SETUP_URL } from './pc-asr.js';
@@ -68,6 +72,7 @@ export class StudioTools {
   videoRange(){const r=this.currentRange();return r?.type==='clip'?r:null;}
   showError(error){if(error.name==='AbortError')return;const box=this.dialog.open&&this.body.querySelector('.smart-error');if(box){box.hidden=false;box.textContent=error.message;}else this.hooks.toast(error.message);}
   cleanup(){
+    this.state?.cancelCropDrag?.();
     this.referenceRecording?.cancel();this.referenceRecording=null;
     this.job?.abort();this.readerCtrl?.abort();this.readerCtrl=null;
     this.state?.reader?.close();this.state=null;
@@ -107,14 +112,14 @@ export class StudioTools {
     }
   }
   inspector(type,item){
-    if(type==='clip')return '<section class="property-section"><h3>자동 편집</h3>'+button('mosaic','▦ 모자이크 · 영역 / 추적')+(item.type==='video'?button('silence','✂ 무음 구간 자동 컷')+button('captions-selected','T 자동 자막 · 이 클립'):'')+'<p class="inspector-note">'+(item.mosaics?.length?'모자이크 '+item.mosaics.length+'개 적용됨':'원본 파일을 바꾸지 않습니다.')+'</p></section>';
+    if(type==='clip')return '<section class="property-section"><h3>자동 편집</h3>'+button('mosaic','▦ 모자이크 · 영역 / 추적')+(item.type==='video'?button('crop-tracking','⌖ 크롭 트래킹 · 대상 따라가기')+button('silence','✂ 무음 구간 자동 컷')+button('captions-selected','T 자동 자막 · 이 클립'):'')+'<p class="inspector-note">'+(item.mosaics?.length?'모자이크 '+item.mosaics.length+'개 적용됨':'원본 파일을 바꾸지 않습니다.')+(item.cropTracking?' · 크롭 추적 적용됨':'')+'</p></section>';
     if(type==='audio')return '<section class="property-section"><h3>자동 편집</h3>'+button('silence','✂ 무음 구간 자동 컷')+button('captions-selected','T 자동 자막 · 이 오디오')+'</section>';
     return '';
   }
   captionControls(){
     const r=this.audioRange(),pc=this.captionEngine==='pc';
     const disabled=(this.captionScope==='selected'?!r:totalDuration()<=0)||(pc&&(!isPcAsrOrigin()||this.pcAsr.checking||!this.pcAsr.status?.available||this.pcAsr.status?.busy));
-    return '<section class="smart-card"><h3>자동 자막 <span class="local-badge">기기에서 처리</span></h3><p class="note">API 키 없이 한국어 말소리를 인식해요. 기존 자막은 보존하고 새 자막 트랙에 추가합니다.</p><label class="field-label">인식 엔진<select data-smart-input="caption-engine"><option value="local" '+(!pc?'selected':'')+'>브라우저 · Whisper Tiny</option><option value="pc" '+(pc?'selected':'')+'>PC 고정밀 · Whisper large-v3-turbo</option></select></label><div id="pcAsrSettings">'+this.pcAsrMarkup()+'</div><label class="field-label">인식 범위<select data-smart-input="caption-scope"><option value="selected" '+(this.captionScope==='selected'?'selected':'')+'>선택한 영상 / 오디오</option><option value="sequence" '+(this.captionScope==='sequence'?'selected':'')+'>전체 말소리 · 영상 + 보이스</option></select></label><p class="inspector-note">'+(this.captionScope==='selected'?(r?esc(r.item.name)+' · '+r.duration.toFixed(2)+'초':'타임라인에서 영상 또는 오디오를 선택하세요.'):'배경음악·효과음·음소거한 클립은 제외합니다. 일반 오디오로 등록한 말소리는 해당 클립을 선택해서 인식하세요.')+'</p>'+button('captions','자동 자막 만들기',disabled,true)+'<p class="inspector-note">최대 3분 · 숫자·고유명사·소음이 있는 부분은 직접 확인해 주세요.</p></section>';
+    return '<section class="smart-card"><h3>자동 자막 <span class="local-badge">기기에서 처리</span></h3><p class="note">API 키 없이 한국어 말소리를 인식해요. 기존 자막은 보존하고 자동자막 트랙에 추가합니다.</p><label class="field-label">인식 엔진<select data-smart-input="caption-engine"><option value="local" '+(!pc?'selected':'')+'>브라우저 · Whisper Tiny</option><option value="pc" '+(pc?'selected':'')+'>PC 고정밀 · Whisper large-v3-turbo</option></select></label><div id="pcAsrSettings">'+this.pcAsrMarkup()+'</div><label class="field-label">인식 범위<select data-smart-input="caption-scope"><option value="selected" '+(this.captionScope==='selected'?'selected':'')+'>선택한 영상 / 오디오</option><option value="sequence" '+(this.captionScope==='sequence'?'selected':'')+'>전체 말소리 · 영상 + 보이스</option></select></label><p class="inspector-note">'+(this.captionScope==='selected'?(r?esc(r.item.name)+' · '+r.duration.toFixed(2)+'초':'타임라인에서 영상 또는 오디오를 선택하세요.'):'배경음악·효과음·음소거한 클립은 제외합니다. 일반 오디오로 등록한 말소리는 해당 클립을 선택해서 인식하세요.')+'</p>'+button('captions','자동 자막 만들기',disabled,true)+'<p class="inspector-note">최대 3분 · 숫자·고유명사·소음이 있는 부분은 직접 확인해 주세요.</p></section>';
   }
   pcAsrMarkup(){
     const pc=this.pcAsr,status=pc.status;
@@ -247,6 +252,7 @@ export class StudioTools {
     if(action==='stop-voice-reference'){this.referenceRecording?.stop();return;}
     if(this.referenceRecording)return;
     if(this.busy)return;
+    if(this.state?.cropDrag)return;
     if(action==='pc-asr-refresh')return this.refreshPcAsr();
     if(action==='use-browser-captions'){this.captionEngine='local';this.captionEngineChosen=true;this.hooks.renderLibrary();return;}
     if(action==='pc-voice-refresh')return this.refreshPcVoice();
@@ -256,6 +262,10 @@ export class StudioTools {
     if(action==='save-voice-reference')return this.saveReference();
     if(action==='delete-voice-reference')return this.deleteReference();
     if(action==='mosaic')return this.openMosaic();
+    if(action==='crop-tracking')return this.openCropTracking();
+    if(action==='track-crop')return this.analyzeCropTracking();
+    if(action==='apply-crop-tracking')return this.applyCropTracking(false);
+    if(action==='remove-crop-tracking')return this.applyCropTracking(true);
     if(action==='silence')return this.openSilence();
     if(action==='captions-selected'){this.captionScope='selected';return this.openCaptions();}
     if(action==='captions')return this.openCaptions();
@@ -296,6 +306,10 @@ export class StudioTools {
       if(map[key])this.cutOptions[map[key]]=value;
     }
     const state=this.state;
+    if(state?.kind==='crop-tracking'&&!state.cropDrag){
+      if(key==='crop-track-time'){state.time=clamp(value,0,state.range.duration-.00001);this.seekCropTracking(state.time).catch(error=>this.showError(error));}
+      if(key==='crop-track-zoom'){state.zoom=clamp(value,1,3);if(state.tracking)state.tracking={...state.tracking,zoom:state.zoom};this.drawCropTracking();}
+    }
     if(state?.kind==='mosaic'){
       const effect=state.effects[state.index];
       if(key==='mosaic-time'){state.time=value;this.seekMosaic(value).catch(error=>this.showError(error));}
@@ -308,7 +322,7 @@ export class StudioTools {
         if(key!=='mosaic-time')this.drawMosaic();
       }
     }
-    if(input.type==='range'){const out=input.parentElement.querySelector('output'),suffix=key==='voice-speed'?'×':key==='cut-threshold'?' dBFS':key==='cut-minimum'||key==='cut-padding'||key==='mosaic-time'?'초':'%';if(out)out.textContent=Number(value).toFixed(Number(input.step)<1?2:0)+suffix;}
+    if(input.type==='range'){const out=input.parentElement.querySelector('output'),suffix=key==='voice-speed'||key==='crop-track-zoom'?'×':key==='cut-threshold'?' dBFS':key==='cut-minimum'||key==='cut-padding'||key==='mosaic-time'||key==='crop-track-time'?'초':'%';if(out)out.textContent=Number(value).toFixed(Number(input.step)<1?2:0)+suffix;}
   }
   change(input){
     const key=input.dataset.smartInput;if(this.busy)return;
@@ -394,6 +408,143 @@ export class StudioTools {
       s.clip.mosaics=structuredClone(s.effects);this.hooks.commit(s.before,'모자이크 적용');
       const warning=unresolvedMosaics(s.clip).length;this.job=null;this.close(false);this.hooks.toast(warning?'모자이크를 저장했어요. 추적이 끊긴 구간을 보정해야 내보낼 수 있습니다.':'모자이크를 적용했어요. 미리보기와 완성 영상에 함께 반영됩니다.');
     });
+  }
+  async openCropTracking(){
+    const range=this.videoRange();
+    if(!range||range.item.type!=='video')throw new Error('타임라인에서 영상 클립을 선택해 주세요.');
+    if(range.duration>180)throw new Error('크롭 추적은 3분 이내의 클립을 지원합니다. 필요한 구간으로 먼저 트림해 주세요.');
+    const clip=range.item,time=clamp(this.hooks.player.time-range.start,0,Math.max(0,range.duration-.00001));
+    this.open('크롭 트래킹 · 선택한 대상 따라가기','<p class="note">원본 프레임을 준비하고 있어요.</p>'+progressMarkup);
+    const tracking=clip.cropTracking?{...structuredClone(clip.cropTracking),enabled:true,zoom:clamp(clip.cropTracking.zoom,1,3)}:null;
+    const point=cropTrackingAt({cropTracking:tracking},time);
+    const s={kind:'crop-tracking',clip,range,before:captureDocument(),time,tracking,zoom:clamp(tracking?.zoom??1.15,1,3),
+      rect:point?normalizedRect(point):{x:.35,y:.25,w:.3,h:.3},selected:false,pending:false,seedTime:time};
+    this.state=s;
+    await this.run('crop-open',async signal=>{
+      const readerCtrl=new AbortController();this.readerCtrl=readerCtrl;
+      signal.addEventListener('abort',()=>readerCtrl.abort(),{once:true});
+      s.reader=await videoFrameReader(clip,readerCtrl.signal);
+      if(signal.aborted||this.state!==s){s.reader.close();return;}
+      this.renderCropTracking();await this.seekCropTracking(time);
+    });
+    if(this.state===s)this.drawCropTracking();
+  }
+  renderCropTracking(){
+    const s=this.state;if(s?.kind!=='crop-tracking')return;
+    this.setBody('<p class="note"><strong>'+esc(s.clip.name)+'</strong><br>원본 화면에서 따라갈 사람·동물·사물을 박스로 지정하세요. 자동 객체 검출이 아니라 선택한 영역의 무늬를 추적합니다.</p>'
+      +'<div class="mosaic-stage"><canvas id="cropTrackingEditor" width="640" height="360" aria-label="따라갈 대상 영역 지정" style="touch-action:none"></canvas></div>'
+      +rangeInput('클립 안 시각','crop-track-time',s.time,0,Math.max(0,s.range.duration-.00001),.01,'초')
+      +'<p class="inspector-note" id="cropTrackingTime"></p>'+rangeInput('추적 확대','crop-track-zoom',s.zoom,1,3,.05,'×')
+      +button('track-crop','박스를 지정한 시각에서 추적',true,true)
+      +'<p class="smart-mask-status" id="cropTrackingStatus" role="status" aria-live="polite"></p>'
+      +'<div class="smart-card"><h3>9:16 리프레임 미리보기</h3><canvas id="cropTrackingPreview" width="180" height="320" style="display:block;width:180px;max-width:100%;height:auto;margin:auto;background:#101315" aria-label="추적 결과 9대16 미리보기"></canvas>'
+      +'<p class="inspector-note">분석 후 시각 슬라이더를 움직여 확인하세요. 해당 클립의 채우기·변형·모자이크만 표시하며 자막과 다른 트랙은 제외합니다. 적용하면 영상 맞춤을 채우기로 바꿉니다.</p></div>'
+      +'<p class="note warning">최대 3분 · 급격한 움직임, 가림, 장면 전환에서는 추적이 끊길 수 있습니다. 끊긴 구간은 마지막 위치를 유지합니다. 클립을 나눠 재추적하거나 위치 키프레임으로 보정하세요.</p>'
+      +progressMarkup+button('apply-crop-tracking','추적 결과 적용',!s.tracking,true)+button('remove-crop-tracking','기존 크롭 추적 제거',!s.clip.cropTracking));
+    this.bindCropSelection();this.drawCropTracking();
+  }
+  bindCropSelection(){
+    const s=this.state,canvas=this.body.querySelector('#cropTrackingEditor');if(!canvas)return;
+    const point=event=>{const r=canvas.getBoundingClientRect();return{x:clamp((event.clientX-r.left)/Math.max(1,r.width),0,1),y:clamp((event.clientY-r.top)/Math.max(1,r.height),0,1)};};
+    const finish=cancel=>{
+      const drag=s.cropDrag;if(!drag)return;s.cropDrag=null;
+      if(cancel||!drag.moved)Object.assign(s,drag.old);
+      window.removeEventListener('blur',abort);window.removeEventListener('keydown',escape,true);
+      if(canvas.hasPointerCapture?.(drag.pointer))canvas.releasePointerCapture(drag.pointer);
+      if(this.state===s)this.drawCropTracking();
+    };
+    const abort=()=>finish(true),escape=event=>{if(event.key==='Escape'&&s.cropDrag){event.preventDefault();event.stopImmediatePropagation();finish(true);}};
+    s.cancelCropDrag=abort;
+    canvas.onpointerdown=event=>{
+      if(event.button!==0||event.isPrimary===false||this.busy||s.seeking||s.cropDrag||!s.raw)return;
+      event.preventDefault();s.cropDrag={pointer:event.pointerId,start:point(event),clientX:event.clientX,clientY:event.clientY,moved:false,
+        old:{rect:{...s.rect},selected:s.selected,pending:s.pending,seedTime:s.seedTime}};
+      canvas.setPointerCapture(event.pointerId);window.addEventListener('blur',abort);window.addEventListener('keydown',escape,true);
+      this.drawCropTracking();
+    };
+    canvas.onpointermove=event=>{
+      const drag=s.cropDrag;if(!drag||event.pointerId!==drag.pointer)return;
+      if(!drag.moved&&Math.hypot(event.clientX-drag.clientX,event.clientY-drag.clientY)<2)return;
+      const p=point(event),start=drag.start;drag.moved=true;
+      s.rect=normalizedRect({x:Math.min(start.x,p.x),y:Math.min(start.y,p.y),w:Math.max(.005,Math.abs(start.x-p.x)),h:Math.max(.005,Math.abs(start.y-p.y))});
+      s.seedTime=s.frameLocalTime;s.selected=true;s.pending=true;this.drawCropTracking();
+    };
+    canvas.onpointerup=event=>{if(event.pointerId===s.cropDrag?.pointer)finish(false);};
+    canvas.onpointercancel=event=>{if(event.pointerId===s.cropDrag?.pointer)finish(true);};
+    canvas.onlostpointercapture=event=>{if(event.pointerId===s.cropDrag?.pointer)finish(true);};
+  }
+  async seekCropTracking(time){
+    const s=this.state;if(s?.kind!=='crop-tracking'||!s.reader)return;
+    s.queuedTime=clamp(time,0,Math.max(0,s.range.duration-.00001));s.time=s.queuedTime;if(s.seeking)return;
+    s.seeking=true;this.drawCropTracking();
+    try{
+      while(s.queuedTime!==undefined&&this.state===s){
+        const local=s.queuedTime;s.queuedTime=undefined;
+        const frame=await s.reader.frame(s.clip.trimStart+local);if(this.state!==s)return;
+        const width=s.clip.natW||frame.canvas.width,height=s.clip.natH||frame.canvas.height,scale=Math.min(1,720/width,400/height);
+        s.raw||=document.createElement('canvas');s.raw.width=Math.max(1,Math.round(width*scale));s.raw.height=Math.max(1,Math.round(height*scale));
+        s.raw.getContext('2d').drawImage(frame.canvas,0,0,s.raw.width,s.raw.height);
+        s.sourceFrameTime=frame.time;s.frameLocalTime=clamp(frame.time-s.clip.trimStart,0,s.range.duration);
+        if(s.queuedTime===undefined)this.drawCropTracking();
+      }
+    }finally{s.seeking=false;if(this.state===s)this.drawCropTracking();}
+  }
+  drawCropTracking(){
+    const s=this.state;if(s?.kind!=='crop-tracking')return;
+    const canvas=this.body.querySelector('#cropTrackingEditor'),preview=this.body.querySelector('#cropTrackingPreview');if(!canvas||!preview)return;
+    const blocked=this.busy||s.seeking||!!s.cropDrag;
+    const actions={'track-crop':blocked||!s.selected,'apply-crop-tracking':blocked||!s.tracking||s.pending,'remove-crop-tracking':blocked||!s.clip.cropTracking};
+    for(const [action,disabled] of Object.entries(actions)){const node=this.body.querySelector('[data-smart-action="'+action+'"]');if(node)node.disabled=disabled;}
+    for(const key of ['crop-track-time','crop-track-zoom']){const node=this.body.querySelector('[data-smart-input="'+key+'"]');if(node)node.disabled=this.busy||!!s.cropDrag;}
+    if(!s.raw)return;
+    if(canvas.width!==s.raw.width||canvas.height!==s.raw.height){canvas.width=s.raw.width;canvas.height=s.raw.height;}
+    const ctx=canvas.getContext('2d');ctx.clearRect(0,0,canvas.width,canvas.height);ctx.drawImage(s.raw,0,0);
+    const at=cropTrackingAt({cropTracking:s.tracking},s.frameLocalTime);
+    const sameSeed=Math.abs(s.frameLocalTime-s.seedTime)<.001;
+    const rect=s.pending?(sameSeed?s.rect:null):at||(!s.tracking&&s.selected&&sameSeed?s.rect:null);
+    if(rect){ctx.save();ctx.strokeStyle=at?.lost&&!s.pending?'#e7a159':'#d5ffa0';ctx.lineWidth=2;ctx.setLineDash([7,4]);ctx.strokeRect(rect.x*canvas.width,rect.y*canvas.height,rect.w*canvas.width,rect.h*canvas.height);ctx.restore();}
+    const label=this.body.querySelector('#cropTrackingTime');if(label)label.textContent='클립 '+s.frameLocalTime.toFixed(2)+'초 · 원본 '+s.sourceFrameTime.toFixed(2)+'초'+(s.seeking?' · 프레임을 읽는 중…':'');
+    const status=this.body.querySelector('#cropTrackingStatus');
+    if(status)status.textContent=s.pending?'박스가 변경됐습니다. '+s.seedTime.toFixed(2)+'초에서 다시 추적한 뒤 적용하세요.':s.tracking?(s.tracking.keys.length+'개 위치 · '+(at?.lost?'현재 구간에서 대상을 놓쳤습니다. ':'')+(cropTrackingWarnings({cropTracking:s.tracking})[0]||'슬라이더로 움직임을 확인해 주세요.')):'따라갈 대상의 무늬가 잘 보이는 영역을 박스로 지정하세요.';
+    this.drawCropPreview(preview,s);
+  }
+  drawCropPreview(canvas,s){
+    const W=canvas.width,H=canvas.height,ctx=canvas.getContext('2d');ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.clearRect(0,0,W,H);ctx.fillStyle='#000';ctx.fillRect(0,0,W,H);
+    if(!s.tracking||s.pending){ctx.fillStyle='#a4afa7';ctx.font='13px sans-serif';ctx.textAlign='center';ctx.fillText(s.pending?'다시 추적해 주세요':'추적 결과 대기',W/2,H/2);return;}
+    const local=s.frameLocalTime,clip=evaluateItem({...s.clip,fit:'cover',cropTracking:{...s.tracking,zoom:s.zoom}},local);
+    const source=redactSource(ctx,{img:s.raw,w:s.raw.width,h:s.raw.height,sourceTime:s.sourceFrameTime},clip,s.sourceFrameTime);
+    const geometry=cropTrackingGeometry(clip,local,clipGeometry(W,H,s.clip.natW||s.raw.width,s.clip.natH||s.raw.height,clip),W,H);
+    const bounds={x:geometry.dx,y:geometry.dy,w:geometry.dw,h:geometry.dh};
+    const alpha=(clip.transform?.opacity??1)*clipFadeGain(clip,local,s.range.duration),opaque={...clip,transform:{...clip.transform,opacity:1}};
+    // 배경과 영상을 먼저 합친 뒤 불투명도·페이드를 딱 한 번 적용합니다.
+    s.previewLayer||=document.createElement('canvas');const plate=s.previewLayer;
+    if(plate.width!==W||plate.height!==H){plate.width=W;plate.height=H;}
+    const paint=plate.getContext('2d');paint.setTransform(1,0,0,1,0,0);paint.globalAlpha=1;paint.globalCompositeOperation='source-over';paint.filter='none';paint.clearRect(0,0,W,H);
+    withVisualTransform(paint,bounds,opaque,W,H,()=>drawClipLayer(paint,W,H,{clip:opaque,local,duration:s.range.duration},source));
+    ctx.save();ctx.globalAlpha=alpha;ctx.drawImage(plate,0,0);ctx.restore();
+  }
+  async analyzeCropTracking(){
+    const s=this.state;if(s?.kind!=='crop-tracking'||!s.selected)return;
+    if(s.seeking||s.cropDrag)throw new Error('영역 선택과 프레임 준비가 끝난 뒤 추적해 주세요.');
+    if(JSON.stringify(captureDocument())!==JSON.stringify(s.before))throw new Error('편집 내용이 바뀌었습니다. 창을 닫고 다시 선택해 주세요.');
+    await this.run('crop-tracking',async signal=>{
+      const result=await trackCrop(s.clip,s.rect,s.seedTime,{signal,zoom:s.zoom,onProgress:(value,message)=>this.progress(value,message)});
+      if(signal.aborted||this.state!==s)return;
+      s.tracking=result.tracking;s.pending=false;s.selected=false;
+    });
+    if(this.state===s)this.drawCropTracking();
+  }
+  applyCropTracking(remove=false){
+    const s=this.state;if(s?.kind!=='crop-tracking'||this.busy)return;
+    if(s.seeking||s.cropDrag)throw new Error('영역 선택과 프레임 준비가 끝난 뒤 적용해 주세요.');
+    if(JSON.stringify(captureDocument())!==JSON.stringify(s.before)||!project.clips.includes(s.clip))throw new Error('편집 내용이 바뀌었습니다. 적용하지 않고 현재 편집을 유지합니다.');
+    const tracking=s.tracking?{...s.tracking,zoom:s.zoom}:null;
+    if(!remove&&(s.pending||!tracking||!validCropTracking(tracking,s.range.duration)))throw new Error('현재 영역을 추적한 뒤 결과를 적용해 주세요.');
+    if(remove){if(!s.clip.cropTracking)return;delete s.clip.cropTracking;}
+    else{s.clip.cropTracking=structuredClone(tracking);s.clip.fit='cover';}
+    this.hooks.commit(s.before,remove?'크롭 추적 제거':'크롭 트래킹 적용');
+    const warnings=remove?[]:cropTrackingWarnings(s.clip);this.close(false);
+    this.hooks.toast(remove?'크롭 추적을 제거했어요. 원래 변형 키프레임은 유지됩니다.':warnings.length?'추적을 적용했어요. 대상을 놓친 구간을 확인하고 위치 키프레임으로 보정해 주세요.':'크롭 추적을 적용했어요. 미리보기와 완성 영상에 함께 반영됩니다.');
   }
   async openSilence(){
     const range=this.audioRange();if(!range)throw new Error('영상 또는 오디오 클립을 선택해 주세요.');
@@ -484,7 +635,7 @@ export class StudioTools {
       const normalized=pc?pcAsrCaptions(result,duration,range?.start||0):whisperCaptions(result,duration,range?.start||0);
       if(!normalized.captions.length)throw new Error('유효한 시각이 있는 자막을 만들지 못했습니다. 말소리가 분명한 구간으로 다시 시도해 주세요.');
       Object.assign(s,normalized);s.gaps=findUncaptioned(buffer,s.captions.map(c=>({...c,start:c.start-(range?.start||0),end:c.end-(range?.start||0)})));
-      this.setBody('<div class="smart-success">'+s.captions.length+'개 자막을 만들었어요.</div><p class="inspector-note">'+(pc?'Whisper large-v3-turbo · '+esc(pcAsrDeviceLabel(result)):'Whisper Tiny · 브라우저 처리')+'</p><p class="note">틀린 문구는 여기서 고친 뒤 적용하세요. 기존 자막은 지우지 않습니다.</p><p class="note warning">숫자·이름은 틀릴 수 있습니다.'+(s.segmentFallback?' 일부 문장은 단어 시각 대신 실제 문장 시각으로 보존했습니다.':'')+(s.skipped?' 시각이 불확실한 '+s.skipped+'개 항목은 제외했습니다.':'')+(s.gaps.length?' 소리는 있으나 자막이 없는 '+s.gaps.length+'개 구간도 확인해 주세요.':'')+'</p><div class="smart-caption-review">'+s.captions.map((c,i)=>'<label><span>'+c.start.toFixed(2)+' → '+c.end.toFixed(2)+'초</span><textarea data-caption-index="'+i+'" maxlength="3000" aria-label="자막 '+(i+1)+' 내용">'+esc(c.text)+'</textarea></label>').join('')+'</div><details class="smart-details"><summary>전체 인식 원문</summary><p>'+esc(s.text)+'</p></details>'+progressMarkup+button('apply-captions','새 자막 트랙에 추가',false,true));
+      this.setBody('<div class="smart-success">'+s.captions.length+'개 자막을 만들었어요.</div><p class="inspector-note">'+(pc?'Whisper large-v3-turbo · '+esc(pcAsrDeviceLabel(result)):'Whisper Tiny · 브라우저 처리')+'</p><p class="note">틀린 문구는 여기서 고친 뒤 적용하세요. 기존 자막은 지우지 않습니다.</p><p class="note warning">숫자·이름은 틀릴 수 있습니다.'+(s.segmentFallback?' 일부 문장은 단어 시각 대신 실제 문장 시각으로 보존했습니다.':'')+(s.skipped?' 시각이 불확실한 '+s.skipped+'개 항목은 제외했습니다.':'')+(s.gaps.length?' 소리는 있으나 자막이 없는 '+s.gaps.length+'개 구간도 확인해 주세요.':'')+'</p><div class="smart-caption-review">'+s.captions.map((c,i)=>'<label><span>'+c.start.toFixed(2)+' → '+c.end.toFixed(2)+'초</span><textarea data-caption-index="'+i+'" maxlength="3000" aria-label="자막 '+(i+1)+' 내용">'+esc(c.text)+'</textarea></label>').join('')+'</div><details class="smart-details"><summary>전체 인식 원문</summary><p>'+esc(s.text)+'</p></details>'+progressMarkup+button('apply-captions','자동자막 트랙에 추가',false,true));
     });}finally{if(pc)this.refreshPcAsr().catch(()=>{});}
   }
   applyCaptions(){
@@ -492,7 +643,7 @@ export class StudioTools {
     if(JSON.stringify(captureDocument())!==JSON.stringify(s.before))throw new Error('인식 중 편집 내용이 바뀌었습니다. 적용하지 않고 현재 편집을 유지합니다.');
     const captions=s.captions.filter(c=>c.text.trim());if(!captions.length)throw new Error('추가할 자막 내용이 없습니다.');
     if(project.captions.length+captions.length>5000)throw new Error('자막은 최대 5,000개입니다. 구간을 나눠 작업해 주세요.');
-    const track=addTimelineTrack('visual',{role:'caption'});
+    const track=ensureAutoCaptionTrack();
     for(const c of captions)c.trackId=track.id;
     project.captions.push(...captions);this.hooks.commit(s.before,s.engine==='pc'?'PC Turbo 자동 자막 추가':'브라우저 자동 자막 추가');
     this.hooks.select('caption',captions[0].id);this.hooks.timeline.reveal({...captions[0],type:'caption'});

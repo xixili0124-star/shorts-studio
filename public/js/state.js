@@ -1,6 +1,7 @@
 // 프로젝트 상태 모델 + 타임라인 계산
 // 여기 있는 값들만이 "진실"이고, 미리보기와 내보내기는 둘 다 이 값으로 그린다.
 
+import { TRANSITIONS } from './presets.js';
 export { FONTS } from './font-catalog.js';
 
 export const ACCENT = '#ff3b5c';
@@ -159,8 +160,9 @@ export const TRACK_ROLES = Object.freeze([
   { id: 'video', kind: 'visual', label: '영상', code: 'V' },
   { id: 'graphic', kind: 'visual', label: '그래픽', code: 'G' },
   { id: 'caption', kind: 'visual', label: '자막', code: 'T' },
+  { id: 'auto-caption', kind: 'visual', label: '자동자막', code: 'CC', optional: true },
   { id: 'audio', kind: 'audio', label: '오디오', code: 'A' },
-  { id: 'voice', kind: 'audio', label: '보이스', code: 'VO' },
+  { id: 'voice', kind: 'audio', label: '보이스', code: 'V' },
 ]);
 export const DEFAULT_TRACKS = Object.freeze([
   { id: 'v1', kind: 'visual', role: 'video' }, { id: 'v2', kind: 'visual', role: 'graphic' }, { id: 'v3', kind: 'visual', role: 'caption' },
@@ -190,6 +192,18 @@ export function trackLabel(id, doc = project) {
   if (!track) return '';
   const siblings = tracks.filter(t => t.role === track.role), number = siblings.findIndex(t => t.id === id) + 1;
   return TRACK_ROLES.find(role => role.id === track.role).label + (number > 1 ? ' ' + number : '');
+}
+export function trackBadge(id, doc = project) {
+  const tracks = timelineTracks(doc), track = tracks.find(track => track.id === id);
+  if (!track) return '';
+  const number = tracks.filter(t => t.role === track.role).findIndex(t => t.id === id) + 1;
+  return TRACK_ROLES.find(role => role.id === track.role).code + (number > 1 ? number : '');
+}
+
+/** 자동자막 결과를 적용할 때만 전용 행을 만들며 수동 자막 행은 그대로 둡니다. */
+export function ensureAutoCaptionTrack() {
+  const existing = timelineTracks().find(track => track.role === 'auto-caption');
+  return existing || addTimelineTrack('visual', { role: 'auto-caption' });
 }
 
 /** 구형 파일의 실제 시각은 보존하고, 자동 연결 정보만 제거합니다. */
@@ -221,10 +235,11 @@ export function addTimelineTrack(kind, { role, afterId } = {}) {
   return track;
 }
 export function removeTimelineTrack(id) {
-  migrateTimeline();
-  const track = project.timelineTracks.find(t => t.id === id);
-  if (!track || project.timelineTracks.filter(t => t.role === track.role).length < 2) return false;
+  const registry = timelineTracks(), track = registry.find(t => t.id === id);
+  if (!track || (!TRACK_ROLES.find(role => role.id === track.role).optional
+    && registry.filter(t => t.role === track.role).length < 2)) return false;
   if (trackItems(id).length) throw new Error('빈 트랙만 삭제할 수 있습니다.');
+  migrateTimeline();
   project.timelineTracks = project.timelineTracks.filter(t => t.id !== id);
   return true;
 }
@@ -246,7 +261,7 @@ export function buildLayout(doc = project) {
     let cursor = 0;
     for (let i = 0; i < clips.length; i++) {
       const { clip, index } = clips[i], duration = clipDuration(clip), next = clips[i + 1]?.clip;
-      const legacyOverlap = next && ['dissolve', 'fade', 'flash'].includes(clip.transitionOut?.type)
+      const legacyOverlap = next && TRANSITIONS.some(t => t.id !== 'cut' && t.id === clip.transitionOut?.type)
         ? Math.max(0, Math.min(2, Number(clip.transitionOut.duration) || 0, duration / 2, clipDuration(next) / 2)) : 0;
       const start = Number.isFinite(clip.start) ? Math.max(0, clip.start) : cursor;
       const entry = { clip, item: clip, id: clip.id, type: 'clip', trackId: track.id,
@@ -275,7 +290,7 @@ export function buildLayout(doc = project) {
       const transition = left.clip.transitionOut;
       const overlap = Math.round((left.end - right.start) * 1e9) / 1e9;
       const limit = Math.min(2, left.duration / 2, right.duration / 2);
-      if (['dissolve', 'fade', 'flash'].includes(transition?.type)
+      if (TRANSITIONS.some(t => t.id !== 'cut' && t.id === transition?.type)
         && (!transition.toId || transition.toId === right.id)
         && overlap > 1e-7 && overlap <= limit + 1e-6) {
         left.overlapOut = overlap;

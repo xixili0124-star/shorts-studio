@@ -4,6 +4,9 @@ import { captureDocument, makeClip, makeAudio, discardStagedInstance } from './p
 import { timelineCollection, itemRange, splitAvailability, deleteTimelineItem, normalizeTransitions, planPlacement } from './timeline-edits.js';
 import { transformOf } from './visual-transform.js';
 import { uid, clamp } from './util.js';
+import { TEXT_STYLE_KEYS } from './text-effects.js';
+import { KEYFRAME_CHANNELS, sliceKeyframes, splitKeyframes, setValueAt } from './keyframes.js';
+import { splitCropTracking } from './crop-tracking.js';
 
 const EPS = 1e-6;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -36,12 +39,13 @@ export function marqueeHits(a, b, boxes) {
     .map(({ type, id }) => ({ type, id }));
 }
 
-const graphicKeys = ['graphic','font','size','color','stroke','strokeW','box','boxColor','glow','align','x','y','anim'];
+const graphicKeys = ['graphic','align','x','y',...TEXT_STYLE_KEYS];
 const mediaKeys = ['fit','bg','scale','offX','offY','fadeIn','fadeOut'];
 const pick = (item, keys) => Object.fromEntries(keys.filter(key => item[key] !== undefined).map(key => [key, clone(item[key])]));
 export function captureItemSettings(ref, doc = project) {
   const range = resolveSelection([ref],doc)[0];if (!range) return null;
   const { type, item } = range, payload = { version: 1, type, name: item.name || item.text || '클립' };
+  payload.keyframes=item.keyframes?clone(item.keyframes):null;
   if (type !== 'audio') payload.visual = { transform: transformOf(item), crop: { left:0, right:0, top:0, bottom:0, ...item.crop } };
   if (type === 'clip') {
     payload.media = pick(item, mediaKeys);
@@ -52,17 +56,17 @@ export function captureItemSettings(ref, doc = project) {
   }
   if (type === 'caption') payload.caption = { anim:'none', glow:null, ...doc.captionStyle, ...item.style };
   if (type === 'graphic') payload.graphic = { ...pick({ ...newOverlay(0), ...item },graphicKeys), graphic:item.graphic||null };
-  if (type === 'caption' || type === 'graphic') payload.typography = pick(payload.caption || payload.graphic,['font','size','color']);
+  if (type === 'caption' || type === 'graphic') payload.typography = pick(payload.caption || payload.graphic,TEXT_STYLE_KEYS);
   return clone(payload);
 }
 export function planPasteSettings(refs, payload, doc = captureDocument()) {
   if (!payload || payload.version !== 1) throw new Error('먼저 클립의 설정을 복사해 주세요.');
   const patches = [], skipped = [];
-  for (const { type,id,item } of resolveSelection(refs,doc)) {
+  for (const { type,id,item,duration } of resolveSelection(refs,doc)) {
     const patch = {}, remove = [];
     if (type !== 'audio' && payload.visual) {
       patch.transform = clone(transformOf({ transform:payload.visual.transform }));
-      patch.crop = pick(payload.visual.crop || {},['left','right','top','bottom']);
+      if(type==='clip')patch.crop = pick(payload.visual.crop || {},['left','right','top','bottom']);
     }
     if (type === 'clip' && payload.media) { Object.assign(patch,pick(payload.media,mediaKeys));remove.push('fadeEnvelope'); }
     if (type === 'clip' && item.type === 'image' && payload.image) { patch.ken=payload.image.ken;remove.push('motionDuration','motionOffset'); }
@@ -74,6 +78,16 @@ export function planPasteSettings(refs, payload, doc = captureDocument()) {
     }
     if (type === 'graphic' && (payload.graphic || payload.typography)) {
       Object.assign(patch,pick(payload.graphic || payload.typography,graphicKeys));
+    }
+    if(payload.keyframes!==undefined){
+      const tracks=clone(item.keyframes?.tracks||{});
+      const copied=payload.keyframes?sliceKeyframes({keyframes:payload.keyframes},0,duration)?.tracks||{}:{};
+      for(const channel of KEYFRAME_CHANNELS){
+        const compatible=channel==='volume'?!!payload.audio&&(type==='audio'||type==='clip'&&item.type==='video'):!!payload.visual&&type!=='audio';
+        if(!compatible)continue;
+        if(copied[channel])tracks[channel]=copied[channel];else delete tracks[channel];
+      }
+      if(Object.keys(tracks).length)patch.keyframes={version:1,tracks};else remove.push('keyframes');
     }
     if (Object.keys(patch).length) patches.push({ type,id,patch,remove });
     else skipped.push({ type,id });
@@ -91,29 +105,31 @@ export function applySettingsPlan(plan) {
 }
 
 /** 값은 UI의 퍼센트가 아닌 실제 저장 단위로 받습니다. 내용·시간·소재는 일괄 덮어쓰지 않습니다. */
-export function applySharedProperty(refs, prop, value) {
+export function applySharedProperty(refs, prop, value, {time=0}={}) {
   let count = 0;
-  for (const { type,item } of resolveSelection(refs)) {
+  for (const { type,item,start,duration } of resolveSelection(refs)) {
+    const local=clamp(time-start,0,duration);
     if (prop.startsWith('transform.') && type !== 'audio') {
       const key=prop.slice(10),limits={offsetX:[-3,3],offsetY:[-3,3],scaleX:[.05,10],scaleY:[.05,10],rotation:[-360,360],opacity:[0,1]};
       if (['flipX','flipY'].includes(key)) { if (typeof value !== 'boolean') continue; }
       else { if (!limits[key] || !Number.isFinite(value)) continue;value=clamp(value,...limits[key]); }
-      item.transform={...transformOf(item),[key]:value};
-    } else if (prop.startsWith('crop.') && type !== 'audio') {
+      if(['flipX','flipY'].includes(key))item.transform={...transformOf(item),[key]:value};
+      else setValueAt(item,key,local,value,{duration});
+    } else if (prop.startsWith('crop.') && type === 'clip') {
       const key=prop.slice(5),other={left:'right',right:'left',top:'bottom',bottom:'top'}[key];
       if (!other || !Number.isFinite(value)) continue;
       item.crop={...item.crop,[key]:clamp(value,0,Math.min(.95,.98-(item.crop?.[other]||0)))};
     } else if (prop.startsWith('textStyle.') && ['caption','graphic'].includes(type)) {
-      const key=prop.slice(10);if (!['font','size','color'].includes(key)) continue;
+      const key=prop.slice(10);if (!TEXT_STYLE_KEYS.includes(key)) continue;
       if (type==='caption') item.style={...project.captionStyle,...item.style,[key]:value};else item[key]=value;
     } else if (prop.startsWith('style.') && type==='caption') {
-      const key=prop.slice(6);if (!['font','size','color','bottom','anim'].includes(key)) continue;
+      const key=prop.slice(6);if (![...TEXT_STYLE_KEYS,'bottom'].includes(key)) continue;
       item.style={...project.captionStyle,...item.style,[key]:value};
     } else if (['fadeIn','fadeOut'].includes(prop) && ['clip','audio'].includes(type)) {
       if (!Number.isFinite(value)) continue;item[prop]=clamp(value,0,10);delete item.fadeEnvelope;
     } else if (['volume','muted'].includes(prop) && (type==='audio'||(type==='clip'&&item.type==='video'))) {
       if (prop==='volume'&&!Number.isFinite(value)) continue;
-      item[prop]=prop==='volume'?clamp(value,0,1):!!value;
+      if(prop==='volume')setValueAt(item,'volume',local,clamp(value,0,3),{duration});else item.muted=!!value;
     } else if (['fit','bg'].includes(prop) && type==='clip') {
       if (!(prop==='fit'?['cover','contain']:['blur','black','white','transparent']).includes(value)) continue;item[prop]=value;
     } else if (prop==='ken' && type==='clip' && item.type==='image') {
@@ -177,11 +193,15 @@ export async function applyBatchSplit(plan, {signal} = {}) {
     verifySnapshot(plan.document,signal);
     for (const {type,id,check} of plan.eligible) {
       const saved=clone(check.item),left={},rightId=uid(),local=check.local;
+      const motion=splitKeyframes(saved,local,check.duration);
+      left.keyframes=motion.left;
       const envelope=clone(saved.fadeEnvelope||{offset:0,duration:check.duration,fadeIn:saved.fadeIn||0,fadeOut:saved.fadeOut||0});
       let right;
       if (type==='clip') right=await makeClip(saved.assetId,{...saved,id:rightId,start:plan.time,fadeIn:0});
       else if (type==='audio') right=makeAudio(saved.assetId,{...saved,id:rightId,start:plan.time,trimStart:saved.trimStart+local,fadeIn:0});
       else right={...saved,id:rightId,start:plan.time,end:check.end};
+      right.keyframes=motion.right;
+      if(type==='clip'&&saved.cropTracking){const tracking=splitCropTracking(saved,local,check.duration);left.cropTracking=tracking.left;right.cropTracking=tracking.right;}
       staged.push({type,id,left,right});
       verifySnapshot(plan.document,signal);
       if (type==='clip') {

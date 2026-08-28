@@ -5,18 +5,21 @@ import {createRequire} from 'node:module';
 import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {legacyEditorMode,setLegacyEditorMode} from '../public/js/state.js';
+import {trackBadge,ensureAutoCaptionTrack} from '../public/js/state.js';
+import {keyframeValue} from '../public/js/keyframes.js';
+import {cropTrackingAt} from '../public/js/crop-tracking.js';
 import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES} from '../public/js/state.js';
 import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,packProject,unpackProject,validateDocument,clearAssets,waveformOf,demoSound} from '../public/js/project-store.js';
 import {encodeWav,transcriptionCaptions} from '../public/js/ai-client.js';
 import {renderFrame,measureVisual,loadFonts} from '../public/js/render.js';
 import {Player} from '../public/js/player.js';
-import {GRAPHICS,CAPTIONS} from '../public/js/presets.js';
+import {GRAPHICS,CAPTIONS,TRANSITIONS} from '../public/js/presets.js';
 import {frameTime,itemRange,splitAvailability,splitTimelineItem,setItemRange,planVideoPlacement,placeVideoClip,setTransition,planClipTrim,applyClipTrim,deleteTimelineItem,planPlacement,placeTimelineItem,trackGaps,currentGap,closeTimelineGap,planItemTrim,applyItemTrim,planSilenceCuts,applySilenceCuts} from '../public/js/timeline-edits.js';
 import {Timeline} from '../public/js/timeline.js';
 import {transformOf,visualCorners,alignVisual,withVisualTransform,croppedBounds,transformPoint,inverseTransformPoint,hitVisual,cropFromDrag,resizeFromDrag,snapVisualCenter} from '../public/js/visual-transform.js';
 import {SAFE_AREAS,safeAreaConfig,safeAreaRect} from '../public/js/safe-areas.js';
 import {FONTS,ensureFont} from '../public/js/font-catalog.js';
-import {SOUND_EFFECTS,synthesizeEffect,createSoundEffect} from '../public/js/sound-effects.js';
+import {SOUND_EFFECTS,synthesizeEffect} from '../public/js/sound-effects.js';
 import {applyFade,mixTimeline,extractClipAudio} from '../public/js/audio.js';
 import {Input,InputAudioTrack,AudioBufferSink} from '../public/vendor/mediabunny.min.js';
 import {exportVideo} from '../public/js/exporter.js';
@@ -124,6 +127,16 @@ test('project validation blocks injected identifiers, invalid trim, and duplicat
   assert.throws(()=>validateDocument(doc,[{id:'" onmouseover="bad'}]));
   assert.throws(()=>validateDocument(doc,[{id:'same'},{id:'same'}]));
   doc.tracks=[{id:'audio',assetId:'sound',start:0,trimStart:3,trimEnd:1,lane:'music'}];assert.throws(()=>validateDocument(doc,[{id:'sound'}]));
+  for(const style of [{size:'58" data-review-marker="accepted'},{shadowBlur:NaN},{boxOpacity:3}]){
+    const styled=captureDocument();styled.captionStyle=style;
+    assert.throws(()=>validateDocument(styled,[]),/글자 스타일/);
+    styled.captionStyle={};styled.captions=[{id:'caption',text:'검사',start:0,end:1,trackId:'v3',style}];
+    assert.throws(()=>validateDocument(styled,[]),/글자 스타일/);
+    styled.captions=[];styled.overlays=[{id:'graphic',text:'검사',start:0,end:1,trackId:'v2',...style}];
+    assert.throws(()=>validateDocument(styled,[]),/글자 스타일/);
+  }
+  const legacyStyle=captureDocument();legacyStyle.captionStyle={size:250,shadowX:-20,anim:'up'};
+  assert.doesNotThrow(()=>validateDocument(legacyStyle,[]));
 });
 
 test('PCM conversion and waveform include right-channel-only audio',async()=>{
@@ -336,6 +349,68 @@ test('splitting retains image motion and video/audio fade envelopes including un
   assert.doesNotThrow(()=>validateDocument(captureDocument(),[...assets.keys()].map(id=>({id}))));
 });
 
+test('trim and split preserve keyframes and tracking in local time despite source trim offsets',async()=>{
+  reset();const motion={
+    keyframes:{version:1,tracks:{offsetX:[{time:0,value:.1},{time:2,value:.3},{time:8,value:.9}],
+      volume:[{time:0,value:.2},{time:8,value:1}]}},
+    cropTracking:{version:1,enabled:true,zoom:1.2,anchorX:.5,anchorY:.5,
+      keys:[0,2,8].map((time,index)=>({time,x:[.1,.3,.7][index],y:.2,w:.1,h:.1,confidence:1,lost:false}))},
+  };
+  project.clips=[await fixtureClip('video',12,'video',{start:10,trimStart:2,trimEnd:10,...structuredClone(motion)})];
+  const before=captureDocument(),history=new History();
+  applyClipTrim(planClipTrim('video','start',12));
+  assert.equal(project.clips[0].trimStart,4);
+  near(keyframeValue(project.clips[0],'offsetX',0),keyframeValue(motion,'offsetX',2));
+  near(cropTrackingAt(project.clips[0],0).x,cropTrackingAt(motion,2).x);
+  const split=await splitTimelineItem({type:'clip',id:'video'},15),right=project.clips.find(c=>c.id===split.id);
+  assert.equal(right.trimStart,7);
+  for(const time of [0,.5,2.9]){
+    near(keyframeValue(right,'offsetX',time),keyframeValue(motion,'offsetX',5+time));
+    near(keyframeValue(right,'volume',time),keyframeValue(motion,'volume',5+time));
+    near(cropTrackingAt(right,time).x,cropTrackingAt(motion,5+time).x);
+  }
+  assert.notEqual(project.clips[0].keyframes.tracks.offsetX,right.keyframes.tracks.offsetX);
+  assert.notEqual(project.clips[0].cropTracking.keys,right.cropTracking.keys);
+  const after=captureDocument();validateDocument(after,[...assets.keys()].map(id=>({id})));
+  history.push(before,'motion edit');history.undo();assert.deepEqual(captureDocument(),before);
+  history.redo();assert.deepEqual(captureDocument(),after);
+  const moved=project.clips.find(c=>c.id===split.id),savedMotion=structuredClone({keyframes:moved.keyframes,cropTracking:moved.cropTracking});
+  placeVideoClip(moved,planVideoPlacement(30,3,moved.id));
+  assert.deepEqual({keyframes:moved.keyframes,cropTracking:moved.cropTracking},savedMotion);
+});
+
+test('image, audio and text trims and splits keep their local animation rather than restarting it',async()=>{
+  for(const type of ['image','audio','caption','graphic']){
+    reset();const channel=type==='audio'?'volume':'offsetX';
+    const motion={keyframes:{version:1,tracks:{[channel]:[{time:0,value:0},{time:6,value:1}]}}};
+    let item,selectionType=type;
+    if(type==='image'){item=await fixtureClip('item',6,'image',{start:10,...structuredClone(motion)});project.clips=[item];selectionType='clip';}
+    else if(type==='audio'){item=fixtureAudio('item',6,{start:10,...structuredClone(motion)});project.audio.tracks=[item];}
+    else{item={id:'item',text:'유지',start:10,end:16,...structuredClone(motion)};project[type==='caption'?'captions':'overlays']=[item];}
+    applyItemTrim(planItemTrim(selectionType,'item','start',11));near(keyframeValue(item,channel,0),1/6);
+    const split=await splitTimelineItem({type:selectionType,id:'item'},13),right=itemRange(selectionType,split.id);
+    near(keyframeValue(right.item,channel,0),.5);near(keyframeValue(right.item,channel,2),5/6);
+    assert.equal(right.start,13);assert.equal(right.end,16);
+    assert.notEqual(item.keyframes.tracks[channel],right.item.keyframes.tracks[channel]);
+    validateDocument(captureDocument(),[...assets.keys()].map(id=>({id})));
+  }
+});
+
+test('automatic cuts slice motion by each kept original interval before closing gaps',async()=>{
+  reset();const motion={keyframes:{version:1,tracks:{offsetX:[{time:0,value:0},{time:8,value:.8}]}},
+    cropTracking:{version:1,enabled:true,zoom:1.2,anchorX:.5,anchorY:.5,
+      keys:[0,8].map(time=>({time,x:.1+time*.05,y:.2,w:.1,h:.1,confidence:1,lost:false}))}};
+  project.clips=[await fixtureClip('video',10,'video',{start:5,trimStart:1,trimEnd:9,...structuredClone(motion)})];
+  const plan=planSilenceCuts({type:'clip',id:'video'},[{start:2,end:3},{start:5,end:6}]);
+  await applySilenceCuts(plan);
+  assert.deepEqual(project.clips.map(c=>[c.start,c.trimStart,c.trimEnd]),[[5,1,3],[7,4,6],[9,7,9]]);
+  for(const [index,clip] of project.clips.entries()){
+    const from=[0,3,6][index];near(keyframeValue(clip,'offsetX',.5),keyframeValue(motion,'offsetX',from+.5));
+    near(cropTrackingAt(clip,.5).x,cropTrackingAt(motion,from+.5).x);
+  }
+  validateDocument(captureDocument(),[...assets.keys()].map(id=>({id})));
+});
+
 test('offline fade scheduling matches the split preview envelope',()=>{
   const events=[],param={setValueAtTime:(value,time)=>events.push([value,time]),linearRampToValueAtTime:(value,time)=>events.push([value,time])};
   const envelope={offset:1,duration:4,fadeIn:2,fadeOut:1};applyFade(param,.8,5,3,0,1,envelope);
@@ -350,6 +425,138 @@ test('video placement preserves empty space and inserts at occupied boundaries w
   const inserted=planVideoPlacement(4,2);assert.equal(inserted.start,3);assert.equal(inserted.shift,2);
   const result=placeVideoClip(clip('new',2),inserted);assert.deepEqual([result.start,result.end],[inserted.start,inserted.end]);assert.equal(result.shifted,3);
   assertValidLayout();assert.deepEqual(buildLayout().entries.map(e=>[e.clip.id,e.start]),[['a',0],['new',3],['b',5],['gap',9],['c',14]]);
+});
+
+test('same-track swaps exchange only the pair including unequal adjacent durations and legacy positions',async()=>{
+  for(const [aDuration,bDuration] of [[3,3],[2,4],[4,2]]){
+    reset();project.clips=[await fixtureClip('a',aDuration),await fixtureClip('b',bDuration),
+      await fixtureClip('c',3),await fixtureClip('far',1,'image',{start:30}),
+      await fixtureClip('upper',2,'image',{start:0,trackId:'v2'})];
+    project.captions=[{id:'caption',text:'그대로',start:1,end:9,trackId:'v3'}];
+    project.audio.tracks=[fixtureAudio('voice',4,{start:6,lane:'voice'})];
+    const before=captureDocument(),history=new History(),plan=planVideoPlacement(.25,bDuration,'b');
+    assert.equal(plan.ok,true);assert.equal(plan.mode,'swap');assert.equal(plan.swap.id,'a');
+    assert.deepEqual([plan.start,plan.end,plan.swap.start,plan.swap.end],[0,bDuration,bDuration,aDuration+bDuration]);
+    assert.deepEqual(plan.shifts,[]);assert.deepEqual(captureDocument(),before);
+    const actual=placeVideoClip(project.clips[1],plan),after=captureDocument();
+    assert.deepEqual([actual.start,actual.end,actual.shifted,actual.swapped],[plan.start,plan.end,0,'a']);
+    assert.deepEqual(after.clips.filter(c=>!['a','b'].includes(c.id)),before.clips.filter(c=>!['a','b'].includes(c.id)));
+    assert.deepEqual(after.captions,before.captions);assert.deepEqual(after.tracks,before.tracks);
+    assertValidLayout();history.push(before,'swap');history.undo();assert.deepEqual(captureDocument(),before);
+    history.redo();assert.deepEqual(captureDocument(),after);
+    placeVideoClip(project.clips[0],planVideoPlacement(.25,aDuration,'a'));assert.deepEqual(captureDocument(),before);
+  }
+});
+
+test('transition swaps keep the original slot connections and never move a third clip',async()=>{
+  for(const [sourceId,targetId] of [['b','a'],['a','b'],['b','c'],['c','b'],['a','c'],['c','a']]){
+    reset();project.clips=[await fixtureClip('a',4),await fixtureClip('b',4),await fixtureClip('c',4),
+      await fixtureClip('far',2,'image',{start:30}),await fixtureClip('upper',3,'image',{start:0,trackId:'v2'})];
+    project.clips[0].transitionOut={type:'dissolve',duration:.5};
+    project.clips[1].transitionOut={type:'blur',duration:.75};
+    const before=captureDocument(),history=new History(),entries=buildLayout().entries;
+    const source=entries.find(entry=>entry.id===sourceId),target=entries.find(entry=>entry.id===targetId);
+    const remap=id=>id===sourceId?targetId:id===targetId?sourceId:id;
+    const pairs=()=>transitionPairs().filter(pair=>pair.duration).map(pair=>[
+      pair.left.id,pair.right.id,pair.type,pair.duration,pair.start,pair.end]);
+    const expected=pairs().map(([left,right,...rest])=>[remap(left),remap(right),...rest]);
+    const time=target.start+target.duration/2,plan=planVideoPlacement(time,source.duration,sourceId);
+    const pointerPlan=planPlacement(time-.25,source.duration,'v1',sourceId,project,{targetTime:time});
+    assert.equal(plan.ok,true);assert.equal(plan.mode,'swap');assert.deepEqual(plan.shifts,[]);
+    assert.deepEqual([pointerPlan.start,pointerPlan.end,pointerPlan.connections],[plan.start,plan.end,plan.connections]);
+    assert.deepEqual(captureDocument(),before);
+    placeVideoClip(source.clip,plan);
+    assert.deepEqual(pairs(),expected);
+    for(const entry of entries.filter(entry=>![sourceId,targetId].includes(entry.id))){
+      const actual=itemRange('clip',entry.id);near(actual.start,entry.start);near(actual.end,entry.end);
+    }
+    near(itemRange('clip',sourceId).duration,4);near(itemRange('clip',targetId).duration,4);assertValidLayout();
+    const after=captureDocument();history.push(before,'swap');history.undo();assert.deepEqual(captureDocument(),before);
+    history.redo();assert.deepEqual(captureDocument(),after);
+    const restoredSource=project.clips.find(item=>item.id===sourceId);
+    placeVideoClip(restoredSource,planVideoPlacement(source.start+2,4,sourceId));
+    assert.deepEqual(captureDocument(),before);
+  }
+});
+
+test('unequal adjacent transition swaps preserve both external boundaries and blend weights',()=>{
+  reset();project.clips=[clip('previous',4,.5),clip('a',4,.75),clip('b',2,.5),clip('next',4)];
+  project.clips[1].transitionOut.type='push-left';project.clips[2].transitionOut.type='blur';
+  const before=buildLayout(),plan=planVideoPlacement(4.5,2,'b');
+  assert.equal(plan.ok,true);assert.deepEqual([plan.start,plan.end,plan.swap.start,plan.swap.end],[3.5,5.5,4.75,8.75]);
+  placeVideoClip(project.clips[2],plan);
+  assert.deepEqual(project.clips.map(item=>[item.id,item.start]),[['previous',0],['a',4.75],['b',3.5],['next',8.25]]);
+  assert.deepEqual(transitionPairs().map(pair=>[pair.left.id,pair.right.id,pair.type,pair.duration]),
+    [['previous','b','dissolve',.5],['b','a','push-left',.75],['a','next','blur',.5]]);
+  near(buildLayout().total,before.total);assertValidLayout();
+  for(let time=0;time<before.total;time+=.025)near(layersAt(time).reduce((sum,layer)=>sum+layer.weight,0),1);
+});
+
+test('transition swaps reject reduced edge capacity or lost remote overlap without mutation',()=>{
+  for(const remote of [false,true]){
+    reset();project.clips=remote
+      ?[{...clip('a',4,1),start:0},{...clip('middle',4),start:3},{...clip('b',2),start:10}]
+      :[clip('previous',4,2),clip('a',6,.5),clip('b',2,.5),clip('next',4)];
+    const before=captureDocument(),source=project.clips.find(item=>item.id==='b');
+    const plan=planVideoPlacement(remote?1:5,2,'b');
+    assert.equal(plan.ok,false);assert.match(plan.reason,/교환할 공간/);
+    assert.throws(()=>placeVideoClip(source,plan),/교환할 공간/);assert.deepEqual(captureDocument(),before);
+  }
+});
+
+test('transition swap guards reject changed edges and unchanged positions remain a no-op',()=>{
+  reset();project.clips=[clip('a',4,.5),clip('b',4,.5),clip('c',4)];pinClipPositions();
+  const before=captureDocument(),b=project.clips[1],noop=planVideoPlacement(b.start,4,'b');
+  assert.equal(noop.ok,true);assert.equal(noop.mode,'move');assert.equal(noop.swap,undefined);
+  placeVideoClip(b,noop);assert.deepEqual(captureDocument(),before);
+  const plan=planVideoPlacement(1,4,'b');project.clips[0].transitionOut.type='flash';
+  const newer=captureDocument();assert.throws(()=>placeVideoClip(b,plan),/변경/);assert.deepEqual(captureDocument(),newer);
+  const cStart=project.clips[2].start;placeVideoClip(b,planVideoPlacement(20,4,'b'));
+  near(project.clips[0].start,0);near(project.clips[2].start,cStart);near(b.start,20);
+  assert.ok(project.clips.every(item=>item.transitionOut.type==='cut'));assertValidLayout();
+});
+
+test('distant swaps preserve fixed clips and refuse insufficient space without mutation',()=>{
+  reset();project.clips=[{...clip('a',2),start:0},{...clip('middle',2),start:6},
+    {...clip('b',4),start:10},{...clip('tail',2),start:16}];
+  const plan=planVideoPlacement(0,4,'b');assert.equal(plan.ok,true);
+  placeVideoClip(project.clips[2],plan);
+  assert.deepEqual(project.clips.map(c=>[c.id,c.start]),[['a',12],['middle',6],['b',0],['tail',16]]);
+  assertValidLayout();
+  placeVideoClip(project.clips[0],planVideoPlacement(0,2,'a'));
+  project.clips[1].start=3;const before=captureDocument(),blocked=planVideoPlacement(0,4,'b');
+  assert.equal(blocked.ok,false);assert.match(blocked.reason,/교환할 공간/);
+  assert.throws(()=>placeVideoClip(project.clips[2],blocked),/교환할 공간/);assert.deepEqual(captureDocument(),before);
+  const gap=planVideoPlacement(6,4,'b');assert.equal(gap.mode,'move');assert.equal(gap.ok,true);
+  placeVideoClip(project.clips[2],gap);assert.deepEqual(project.clips.map(c=>c.start),[0,3,6,16]);
+  const shortGap=planVideoPlacement(14.5,4,'b'),unchanged=captureDocument();
+  assert.equal(shortGap.ok,false);assert.throws(()=>placeVideoClip(project.clips[2],shortGap),/빈 공간/);
+  assert.deepEqual(captureDocument(),unchanged);
+});
+
+test('swapping very short text clips preserves true durations and never grows into the next item',()=>{
+  for(const type of ['caption','graphic']){
+    reset();const list=type==='caption'?project.captions:project.overlays,trackId=type==='caption'?'v3':'v2';
+    list.push({id:'short',text:'짧음',start:0,end:.01,trackId},{id:'long',text:'길게',start:.01,end:1.01,trackId},
+      {id:'next',text:'그대로',start:1.01,end:2.01,trackId});
+    const plan=planPlacement(0,1,trackId,'long');assert.equal(plan.ok,true);
+    placeTimelineItem(type,list[1],plan);
+    near(list[0].start,1);near(list[0].end,1.01);near(list[1].start,0);near(list[1].end,1);
+    near(list[2].start,1.01);near(list[2].end,2.01);
+  }
+});
+
+test('swap targets follow the pointer and stale or overlapping plans never apply',()=>{
+  reset();project.clips=[{...clip('a',3),start:0},{...clip('b',3),start:3},{...clip('c',3),start:6}];
+  const pointerPlan=planPlacement(1.5,3,'v1','a',project,{targetTime:4});
+  assert.equal(pointerPlan.swap.id,'b');assert.equal(pointerPlan.start,3);
+  const before=captureDocument();project.clips[2].start=8;const newer=captureDocument();
+  assert.throws(()=>placeVideoClip(project.clips[0],pointerPlan),/변경/);assert.deepEqual(captureDocument(),newer);
+  assert.notDeepEqual(newer,before);
+  project.clips=[{...clip('left',4),start:0},{...clip('right',4),start:3}];
+  const overlap=planVideoPlacement(1,4,'right'),original=captureDocument();
+  assert.equal(overlap.ok,false);assert.throws(()=>placeVideoClip(project.clips[1],overlap),/겹침/);
+  assert.deepEqual(captureDocument(),original);
 });
 
 test('inserting inside a dissolve removes only that connection and keeps original clip lengths',()=>{
@@ -369,6 +576,21 @@ test('transitions belong to adjacent pairs and update the right side only, inclu
   assert.throws(()=>setTransition('b','c','dissolve',.5),/맞닿은/);
   setTransition('a','b','flash',.5);assert.deepEqual(project.clips.map(c=>c.start),[0,3.5,9.5]);
   setTransition('a','b','dissolve',0);assert.equal(transitionPairs()[0].type,'cut');assert.deepEqual(project.clips.map(c=>c.start),[0,4,10]);
+});
+
+test('every catalog transition keeps layout, editing, labels and saved documents consistent',async()=>{
+  for(const transition of TRANSITIONS){
+    reset();project.clips=[await fixtureClip('a',4),await fixtureClip('b',4)];
+    project.clips[0].transitionOut={type:transition.id,duration:transition.id==='cut'?0:.5};
+    const initial=buildLayout();near(initial.entries[1].start,transition.id==='cut'?4:3.5);
+    const pair=setTransition('a','b',transition.id,.75),expected=transition.id==='cut'?0:.75;
+    near(pair.duration,expected);assert.equal(pair.type,transition.id);
+    const timeline=Object.assign(Object.create(Timeline.prototype),{zoom:100});
+    assert.ok(timeline.transitionButton(pair).includes(transition.name));
+    const saved=captureDocument();validateDocument(saved,[...assets.keys()].map(id=>({id})));restoreDocument(saved);
+    assert.equal(transitionPairs()[0].type,transition.id);near(buildLayout().entries[1].start,4-expected);
+  }
+  assert.throws(()=>setTransition('a','b','unlisted',.5),/지원하지/);
 });
 
 test('Delete leaves a gap; ripple delete closes time on just the selected numbered track',()=>{
@@ -415,7 +637,7 @@ test('drag metadata keeps the compatible destination track and exact full-durati
   assert.deepEqual([actual.trackId,actual.start,actual.end],[videoPlan.trackId,videoPlan.start,videoPlan.end]);assert.deepEqual(project.clips.slice(0,2).map(c=>c.start),[0,4]);
   timeline.external={kind:'preset',id:'g:burst'};const graphic=timeline.externalPlan(1800,'v3');near(graphic.end,19);assert.equal(timeline.externalPlan(1800,'a2'),null);
   timeline.external={kind:'preset',id:'c:pill'};assert.equal(timeline.externalPlan(1800,'v1').lane,'v1');
-  timeline.external={kind:'preset',id:'sfx:whoosh'};const sound=timeline.externalPlan(1800,'a2');near(sound.end,18.65);assert.equal(timeline.externalPlan(1800,'v1'),null);
+  timeline.external={kind:'preset',id:'sfx:whoosh'};const sound=timeline.externalPlan(1800,'a2');near(sound.end,18+SOUND_EFFECTS.find(effect=>effect.id==='whoosh').duration);assert.equal(timeline.externalPlan(1800,'v1'),null);
   timeline.external={kind:'preset',id:'t:dissolve'};assert.equal(timeline.externalPlan(1800,'v1'),null);
   assertValidLayout();
 });
@@ -510,7 +732,11 @@ test('deterministic mixed edits never create an unapproved video overlap',()=>{
   for(let i=0;i<800;i++){
     const list=buildLayout().entries,selected=list[Math.floor(random()*list.length)],operation=Math.floor(random()*6);
     if(!selected||operation===0){const duration=1+random()*5;placeVideoClip(clip('added-'+i,duration),planVideoPlacement(frameTime(random()*30),duration));}
-    else if(operation===1)placeVideoClip(selected.clip,planVideoPlacement(frameTime(random()*30),selected.duration,selected.clip.id));
+    else if(operation===1){
+      const plan=planVideoPlacement(frameTime(random()*30),selected.duration,selected.clip.id),before=captureDocument();
+      if(plan.ok)placeVideoClip(selected.clip,plan);
+      else{assert.throws(()=>placeVideoClip(selected.clip,plan));assert.deepEqual(captureDocument(),before);}
+    }
     else if(operation===2)applyClipTrim(planClipTrim(selected.clip.id,'end',frameTime(selected.end+(random()-.5)*2)));
     else if(operation===3&&list.length>2)deleteTimelineItem({type:'clip',id:selected.clip.id},random()>.5);
     else{const pairs=transitionPairs();if(pairs.length){const pair=pairs[Math.floor(random()*pairs.length)];setTransition(pair.left.clip.id,pair.right.clip.id,random()>.5?'dissolve':'cut',random());}}
@@ -707,7 +933,7 @@ test('voice transcription follows purpose after movement between numbered audio 
   finally{globalThis.OfflineAudioContext=previous;}
 });
 
-test('built-in sound effects are deterministic, distinct, bounded non-silent WAV files',async()=>{
+test('synthesized fallback sound effects are deterministic, distinct and bounded',()=>{
   const signatures=new Set();
   for(const effect of SOUND_EFFECTS){
     const samples=synthesizeEffect(effect.id,8000),again=synthesizeEffect(effect.id,8000);
@@ -715,8 +941,6 @@ test('built-in sound effects are deterministic, distinct, bounded non-silent WAV
     let peak=0,power=0;for(const value of samples){assert.ok(Number.isFinite(value));peak=Math.max(peak,Math.abs(value));power+=value*value;}
     assert.ok(peak>.7&&peak<.83);assert.ok(power>1);near(samples[0],0);
     signatures.add(Buffer.from(samples.buffer).toString('base64'));
-    const wav=new DataView(await createSoundEffect(effect.id).arrayBuffer());assert.equal(wav.getUint32(24,true),48000);
-    assert.equal(wav.getUint32(40,true),Math.round(effect.duration*48000)*2);
   }
   assert.equal(signatures.size,SOUND_EFFECTS.length);assert.throws(()=>synthesizeEffect('missing'));
 });
@@ -1117,9 +1341,46 @@ test('legacy role migration preserves ids, stack order, mixed tracks and version
   assert.equal(trackIdFor('caption',{}),'v1');assert.equal(trackLabel('a1'),'보이스');
 });
 
+test('automatic captions create one optional row and preserve manual captions through version 4 saves',()=>{
+  reset();const initial=captureDocument();assert.equal(initial.timelineTracks.length,5);
+  assert.ok(!timelineTracks().some(track=>track.role==='auto-caption'));
+  project.captions=[{id:'manual',text:'수동',start:1,end:2,trackId:'v3'}];
+  const manual=structuredClone(project.captions[0]),track=ensureAutoCaptionTrack();
+  assert.equal(track.role,'auto-caption');assert.equal(trackLabel(track.id),'자동자막');
+  assert.equal(trackIdFor('caption',{}),'v3');
+  project.captions.push({id:'auto',text:'자동',start:3,end:4,trackId:track.id});
+  assert.equal(ensureAutoCaptionTrack().id,track.id);assert.equal(timelineTracks().length,6);
+  const saved=captureDocument();assert.equal(saved.version,4);validateDocument(saved,[]);restoreDocument(saved);
+  assert.equal(ensureAutoCaptionTrack().id,track.id);assert.deepEqual(project.captions[0],manual);
+  assert.throws(()=>removeTimelineTrack(track.id),/빈 트랙/);
+  project.captions.splice(1);assert.equal(removeTimelineTrack(track.id),true);
+  assert.ok(!timelineTracks().some(row=>row.role==='auto-caption'));
+  assert.equal(trackLabel(ensureAutoCaptionTrack().id),'자동자막');
+  const legacy=structuredClone(initial);for(const row of legacy.timelineTracks)delete row.role;
+  validateDocument(legacy,[]);restoreDocument(legacy);assert.equal(timelineTracks().length,5);
+  assert.ok(!timelineTracks().some(row=>row.role==='auto-caption'));
+  project.timelineTracks=[...Array.from({length:24},
+    (_,index)=>({id:'v'+(index+1),kind:'visual',role:'video'})),{id:'a1',kind:'audio',role:'audio'}];
+  const full=captureDocument();assert.throws(()=>ensureAutoCaptionTrack(),/24개/);assert.deepEqual(captureDocument(),full);
+  project.timelineTracks[23].role='auto-caption';assert.equal(ensureAutoCaptionTrack().id,'v24');
+  assert.equal(timelineTracks().length,25);
+});
+
+test('voice badges follow role order without changing track ids or initial numbering',()=>{
+  reset();assert.equal(trackBadge('a2'),'V');assert.equal(trackLabel('a2'),'보이스');
+  const second=addTimelineTrack('audio',{afterId:'a2'}),inserted=addTimelineTrack('audio',{afterId:'a2'});
+  assert.deepEqual([trackBadge('a2'),trackBadge(inserted.id),trackBadge(second.id)],['V','V2','V3']);
+  assert.deepEqual([trackLabel(inserted.id),trackLabel(second.id)],['보이스 2','보이스 3']);
+  const saved=captureDocument();validateDocument(saved,[]);restoreDocument(saved);
+  assert.deepEqual(timelineTracks().map(row=>row.id),saved.timelineTracks.map(row=>row.id));
+  assert.equal(removeTimelineTrack(inserted.id),true);assert.equal(trackBadge(second.id),'V2');
+  assert.equal(removeTimelineTrack(second.id),true);assert.equal(removeTimelineTrack('a2'),false);
+  assert.equal(trackBadge('a2'),'V');
+});
+
 test('per-row addition is visually adjacent and protects the last row of every role',()=>{
   reset();migrateTimeline();
-  for(const role of TRACK_ROLES){
+  for(const role of TRACK_ROLES.filter(role=>!role.optional)){
     const original=timelineTracks().find(row=>row.role===role.id),added=addTimelineTrack(role.kind,{afterId:original.id});
     const display=timelineTracks().filter(row=>row.kind===role.kind);if(role.kind==='visual')display.reverse();
     const index=display.findIndex(row=>row.id===original.id);
@@ -1198,12 +1459,24 @@ test('batch splitting includes only selected eligible items and retains masks an
   project.audio.tracks=[fixtureAudio('voice',12,{trimStart:2,trimEnd:10,start:0,role:'voice',fadeIn:2,fadeOut:2})];
   project.captions=[{id:'cap',text:'분할',trackId:'v3',start:0,end:8},{id:'later',text:'그대로',trackId:'v3',start:10,end:12}];
   project.overlays=[{id:'unselected',text:'유지',trackId:'v2',start:0,end:8}];
+  project.clips[0].keyframes={version:1,tracks:{offsetX:[{time:0,value:0},{time:8,value:.8}]}};
+  project.clips[0].cropTracking={version:1,enabled:true,zoom:1.2,anchorX:.5,anchorY:.5,
+    keys:[0,8].map(time=>({time,x:.1+time*.05,y:.2,w:.1,h:.1,confidence:1,lost:false}))};
+  project.audio.tracks[0].keyframes={version:1,tracks:{volume:[{time:0,value:.25},{time:8,value:1.25}]}};
+  project.captions[0].keyframes={version:1,tracks:{opacity:[{time:0,value:.2},{time:8,value:1}]}};
   const refs=[{type:'clip',id:'video'},{type:'audio',id:'voice'},{type:'caption',id:'cap'},{type:'caption',id:'later'}],before=captureDocument();
   const plan=planBatchSplit(refs,4),result=await applyBatchSplit(plan);assert.equal(result.items.length,3);assert.equal(result.skipped,1);
   assert.deepEqual(project.overlays,before.overlays);assert.equal(project.captions.find(item=>item.id==='later').start,10);
   for(const ref of result.items){const range=itemRange(ref.type,ref.id);assert.equal(range.start,4);assert.equal(range.end,8);}
   const right=project.clips.find(item=>item.id!=='video');assert.equal(right.trimStart,6);assert.deepEqual(right.mosaics,before.clips[0].mosaics);assert.notEqual(right.mosaics,project.clips[0].mosaics);
   for(const time of [0,.5,3.5,4,5,7.5]){const part=time<4?project.clips[0]:right;near(clipFadeGain(part,time<4?time:time-4,4),clipFadeGain(before.clips[0],time,8));}
+  for(const ref of result.items){
+    const item=itemRange(ref.type,ref.id).item,channel={clip:'offsetX',audio:'volume',caption:'opacity'}[ref.type];
+    const original={clip:before.clips[0],audio:before.tracks[0],caption:before.captions[0]}[ref.type];
+    for(const time of [0,1.25,3.9])near(keyframeValue(item,channel,time),keyframeValue(original,channel,time+4));
+  }
+  near(cropTrackingAt(right,1).x,cropTrackingAt(before.clips[0],5).x);
+  validateDocument(captureDocument(),[...assets.keys()].map(id=>({id})));
   const h=new History();h.push(before,'batch split');h.undo();assert.deepEqual(captureDocument(),before);
 });
 
@@ -1225,9 +1498,13 @@ for(const command of ['split','duplicate'])for(const mode of ['cancel','stale','
 
 test('cross-track duplication preserves offsets when one row pushes the insertion later',async()=>{
   reset();project.captions=[{id:'a',text:'A',trackId:'v3',start:0,end:2},{id:'b',text:'B',trackId:'v2',start:1,end:3},{id:'obstacle',text:'O',trackId:'v3',start:2.5,end:6}];
+  project.captions[0].keyframes={version:1,tracks:{opacity:[{time:0,value:.1},{time:2,value:.9}]}};
   const original=captureDocument(),copies=await duplicateSelectedItems([{type:'caption',id:'a'},{type:'caption',id:'b'}]);
   assert.equal(copies.length,2);const a=itemRange('caption',copies[0].id),b=itemRange('caption',copies[1].id);near(b.start-a.start,1);
   assert.ok(a.start>=6);assert.deepEqual(project.captions.slice(0,3),original.captions);
+  assert.deepEqual(a.item.keyframes,project.captions[0].keyframes);
+  assert.notEqual(a.item.keyframes.tracks.opacity,project.captions[0].keyframes.tracks.opacity);
+  near(keyframeValue(a.item,'opacity',1),.5);
   validateDocument(captureDocument(),[]);
 });
 
@@ -1449,9 +1726,9 @@ function mockTimelineEvents() {
     releasePointerCapture(id){this.captures.delete(id);emit(this,'lostpointercapture',{pointerId:id});},...data,
   });
   const rows=new Map(['v1','v2','a1'].map(id=>{const row=node({dataset:{track:id}});row.closest=s=>s==='.track'?row:null;return[id,row];}));
-  const blocks=new Map(project.captions.map(item=>{
-    const block=node({dataset:{type:'caption',id:item.id},getBoundingClientRect:()=>({left:item.start*100,right:item.end*100,top:item.id==='a'?81:27,bottom:item.id==='a'?125:71})});
-    block.closest=s=>s.includes('.timeline-block')?block:s==='.track'?rows.get(item.trackId):null;return[item.id,block];
+  const blocks=new Map(buildLayout().items.map(entry=>{
+    const block=node({dataset:{type:entry.type,id:entry.id},getBoundingClientRect:()=>({left:entry.start*100,right:entry.end*100,top:entry.id==='a'?81:27,bottom:entry.id==='a'?125:71})});
+    block.closest=s=>s.includes('.timeline-block')?block:s==='.track'?rows.get(entry.trackId):null;return[entry.id,block];
   }));
   const canvas=node({querySelectorAll:s=>s.includes('.timeline-block')?[...blocks.values()]:[]});
   const ruler=node();ruler.closest=s=>s.includes('#ruler')?ruler:null;
@@ -1463,8 +1740,8 @@ function mockTimelineEvents() {
     activateTrack(){},render(){},ensureWidth(){},showPreview(){},clearPreview(){},
   });
   const pointer=(target,clientX=150,clientY=90,pointerId=7)=>({target,button:0,isPrimary:true,pointerId,clientX,clientY,preventDefault(){}});
-  const refs=[...blocks.keys()].map(id=>({type:'caption',id}));
-  return{timeline,canvas,ruler,blocks,refs,calls,rafs,emit,pointer,
+  const refs=[...blocks.values()].map(block=>({type:block.dataset.type,id:block.dataset.id}));
+  return{timeline,canvas,ruler,blocks,rows,notice,refs,calls,rafs,emit,pointer,
     restore(){emit(window,'keydown',{key:'Escape'});emit(window,'blur');for(const[name,descriptor]of saved){if(descriptor)Object.defineProperty(globalThis,name,descriptor);else delete globalThis[name];}},
   };
 }
@@ -1507,6 +1784,54 @@ test('single trim isolates its clip after multi-selection',()=>{
     const grip={dataset:{edge:'end'},closest:s=>s==='[data-edge]'?grip:owner.closest(s)};t.pointerDown(m.pointer(grip,300));
     m.emit(owner,'pointermove',{pointerId:7,clientX:350,clientY:90});m.emit(owner,'pointerup',{pointerId:7});
     assert.equal(project.captions[0].end,3.5);assert.deepEqual(project.captions[1],other);assert.deepEqual(t.selections,[m.refs[0]]);assert.equal(m.calls.commits.length,1);
+  }finally{m.restore();}
+});
+
+test('single pointer swap previews both actual ranges and commits the same pair only once',()=>{
+  reset();project.clips=[{...clip('a',2),start:1},{...clip('b',4),start:3},{...clip('c',3),start:7}];
+  const m=mockTimelineEvents();try{
+    const t=m.timeline,owner=m.blocks.get('b'),before=captureDocument();
+    t.showPreview=Timeline.prototype.showPreview;t.pointerDown(m.pointer(owner,600));
+    m.emit(owner,'pointermove',{pointerId:7,clientX:200,clientY:90});
+    const ghosts=m.rows.get('v1').children.filter(node=>node.className?.includes('timeline-insert-preview'));
+    assert.deepEqual(ghosts.map(node=>[node.style.left,node.style.width]),[['100px','400px'],['500px','200px']]);
+    assert.match(m.notice.textContent,/두 클립만 자리 교환/);assert.deepEqual(captureDocument(),before);
+    m.emit(owner,'pointerup',{pointerId:7});m.emit(owner,'pointerup',{pointerId:7});
+    assert.deepEqual(project.clips.map(c=>[c.id,c.start]),[['a',5],['b',1],['c',7]]);
+    assert.equal(m.calls.commits.length,1);assert.equal(m.calls.commits[0].label,'클립 자리 교환');
+    assert.equal(m.calls.errors.length,0);assert.equal(t.selection.id,'b');
+  }finally{m.restore();}
+});
+
+test('pointer swap with dissolves previews exact ranges and reconnects the fixed third clip',()=>{
+  reset();project.clips=[clip('a',4,.5),clip('b',4,.5),clip('c',4)];
+  const m=mockTimelineEvents();try{
+    const t=m.timeline,owner=m.blocks.get('b'),before=captureDocument();
+    t.showPreview=Timeline.prototype.showPreview;t.pointerDown(m.pointer(owner,650));
+    m.emit(owner,'pointermove',{pointerId:7,clientX:100,clientY:90});
+    const ghosts=m.rows.get('v1').children.filter(node=>node.className?.includes('timeline-insert-preview'));
+    assert.deepEqual(ghosts.map(node=>[node.style.left,node.style.width]),[['0px','400px'],['350px','400px']]);
+    assert.ok(ghosts.every(node=>!node.className.includes('invalid')));assert.deepEqual(captureDocument(),before);
+    m.emit(owner,'pointerup',{pointerId:7});m.emit(owner,'pointerup',{pointerId:7});
+    assert.deepEqual(project.clips.map(item=>[item.id,item.start]),[['a',3.5],['b',0],['c',7]]);
+    assert.deepEqual(transitionPairs().map(pair=>[pair.left.id,pair.right.id,pair.duration]),
+      [['b','a',.5],['a','c',.5]]);
+    assert.equal(m.calls.commits.length,1);assert.equal(m.calls.errors.length,0);
+    assert.equal(t.selection.id,'b');assert.equal(t.dragging,false);assertValidLayout();
+  }finally{m.restore();}
+});
+
+test('insufficient swap space is visible before release and does not enter undo history',()=>{
+  reset();project.clips=[{...clip('a',2),start:0},{...clip('middle',2),start:3},{...clip('b',4),start:10}];
+  const m=mockTimelineEvents();try{
+    const t=m.timeline,owner=m.blocks.get('b'),before=captureDocument();
+    t.showPreview=Timeline.prototype.showPreview;t.pointerDown(m.pointer(owner,1200));
+    m.emit(owner,'pointermove',{pointerId:7,clientX:100,clientY:90});
+    const ghosts=m.rows.get('v1').children.filter(node=>node.className?.includes('timeline-insert-preview'));
+    assert.equal(ghosts.length,2);assert.ok(ghosts.every(node=>node.className.includes('invalid')));
+    assert.match(m.notice.textContent,/교환할 공간/);assert.deepEqual(captureDocument(),before);
+    m.emit(owner,'pointerup',{pointerId:7});assert.deepEqual(captureDocument(),before);
+    assert.equal(m.calls.commits.length,0);assert.equal(m.calls.errors.length,1);
   }finally{m.restore();}
 });
 

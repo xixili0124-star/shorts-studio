@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<title>Studio motion browser smoke test</title>
+<link rel="stylesheet" href="/studio.css">
+<style>
+body{display:block;overflow:auto;padding:24px;height:auto;background:#141719;color:#eef0f1}
+main{max-width:1000px;margin:auto}button{margin:10px 8px 10px 0;padding:10px}
+pre{white-space:pre-wrap;line-height:1.6}canvas{background:#080a0c;max-width:100%;height:auto}
+.frames{display:flex;gap:20px;align-items:start}.frames canvas:last-child{width:180px}video{max-width:220px}
+</style>
+<main>
+<h1>크롭 추적 · 실제 브라우저 검사</h1>
+<p>테스트용 움직이는 무늬 영상을 기기에서 생성합니다. 사용자 파일·음성 모델을 사용하지 않습니다.</p>
+<button id="run">실제 영상 생성 → Worker 추적 → MP4 출력</button>
+<button id="dialog" disabled>동일한 크롭 추적 창 열기</button>
+<pre id="result" role="status">대기 중</pre>
+<div class="frames"><canvas id="source" width="640" height="360"></canvas><canvas id="framed" width="180" height="320"></canvas></div>
+<video id="output" controls hidden></video>
+<div id="libraryContent"></div><div id="inspectorContent"></div>
+</main>
+<script type="module">
+// 로컬 수동 검사 전용입니다. public/__qa-motion.html로 복사해 사용합니다.
+// 커밋·배포 전에는 public 아래 임시 복사본을 제거해야 합니다.
+import * as MB from '/vendor/mediabunny.min.js';
+import {project,migrateTimeline} from '/js/state.js';
+import {addAsset,makeClip} from '/js/project-store.js';
+import {trackCrop,validCropTracking} from '/js/crop-tracking.js';
+import {videoFrameReader} from '/js/video-analysis.js';
+import {renderFrame} from '/js/render.js';
+import {setKeyframe} from '/js/keyframes.js';
+import {detectEngine,exportVideo} from '/js/exporter.js';
+import {StudioTools} from '/js/studio-tools.js';
+
+const source=document.getElementById('source'),framed=document.getElementById('framed');
+const status=document.getElementById('result'),run=document.getElementById('run');
+const dialogButton=document.getElementById('dialog'),preview=document.getElementById('output');
+let clip,tools,objectUrl;
+const expectedX=time=>Math.round(150+200*Math.min(1,time/(89/30)))/640;
+const assert=(condition,message)=>{if(!condition)throw new Error(message);};
+const lines=[];
+const report=message=>{lines.push(message);status.textContent=lines.join('\n');};
+const progress=message=>{status.textContent=lines.concat(message).join('\n');};
+
+async function fixture(){
+  const ctx=source.getContext('2d');
+  const output=new MB.Output({format:new MB.Mp4OutputFormat({fastStart:'in-memory'}),target:new MB.BufferTarget()});
+  const video=new MB.CanvasSource(source,{codec:'avc',quality:MB.QUALITY_HIGH});
+  output.addVideoTrack(video,{frameRate:30});
+  try{
+    await output.start();
+    for(let frame=0;frame<90;frame++){
+      const x=Math.round(150+200*frame/89),y=125;
+      ctx.fillStyle='#24333b';ctx.fillRect(0,0,640,360);
+      ctx.fillStyle='#18272e';for(let k=0;k<640;k+=64)ctx.fillRect(k,0,2,360);
+      for(let row=0;row<10;row++)for(let col=0;col<8;col++){
+        const bit=((row*13+col*29+row*col*7)%11)<5;
+        ctx.fillStyle=bit?'#f3db70':'#13352c';ctx.fillRect(x+col*10,y+row*10,10,10);
+      }
+      ctx.strokeStyle='#fefaf1';ctx.lineWidth=3;ctx.strokeRect(x, y, 80, 100);
+      await video.add(frame/30,1/30);
+    }
+    video.close();await output.finalize();
+    return new File([output.target.buffer],'motion-fixture.mp4',{type:'video/mp4'});
+  }catch(error){try{await output.cancel();}catch{}throw error;}
+}
+
+run.onclick=async()=>{
+  run.disabled=true;dialogButton.disabled=true;lines.length=0;
+  document.body.dataset.result='running';delete document.body.dataset.dialogResult;
+  tools?.close();preview.pause();preview.hidden=true;preview.removeAttribute('src');preview.load();
+  if(objectUrl){URL.revokeObjectURL(objectUrl);objectUrl=null;}
+  try{
+    report('H.264 테스트 영상 생성 중');
+    const asset=await addAsset(await fixture());
+    assert(asset.kind==='video'&&Math.abs(asset.duration-3)<1/30,'Fixture must be a 3-second video');
+    clip=await makeClip(asset.id,{start:0,trimStart:.5,trimEnd:2.5,fit:'cover',bg:'black'});
+    project.clips=[clip];project.overlays=[];project.captions=[];project.audio.tracks=[];
+    project.audio.bgm=null;project.audio.narration=null;
+    project.template.mode='none';Object.assign(project,{width:720,height:1280,fps:30});migrateTimeline();
+    report('원본 0.5–2.5초 구간 분석 · 실제 Web Worker');
+    const rect={x:expectedX(1),y:125/360,w:80/640,h:100/360};
+    const result=await trackCrop(clip,rect,.5,{zoom:1.15,onProgress:(_,message)=>progress(message)});
+    assert(validCropTracking(result.tracking,2),'Invalid tracking data');
+    const reliable=result.tracking.keys.filter(key=>!key.lost);
+    const maxError=Math.max(...reliable.map(key=>Math.abs(key.x-expectedX(key.time+.5))));
+    assert(reliable.length>=15,'Too few reliable decoded frames');
+    assert(maxError<.055,'Tracker drift exceeded 5.5% of source width');
+    clip.cropTracking=result.tracking;
+    setKeyframe(clip,'offsetY',0,0);setKeyframe(clip,'offsetY',2,.03);
+    const reader=await videoFrameReader(clip);
+    try{
+      const frame=await reader.frame(1.5);
+      source.getContext('2d').drawImage(frame.canvas,0,0,640,360);
+      renderFrame(framed.getContext('2d'),1,{source:()=>({img:frame.canvas,w:frame.canvas.width,h:frame.canvas.height,sourceTime:frame.time})});
+    }finally{reader.close();}
+    report('PASS: '+reliable.length+'개 위치 · 최대 오차 '+(maxError*100).toFixed(2)+'%');
+    if(result.warnings.length)report('추적 경고: '+result.warnings.join(' / '));
+    const engine=await detectEngine();assert(engine.mode==='webcodecs'&&engine.container==='mp4','WebCodecs MP4 not available');
+    const blob=await exportVideo({engine,onProgress:(_,message)=>progress(message)});
+    assert(blob.type==='video/mp4'&&blob.size>0,'Output must be a non-empty MP4');
+    const exported=new MB.Input({formats:[MB.MP4],source:new MB.BlobSource(blob)});
+    try{
+      const outputTrack=await exported.getPrimaryVideoTrack(),duration=await exported.computeDuration();
+      assert(outputTrack&&await outputTrack.canDecode(),'Exported video must be decodable');
+      assert(Number.isFinite(duration)&&Math.abs(duration-2)<1/30,'Export must preserve the 2-second trimmed duration');
+      const frame=await new MB.CanvasSink(outputTrack).getCanvas(1);
+      assert(frame?.canvas&&Number.isFinite(frame.timestamp),'Exported video frame missing');
+      report('PASS: 추적 + 키프레임 MP4 '+duration.toFixed(3)+'초 · '+blob.size+' bytes · 프레임 재디코딩');
+    }finally{exported.dispose();}
+    objectUrl=URL.createObjectURL(blob);preview.src=objectUrl;preview.hidden=false;
+    if(!tools)tools=new StudioTools({
+      player:{time:1,pause(){},seek(){},invalidate(){}},selection:()=>({type:'clip',id:clip.id}),
+      view:()=> 'media',renderLibrary(){},refresh(){},commit(){report('PASS: dialog applied');},
+      toast:report,select(){},timeline:{activateTrack(){},reveal(){}},saveDraft(){}
+    });
+    dialogButton.disabled=false;
+    report('다음 검사: 위 버튼으로 실제 크롭 추적 창을 열어 영역·시각·적용을 확인하세요.');
+    document.body.dataset.result='pass';
+  }catch(error){report('FAIL: '+error.stack);document.body.dataset.result='fail';}
+  finally{run.disabled=false;}
+};
+dialogButton.onclick=async()=>{
+  dialogButton.disabled=true;
+  try{
+    await tools.openCropTracking();
+    assert(tools.dialog.open&&tools.state?.kind==='crop-tracking'&&tools.state.raw,'Crop tracking dialog did not load its source frame');
+    document.body.dataset.dialogResult='pass';report('PASS: 실제 크롭 추적 창 · 원본 프레임 준비');
+  }catch(error){document.body.dataset.dialogResult='fail';report('FAIL: '+error.message);}
+  finally{dialogButton.disabled=false;}
+};
+</script>
+</html>

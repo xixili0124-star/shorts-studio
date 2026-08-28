@@ -1,0 +1,1734 @@
+{
+  "repository": "https://github.com/google/fonts",
+  "revision": "ade3d1533e06b2b1462ffcde8e08b129627ca360",
+  "revisionDate": "2026-08-27T09:56:30Z",
+  "checkedAt": "2026-08-28",
+  "fonts": [
+    {
+      "family": "Noto Sans KR",
+      "slug": "notosanskr",
+      "weight": 900,
+      "language": "ko",
+      "subsets": [
+        "cyrillic",
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          100.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/notosanskr/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/notosanskr/OFL.txt",
+      "metadataSha256": "9b8b27c0dd1adbb0057d1fbe9534207ab3606114ace6755453d14668912471a1",
+      "licenseSha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Noto%20Sans%20KR:wght@900&display=swap",
+      "cssSha256": "db8e5b83f393ff0dc6b4f77d57cf708a3896338a890ce1fb5c591f4838b1f349",
+      "cssFontFaceCount": 124,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Nanum Gothic",
+      "slug": "nanumgothic",
+      "weight": 800,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400,
+        700,
+        800
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumgothic/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumgothic/OFL.txt",
+      "metadataSha256": "3f58e10d125ed43d363f1730b14a29a740f61c39dfa8dc1cb7be532b0072b2e2",
+      "licenseSha256": "eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Nanum%20Gothic:wght@800&display=swap",
+      "cssSha256": "095349af894557507be11038457ac132f7568d1db53d3be2d54075532cae8e75",
+      "cssFontFaceCount": 92,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Gothic A1",
+      "slug": "gothica1",
+      "weight": 900,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "greek-ext",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gothica1/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gothica1/OFL.txt",
+      "metadataSha256": "b4a9b6fcbc0322f95aa4d2c0da8a41f4ece3d486914cb90cffbd681eb145131b",
+      "licenseSha256": "ed95c33f80ccca002e3a360b683c43368f9c5eb024e5b992abb51af3c10b59bc",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Gothic%20A1:wght@900&display=swap",
+      "cssSha256": "e89dcb46b06716c04072d7903f3957e37a2701e1ce8664af381459f202a9095d",
+      "cssFontFaceCount": 99,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "IBM Plex Sans KR",
+      "slug": "ibmplexsanskr",
+      "weight": 600,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/ibmplexsanskr/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/ibmplexsanskr/OFL.txt",
+      "metadataSha256": "424565c06562f8fecab4cc94a4260d34d6895efbc1d7cad00bdaf9ddea066e79",
+      "licenseSha256": "7e6b2818edbd8f6a01ae80641cc8f16a51080d08fb4e532be3a0b6f74adb07da",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=IBM%20Plex%20Sans%20KR:wght@600&display=swap",
+      "cssSha256": "d9a72a8b715450e78f281940ef02930ce787f53adc0ebcbbb8f74ddb4b721eab",
+      "cssFontFaceCount": 94,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Gowun Dodum",
+      "slug": "gowundodum",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gowundodum/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gowundodum/OFL.txt",
+      "metadataSha256": "030c76da312a2b23eb97d1a65a05a06bc13ca1a7936f26ff4b2c4fa06b39cf2d",
+      "licenseSha256": "a7c73f9521cd646bbdfb6684c99a62311bbd7bce11898dc11ef0b3c69eda1aca",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Gowun%20Dodum:wght@400&display=swap",
+      "cssSha256": "81398519758280de806b3c5140f98d00afdc100cdbdb123b013aa0fc1386e709",
+      "cssFontFaceCount": 95,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Orbit",
+      "slug": "orbit",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/orbit/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/orbit/OFL.txt",
+      "metadataSha256": "3701836e728e98bf0d6b1f37c1dbbb8c37b0442a30e8e45aef155ed1d2d09601",
+      "licenseSha256": "00f1783a4e7a52d945c0c4de689571b2db896493362651db2706b40c6fc1c330",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Orbit:wght@400&display=swap",
+      "cssSha256": "a79a063bda2f30d101fbab664026e33f631ac84293755adcd9fadbf9b16d35b6",
+      "cssFontFaceCount": 91,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Nanum Gothic Coding",
+      "slug": "nanumgothiccoding",
+      "weight": 700,
+      "language": "ko",
+      "subsets": [
+        "menu",
+        "latin",
+        "korean"
+      ],
+      "normalWeights": [
+        400,
+        700
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumgothiccoding/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumgothiccoding/OFL.txt",
+      "metadataSha256": "b8e8b14cc0f6034e473498a752c689f8dd1396522fe80d5d7073236a4c1319ea",
+      "licenseSha256": "eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Nanum%20Gothic%20Coding:wght@700&display=swap",
+      "cssSha256": "bbf8a7ea627f3698d2fea725a4ccaeb0d6b4bfccfd4cba4cb2178e10a87788a4",
+      "cssFontFaceCount": 93,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Noto Serif KR",
+      "slug": "notoserifkr",
+      "weight": 900,
+      "language": "ko",
+      "subsets": [
+        "cyrillic",
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          200.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/notoserifkr/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/notoserifkr/OFL.txt",
+      "metadataSha256": "11a2445e02b744e88e8ed6fd5b807da7df4628fcc6526a15ea9b111ba0458bf4",
+      "licenseSha256": "5e0da210fb04058a8c0087985d2d456b931c2579811a49655721d3cf0c36b6d6",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Noto%20Serif%20KR:wght@900&display=swap",
+      "cssSha256": "e4b6350e929d55109ab963795c3796e885ddef271cc24b661ac11cb609ae2863",
+      "cssFontFaceCount": 124,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Nanum Myeongjo",
+      "slug": "nanummyeongjo",
+      "weight": 800,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400,
+        700,
+        800
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanummyeongjo/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanummyeongjo/OFL.txt",
+      "metadataSha256": "9b5fb78ccdc8097d94ab915a5feba1fd3436520ab620aefe73eea10e29da709f",
+      "licenseSha256": "8eb1c1019fe7fe6d0b6e7d7bbbba1d9cbdd969d8c5f26455708f6cfb8a77284c",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Nanum%20Myeongjo:wght@800&display=swap",
+      "cssSha256": "0aa829164620492ebc8ab5ee59f5c11d7d9e1c463459e3d7e755c4b8d10b26df",
+      "cssFontFaceCount": 92,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Gowun Batang",
+      "slug": "gowunbatang",
+      "weight": 700,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400,
+        700
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gowunbatang/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gowunbatang/OFL.txt",
+      "metadataSha256": "5ab6c5630b85b7d20e8cec7a3be246f9cd5a8f247dea4993f6fb9cf1cc24478e",
+      "licenseSha256": "49a57cc769fa9affd6eefb9070a61e3d3f6b757c97cafb15848bc6d1c81acc78",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Gowun%20Batang:wght@700&display=swap",
+      "cssSha256": "812280b24c9c0e34d1216c44d80637dae6d7685631ff0653000730485a5223b7",
+      "cssFontFaceCount": 95,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Hahmlet",
+      "slug": "hahmlet",
+      "weight": 700,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          100.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/hahmlet/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/hahmlet/OFL.txt",
+      "metadataSha256": "e78f4fc16822a998b9872f77bcda4cad93401ad46543d909c66d49672c90b7dd",
+      "licenseSha256": "ddadb10d28a303e3ef3b1f7ec55d3027903b9ec566d2f87d3ee03f3c87c91711",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Hahmlet:wght@700&display=swap",
+      "cssSha256": "1d8579045cd41e5b208a5c70ec83defd0d62689c2191fbe2d9b4c42922850974",
+      "cssFontFaceCount": 92,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Song Myung",
+      "slug": "songmyung",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/songmyung/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/songmyung/OFL.txt",
+      "metadataSha256": "99313d2efe78f09068a12aab45245197f9d99f034e38df09ed8662cbcf1fdd99",
+      "licenseSha256": "40bd3f35477284c021978816e9d3b8723ff2283fd7065fafaa5bb3004e41b237",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Song%20Myung:wght@400&display=swap",
+      "cssSha256": "4f458b403e27816d6975393c232fc9ad56332a32774139a2ff6c08bc0dea9eda",
+      "cssFontFaceCount": 89,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Diphylleia",
+      "slug": "diphylleia",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/diphylleia/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/diphylleia/OFL.txt",
+      "metadataSha256": "b5cca79d2e1958f0b37f08136be415aa977cfc33f75215b942c3f190dc2735d8",
+      "licenseSha256": "9279f4143833810493f74b4520c8b8fce2526d9df2da9564ffe897e065e1d461",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Diphylleia:wght@400&display=swap",
+      "cssSha256": "3762ad2a6ca1b028fab0556495488c64ea4124ce7f1ac56bc627b5f4f1411525",
+      "cssFontFaceCount": 92,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Black Han Sans",
+      "slug": "blackhansans",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/blackhansans/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/blackhansans/OFL.txt",
+      "metadataSha256": "be9f5a5233538e4cb590db06639cdc9875c4cf848ea231b20bd5d98f5eff084e",
+      "licenseSha256": "c324192c8b3a988bae45a9a7e4ac1258b684739003bda114e0523423440457c9",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Black%20Han%20Sans:wght@400&display=swap",
+      "cssSha256": "6fbc6078c04b1905368afeb56c9abd59ad6efeb98222b3b2e34322cb0b35ed11",
+      "cssFontFaceCount": 88,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Do Hyeon",
+      "slug": "dohyeon",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dohyeon/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dohyeon/OFL.txt",
+      "metadataSha256": "8ab86d61289efe626aab97f2b7b6241aa1609e626c2154a7ec6e21e8c0cc2421",
+      "licenseSha256": "de5ff32211a4340b01477af39ee339d639438955e409f79b666d4b9207f3c92c",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Do%20Hyeon:wght@400&display=swap",
+      "cssSha256": "3a5de70575bd242cb89ff3965da2ad6a15f09e2ca8dadacec40c19d7100f5155",
+      "cssFontFaceCount": 93,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Jua",
+      "slug": "jua",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/jua/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/jua/OFL.txt",
+      "metadataSha256": "c6b70d2a511edacbfb1f216140d2b46e7375118b60113c82af492f489bbf7d67",
+      "licenseSha256": "44a7c6e4c5572392ae122d3b1d8c6ba6fd640a7797e675384585d947f2773e3c",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Jua:wght@400&display=swap",
+      "cssSha256": "268a459de1fa8851d5e73b955e5d9e3c3e9397076bdfbf85738d1439e91dca2a",
+      "cssFontFaceCount": 87,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Gugi",
+      "slug": "gugi",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gugi/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gugi/OFL.txt",
+      "metadataSha256": "99a5aee379f63b6f290f0f884e3c7825d7d12a6018120f2333075eccd5f51bea",
+      "licenseSha256": "391ac3126dacc95b92a8f3408467879edb3245344bc411530a30d5aada52df92",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Gugi:wght@400&display=swap",
+      "cssSha256": "8c9b5d557414e2af350c26e799e94a9db296d32bc89991226e842b50ff31ac2c",
+      "cssFontFaceCount": 87,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Sunflower",
+      "slug": "sunflower",
+      "weight": 700,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "menu"
+      ],
+      "normalWeights": [
+        300,
+        500,
+        700
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/sunflower/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/sunflower/OFL.txt",
+      "metadataSha256": "5944c749518fbd05abd581f8f4097298219bf35df6ad95bb3a214c6ed204d75a",
+      "licenseSha256": "a9b40759b5821a0c2ad07cbd2c2a61dca4b3e222e6370a7d5bfb6b373bf4fb10",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Sunflower:wght@700&display=swap",
+      "cssSha256": "d95566777abdacd138ffc2ebe460bdd02ba7327a79910a71d522e7aa22bd4593",
+      "cssFontFaceCount": 88,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Dongle",
+      "slug": "dongle",
+      "weight": 700,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        300,
+        400,
+        700
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dongle/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dongle/OFL.txt",
+      "metadataSha256": "c56ab22bf46b3888112b49c3961ed08c25819a8853c54fb11166d7b7e961486b",
+      "licenseSha256": "f9e59049e824264bffd626d0901cfcaac9d5ba756988b904d3e3e0e233493607",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Dongle:wght@700&display=swap",
+      "cssSha256": "045ef3139b3ee8bed9ee69724aa0962d3298cbb29e1538829efd1cf81b2c17a5",
+      "cssFontFaceCount": 95,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Bagel Fat One",
+      "slug": "bagelfatone",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/bagelfatone/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/bagelfatone/OFL.txt",
+      "metadataSha256": "2bbf68a2d5fd6b67cc68a9ffec0a883ec4f538b2b2b8a70fcd999d63fd365d29",
+      "licenseSha256": "4f40ab196ccf674056fed8b0e6d4f918eea183a149be8a67bff1239413ebada9",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Bagel%20Fat%20One:wght@400&display=swap",
+      "cssSha256": "a9883a5eed09e19310e694fab6764b417f28088ab9ccdd79a56d7ea371db8a14",
+      "cssFontFaceCount": 92,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Gaegu",
+      "slug": "gaegu",
+      "weight": 700,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        300,
+        400,
+        700
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gaegu/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gaegu/OFL.txt",
+      "metadataSha256": "4e264dd655a6f7f8e27ec89f735f197cd43cd4aa4c73b03deaf48a0f20383e91",
+      "licenseSha256": "53a9ce47085d9fef613c7ecb3730dc80d25962510bbea231b89564f58240f251",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Gaegu:wght@700&display=swap",
+      "cssSha256": "722928d1273648cb65f4dea89f9278f1b5ec9597f3003552c070d371630fe452",
+      "cssFontFaceCount": 89,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Gamja Flower",
+      "slug": "gamjaflower",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gamjaflower/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gamjaflower/OFL.txt",
+      "metadataSha256": "73f9a93e6e8504cca6054f5a1737349728fce70aa7434add181b750fa79c616c",
+      "licenseSha256": "39de3de5f1873f89bca4af37823ab22e28e88d0d8f7fe2f07e82e9e6e9bf7b70",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Gamja%20Flower:wght@400&display=swap",
+      "cssSha256": "7715020ae77afae411fe5dd08a952c0b4affe66beba1f56b7f3947e9de1a26f7",
+      "cssFontFaceCount": 93,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Hi Melody",
+      "slug": "himelody",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/himelody/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/himelody/OFL.txt",
+      "metadataSha256": "89b65e369c5e83c85cae5d1b7ac4077fd4088c812eb89ffac062a93811efbad7",
+      "licenseSha256": "39de3de5f1873f89bca4af37823ab22e28e88d0d8f7fe2f07e82e9e6e9bf7b70",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Hi%20Melody:wght@400&display=swap",
+      "cssSha256": "603916d7036c7f623ec056a4ba251618b74e2fd427ad00775b35a88c57d4f3a6",
+      "cssFontFaceCount": 93,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Single Day",
+      "slug": "singleday",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/singleday/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/singleday/OFL.txt",
+      "metadataSha256": "c87ef0b6cae6bb00b73f9cb700bc3bb20dfaaa84e5e630b7228ea203c66122f1",
+      "licenseSha256": "397e83b05703a4240be51e2c3a2be1d0d7693d7a2d8b1ff367c26a2b9afc013e",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Single%20Day:wght@400&display=swap",
+      "cssSha256": "8c81ab76c88402b19caefbdd8338cca23b3e4f40ee83530c68db16d19ac006f2",
+      "cssFontFaceCount": 89,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Nanum Pen Script",
+      "slug": "nanumpenscript",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "menu",
+        "latin",
+        "korean"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumpenscript/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumpenscript/OFL.txt",
+      "metadataSha256": "d81985915cd7afe1baff832137e63d6334766acbabbe65cbc933d2c15077455d",
+      "licenseSha256": "eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Nanum%20Pen%20Script:wght@400&display=swap",
+      "cssSha256": "4db9f9b966d7a350e9db985d15411c803757a94097ce368fc8207562702232ec",
+      "cssFontFaceCount": 93,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Nanum Brush Script",
+      "slug": "nanumbrushscript",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumbrushscript/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumbrushscript/OFL.txt",
+      "metadataSha256": "9fc7c149b38d16733f08ffbb7aa4e4f037e6637c68f9e6f71b8c3a4b0db88c4d",
+      "licenseSha256": "eeacf16032901d0ed0456876ec77b8f0fda6b3fecec7d972f8543eb602e6c30f",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Nanum%20Brush%20Script:wght@400&display=swap",
+      "cssSha256": "db0660555eb7314e385632cf70b1b2640824bca946d448a33fd1e25a55f08464",
+      "cssFontFaceCount": 93,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Yeon Sung",
+      "slug": "yeonsung",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/yeonsung/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/yeonsung/OFL.txt",
+      "metadataSha256": "53a3fac3f20da3c6ab9bee788efe344d6efbfc223627c234b5e555dc1d5c2035",
+      "licenseSha256": "d7d8074c2dd46804990c184e25849947ab76c5ac7607fbf3966543455769bb73",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Yeon%20Sung:wght@400&display=swap",
+      "cssSha256": "3dae1e186d1ea17aa4e3ae4eb243f67cb029309653988aa6779440deadb6e920",
+      "cssFontFaceCount": 93,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Kirang Haerang",
+      "slug": "kiranghaerang",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/kiranghaerang/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/kiranghaerang/OFL.txt",
+      "metadataSha256": "e0f604e3b5f646bac75c771fb1d1a2a6d6fea6e5d339604ca5190fbb03f2eb60",
+      "licenseSha256": "7e896665d0863d2a17a671001dbe2528a5f9302f1dff9222af8b0834e9088d0c",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Kirang%20Haerang:wght@400&display=swap",
+      "cssSha256": "d68fb932797e95268764a99090dc4b48df9c38a09d4bab39d6ff1c2e94fd54ec",
+      "cssFontFaceCount": 93,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "East Sea Dokdo",
+      "slug": "eastseadokdo",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/eastseadokdo/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/eastseadokdo/OFL.txt",
+      "metadataSha256": "b9f5ea061ff243636a2ce8db2490ac3e1c9dd9cc3906748c7fa0b04129b2f65a",
+      "licenseSha256": "39de3de5f1873f89bca4af37823ab22e28e88d0d8f7fe2f07e82e9e6e9bf7b70",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=East%20Sea%20Dokdo:wght@400&display=swap",
+      "cssSha256": "bbe611ed581dc73a1946d670bc5efef3ca69144293c4cf65828f32f06b78f7eb",
+      "cssFontFaceCount": 92,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Black And White Picture",
+      "slug": "blackandwhitepicture",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/blackandwhitepicture/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/blackandwhitepicture/OFL.txt",
+      "metadataSha256": "59871adc2622a36f6a057919492f15b823c66f58841558b5ff2b105b169fab2a",
+      "licenseSha256": "a9b3e7e1cf5735dc49d802b88b1858a2a50307ba2a877ddf3f0b27d8b1d0abc5",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Black%20And%20White%20Picture:wght@400&display=swap",
+      "cssSha256": "fc54d259b03442988b2ad5b157edff81c11cf2f548584707fd6dabb1d6d162ca",
+      "cssFontFaceCount": 88,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "42dot Sans",
+      "slug": "42dotsans",
+      "weight": 700,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          300.0,
+          800.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/42dotsans/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/42dotsans/OFL.txt",
+      "metadataSha256": "f8f60f63f48f89ed7320e629b8573abbbb60431c51ad93690d941bd70c53ae53",
+      "licenseSha256": "1e25d65ef980a81f53feb4fcded827df7edb116f32ffd40b8f4e7250d4d8976b",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=42dot%20Sans:wght@700&display=swap",
+      "cssSha256": "180fa9c363dc7b26a1bd924c322c252e3c5659be0f22498171cd94ed88dd3cac",
+      "cssFontFaceCount": 93,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Cute Font",
+      "slug": "cutefont",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/cutefont/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/cutefont/OFL.txt",
+      "metadataSha256": "c5a09b0301b6791e5e1b8e80ec313c4bedd22546b97b419fd3a4935867da8e03",
+      "licenseSha256": "1a2debd5ad8e656b26bb3b29213caa8f7e557a2f31454b11ebb6c3e3b59aa5d4",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Cute%20Font:wght@400&display=swap",
+      "cssSha256": "d3e8a545222194432414019397c58e8d29aa5787f0a42b815c745449c07ae01a",
+      "cssFontFaceCount": 88,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Dokdo",
+      "slug": "dokdo",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dokdo/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dokdo/OFL.txt",
+      "metadataSha256": "3c59898b3630c9061656965cc745e130406ab8d08db12ee45c25b7c940f8255e",
+      "licenseSha256": "dcc832bd71ea62cbf97f06327a1b5442905b49ea446801421d71f7d1362db215",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Dokdo:wght@400&display=swap",
+      "cssSha256": "24b46151f047d21e9a5e267bc57c2ffc94f64d9f0bdb62f48d1d476699d4585a",
+      "cssFontFaceCount": 89,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Gasoek One",
+      "slug": "gasoekone",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gasoekone/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gasoekone/OFL.txt",
+      "metadataSha256": "ed7c88e957cf87ed99f4a36261f913f67e6e33898d1a3ef8c6e3b27638bee4cd",
+      "licenseSha256": "a13e353470a9abc44e015067bc353fd3ebc3ea010dea68a00d56f961ebe8f7a9",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Gasoek%20One:wght@400&display=swap",
+      "cssSha256": "00f3f13badc06fb9d60d57490ea689d1da65a9a128dcde1252c56955ac6c3e72",
+      "cssFontFaceCount": 92,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Moirai One",
+      "slug": "moiraione",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/moiraione/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/moiraione/OFL.txt",
+      "metadataSha256": "a637443cc88dcabb46720ed685819ca512b07eed749913b158517f36c636b0ff",
+      "licenseSha256": "0f2daa61cee069893d44ba24f3bdddbba18ac33b011fd8944e8682dbf347c61d",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Moirai%20One:wght@400&display=swap",
+      "cssSha256": "6753aab5638d314b0e6964044d1c6cc4e143b42dcf2b5d7c565f517119c85ad9",
+      "cssFontFaceCount": 92,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Poor Story",
+      "slug": "poorstory",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "latin",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/poorstory/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/poorstory/OFL.txt",
+      "metadataSha256": "f018abf900a708d54fc9580c351789801a31d9366cbaccfc8c9f6860054b48d7",
+      "licenseSha256": "39de3de5f1873f89bca4af37823ab22e28e88d0d8f7fe2f07e82e9e6e9bf7b70",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Poor%20Story:wght@400&display=swap",
+      "cssSha256": "d853a2aaf3ed700c336ddeab539f5b624aa5548ba229afdf2046ef40f8c87791",
+      "cssFontFaceCount": 92,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Stylish",
+      "slug": "stylish",
+      "weight": 400,
+      "language": "ko",
+      "subsets": [
+        "korean",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/stylish/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/stylish/OFL.txt",
+      "metadataSha256": "fb62cce7117f4807ed30311dbf6d5a52e0031a095ca27991f307e0140bec9c40",
+      "licenseSha256": "a9b3e7e1cf5735dc49d802b88b1858a2a50307ba2a877ddf3f0b27d8b1d0abc5",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Stylish:wght@400&display=swap",
+      "cssSha256": "40f11ab8f942464024c17ba2bc9fa49b8208e48a8278beb8c40bc3e1d0f5b21c",
+      "cssFontFaceCount": 88,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Inter",
+      "slug": "inter",
+      "weight": 800,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "greek-ext",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "opsz": [
+          14.0,
+          32.0
+        ],
+        "wght": [
+          100.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/inter/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/inter/OFL.txt",
+      "metadataSha256": "79e4721ef4f72251c6080a40dfd9efb6728b4df1fc690f0c70eb4b1b5303a5b0",
+      "licenseSha256": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Inter:wght@800&display=swap",
+      "cssSha256": "2dbecd755f8bd0e3b22d79e64cec3b14951a383df07653759d180c5554e35783",
+      "cssFontFaceCount": 7,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Montserrat",
+      "slug": "montserrat",
+      "weight": 800,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          100.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/montserrat/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/montserrat/OFL.txt",
+      "metadataSha256": "c48dbcaee013b8f6a33e7e6a79191adbf098a36839367d9750598594ff664e5f",
+      "licenseSha256": "8b7141c03fa4f8d44e6345d5d4931709290f0f67875e452e95ac1fd3a027802e",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Montserrat:wght@800&display=swap",
+      "cssSha256": "2614a3d5e6ff3d396553ddb38ef6704f1f8f5cc8210c4dfcdd0993faaf36a5fb",
+      "cssFontFaceCount": 5,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Poppins",
+      "slug": "poppins",
+      "weight": 700,
+      "language": "en",
+      "subsets": [
+        "devanagari",
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/poppins/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/poppins/OFL.txt",
+      "metadataSha256": "8121646e47a90cbcd2f4664e0df036944880035522b4f25ec51cb9465428b346",
+      "licenseSha256": "6be04893d770899a015649c7aa3b582f871b272f8747a92b78b17c3e5c8b2573",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Poppins:wght@700&display=swap",
+      "cssSha256": "34fabf175bb7e06a1224ce9a317619a4bad4171f4267924008aa2996f4becd87",
+      "cssFontFaceCount": 3,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Roboto",
+      "slug": "roboto",
+      "weight": 900,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "greek-ext",
+        "latin",
+        "latin-ext",
+        "math",
+        "menu",
+        "symbols",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wdth": [
+          75.0,
+          100.0
+        ],
+        "wght": [
+          100.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/roboto/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/roboto/OFL.txt",
+      "metadataSha256": "6fef19da54fb62d152f0c7b21710e6849950db7ecf852ea29511c593dad462f0",
+      "licenseSha256": "061402327a96aadb0bfb694a960ed289ecd38d383e396243831ab81feb109c41",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Roboto:wght@900&display=swap",
+      "cssSha256": "a39d6ea341657e5d2b24d5526126271867ec8f4fc77a685381574f900f4f1e65",
+      "cssFontFaceCount": 9,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Open Sans",
+      "slug": "opensans",
+      "weight": 800,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "greek-ext",
+        "hebrew",
+        "latin",
+        "latin-ext",
+        "math",
+        "menu",
+        "symbols",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wdth": [
+          75.0,
+          100.0
+        ],
+        "wght": [
+          300.0,
+          800.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/opensans/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/opensans/OFL.txt",
+      "metadataSha256": "50305d75a1b32bc4b5f59a037a71b0db45be509479519f7fded5b9cfa86217e8",
+      "licenseSha256": "fbbbcfef55318de350562559b671360de6d597112ecc5c73881b05092db89602",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Open%20Sans:wght@800&display=swap",
+      "cssSha256": "3a0148148c95b49d35a68c9ce3413c3f7edd336bb2731117df43a8712c4c35a0",
+      "cssFontFaceCount": 10,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Lato",
+      "slug": "lato",
+      "weight": 900,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "greek-ext",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/lato/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/lato/OFL.txt",
+      "metadataSha256": "b01e6d38725c22f991321800baf7a71af2dca3a381184eb80557c5308d5e34c5",
+      "licenseSha256": "74ba064d03f1f1c4a952da936c3eb71866c34404916734de3cae73b34357e59e",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Lato:wght@900&display=swap",
+      "cssSha256": "046c84738c46b54517f35831e2b0787b66e385f957afab99de3296a1438658f9",
+      "cssFontFaceCount": 2,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Oswald",
+      "slug": "oswald",
+      "weight": 700,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          200.0,
+          700.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/oswald/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/oswald/OFL.txt",
+      "metadataSha256": "3d5119d2e99a15e7c2973937d10a77e7aa1fc6a28fe173b02e059485aa596097",
+      "licenseSha256": "0fd731a904b729a4e02eaf5e8ebd06783edd9abe400e8882760160230675b652",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Oswald:wght@700&display=swap",
+      "cssSha256": "9f59559b5998255f34491c42d49ad6d4cb07b5f718c7d441924b576de47fbebd",
+      "cssFontFaceCount": 5,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Bebas Neue",
+      "slug": "bebasneue",
+      "weight": 400,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/bebasneue/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/bebasneue/OFL.txt",
+      "metadataSha256": "180da4f2ee7757e589eb5cb82f32c58b64c49f015e504ccab6b21401e7f5d43a",
+      "licenseSha256": "72082f6cb4d04be2ecf7cc7d9e1e7d73787f0af8a5a278a47cade70c16b78341",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Bebas%20Neue:wght@400&display=swap",
+      "cssSha256": "edbe5026216edb86999a49a0af43f0619af529368ac52aba5fbb5352809f1941",
+      "cssFontFaceCount": 2,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Anton",
+      "slug": "anton",
+      "weight": 400,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/anton/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/anton/OFL.txt",
+      "metadataSha256": "53e7d98a610693d7163915083540a2400f2663ec775753230d15861087c116e1",
+      "licenseSha256": "ee67e6ee22790b7929f1a3769ca2801d565c64b5a9096942c1adf5596de9c9e4",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Anton:wght@400&display=swap",
+      "cssSha256": "60f7a6eec04197f4e0cc89810815abe3d1712ef8fe9519ac4517bced2deb78e5",
+      "cssFontFaceCount": 3,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Archivo Black",
+      "slug": "archivoblack",
+      "weight": 400,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/archivoblack/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/archivoblack/OFL.txt",
+      "metadataSha256": "def0eb81b3f0d8739a25566ce484cac9e396ad46108a02a809dd8a04c26bfdc5",
+      "licenseSha256": "3173acd82f8c6159b5b1037b539fcbd4edff68e65c2ea8b9412b5a5ca97b08ff",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Archivo%20Black:wght@400&display=swap",
+      "cssSha256": "1dd05599139cbe08c0d38d033560be7dc858b5563485992a1e679492101bad92",
+      "cssFontFaceCount": 2,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Barlow Condensed",
+      "slug": "barlowcondensed",
+      "weight": 800,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        100,
+        200,
+        300,
+        400,
+        500,
+        600,
+        700,
+        800,
+        900
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/barlowcondensed/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/barlowcondensed/OFL.txt",
+      "metadataSha256": "fdb9c7b3c0c2c1069bc0193f0b72fb95efef36dc155c281e307da71b7dcfc558",
+      "licenseSha256": "186d750eb496a4c17a76385f82be6aea2ac1cf2de074a811d63786cf374ea73f",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Barlow%20Condensed:wght@800&display=swap",
+      "cssSha256": "ad673c8f0beeff39745529605e47e6bdea91ce3df3ae3cf387dbcdcfc9768a6c",
+      "cssFontFaceCount": 3,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "League Spartan",
+      "slug": "leaguespartan",
+      "weight": 800,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          100.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/leaguespartan/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/leaguespartan/OFL.txt",
+      "metadataSha256": "ad4295bf28684a54794868de936452391b82b6401983b009792b986913366044",
+      "licenseSha256": "41c9980cacc325ccd1afa6553bcae038cc6c74fa519aff60bacb99e3854292ce",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=League%20Spartan:wght@800&display=swap",
+      "cssSha256": "864fce4efc1761376ba78004aec86a955ae67a33fbc67d8dc9dfe619b2fc4705",
+      "cssFontFaceCount": 3,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Outfit",
+      "slug": "outfit",
+      "weight": 800,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          100.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/outfit/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/outfit/OFL.txt",
+      "metadataSha256": "4cd9d2154f15495ca97de561060d535eaba9f7007be4a87e40f3b58ea8111cf2",
+      "licenseSha256": "c676351bf8576b9aba743cd5eaa8c0e7ee0d51f805d720447b4df4ddb6a2e416",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Outfit:wght@800&display=swap",
+      "cssSha256": "d80569af7fc19b36e77c1b34e75c95a7b566bcc296730bd4427e3695c803b447",
+      "cssFontFaceCount": 2,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Manrope",
+      "slug": "manrope",
+      "weight": 800,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          200.0,
+          800.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/manrope/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/manrope/OFL.txt",
+      "metadataSha256": "368beda3aa55b0afe90edc142d67cf37e743258c76481d520172afbc148c6cca",
+      "licenseSha256": "e01b637272e0cbdfb240184dd98ea5cc671556d9894dae2668d92ab2c906787c",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Manrope:wght@800&display=swap",
+      "cssSha256": "09a47db88eca778aa1bffd12acf7ab263e0032ea7b8b289510ac7ce2a46c9553",
+      "cssFontFaceCount": 6,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Space Grotesk",
+      "slug": "spacegrotesk",
+      "weight": 700,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          300.0,
+          700.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/spacegrotesk/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/spacegrotesk/OFL.txt",
+      "metadataSha256": "3713adf5c1a21affdbede103b6bb23f551d4195771fa8bc1b91ce813bd1623ee",
+      "licenseSha256": "564ce565c371c5e5bbf286006565a7c9aa55a9f56e7ca58d56e05d649dd61a72",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Space%20Grotesk:wght@700&display=swap",
+      "cssSha256": "b6b1c83118670025ccb66d71ced8011c1207879a3501531caf51796b8776bae2",
+      "cssFontFaceCount": 3,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Playfair Display",
+      "slug": "playfairdisplay",
+      "weight": 800,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          400.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/playfairdisplay/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/playfairdisplay/OFL.txt",
+      "metadataSha256": "c9e6a996754f710fb7ff2ba36f8dd807244318d561d63d247a22199ea1a5e94a",
+      "licenseSha256": "566be814f8e96e93dfa16101331557eb6b5467e9e03f627c0910fe93ca12300e",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Playfair%20Display:wght@800&display=swap",
+      "cssSha256": "3c61faedb4348a3b2272144e70f6454bad040184ba8c9d00424c7aebcb4faec5",
+      "cssFontFaceCount": 4,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Lora",
+      "slug": "lora",
+      "weight": 700,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "latin",
+        "latin-ext",
+        "math",
+        "menu",
+        "symbols",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          400.0,
+          700.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/lora/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/lora/OFL.txt",
+      "metadataSha256": "6d9e38cc8926e903359a1c4c358fd2e71864f422aae9550d0d9a2ae0c62ddb8d",
+      "licenseSha256": "1d9a970809ac804b582a6ce7f0ebc4e7fefcbfd7ff6299cad35ee656a21be716",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Lora:wght@700&display=swap",
+      "cssSha256": "86ef5be7b4d8a4ba6c5d6efda75be44fbe468078a3dcf7dd523e16d9dc5b6d50",
+      "cssFontFaceCount": 7,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "DM Serif Display",
+      "slug": "dmserifdisplay",
+      "weight": 400,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dmserifdisplay/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dmserifdisplay/OFL.txt",
+      "metadataSha256": "3014380ddec81e774af2ab07a903542367573ce4e4d19ca8c01b928e970c1268",
+      "licenseSha256": "a3e5cdd67d4571dd0a24fcc968de0efde7ae97ef752daf0906e4767619dd7231",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=DM%20Serif%20Display:wght@400&display=swap",
+      "cssSha256": "f915f6f0922978095052cb2f3b987aeb494984e40f68f88e11a2bb335028771e",
+      "cssFontFaceCount": 2,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Libre Baskerville",
+      "slug": "librebaskerville",
+      "weight": 700,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          400.0,
+          700.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/librebaskerville/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/librebaskerville/OFL.txt",
+      "metadataSha256": "e29f1dcebfdf5918d29c4d373e1a6a0ae3bcb94538aa63362fdcc7bf095cc9c8",
+      "licenseSha256": "3624eddd4c8f8a908130a417ae7cd089c9da69899c4e0ca1a5217d0a6fae16fd",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Libre%20Baskerville:wght@700&display=swap",
+      "cssSha256": "8187ca45ed5931cdc5aa5ff5997fd153f629b6b2a87b0b5b69d05ee5c9db1431",
+      "cssFontFaceCount": 2,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Merriweather",
+      "slug": "merriweather",
+      "weight": 900,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "opsz": [
+          18.0,
+          144.0
+        ],
+        "wdth": [
+          87.0,
+          112.0
+        ],
+        "wght": [
+          300.0,
+          900.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/merriweather/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/merriweather/OFL.txt",
+      "metadataSha256": "50aa12ab94b75275eb90b6353dd3f9b187c101ce0a89071f5456c052490a4345",
+      "licenseSha256": "715bd349bfa6116f99e351e1548321dcfa25b91df65502d22ca8d624557697d2",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Merriweather:wght@900&display=swap",
+      "cssSha256": "5f57f6bb998f4465883dbe632bcefb0874d4a5f24786236aea7ce87536c11f6a",
+      "cssFontFaceCount": 5,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Abril Fatface",
+      "slug": "abrilfatface",
+      "weight": 400,
+      "language": "en",
+      "subsets": [
+        "menu",
+        "latin",
+        "latin-ext"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/abrilfatface/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/abrilfatface/OFL.txt",
+      "metadataSha256": "fb7807509c5cdceaa33c8748b4e387b14d37a70a24cdc7511101a6208fc86c19",
+      "licenseSha256": "aba8997e16b1e3888c6e855ba883c70d96bd4375bff8cb9c7ce0f097200f74b8",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Abril%20Fatface:wght@400&display=swap",
+      "cssSha256": "6a3f7e4db3495cf29e64e2bb57db667d22622738cbba24766b34caee30cf43d0",
+      "cssFontFaceCount": 2,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Lobster",
+      "slug": "lobster",
+      "weight": 400,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/lobster/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/lobster/OFL.txt",
+      "metadataSha256": "f4ec557428a890a5256da9da2aa484a18ac861b36096f09be123eaf6cf0af99e",
+      "licenseSha256": "88aece7d90f2bb7049719f11619a560af22af3451af141f12aa4f46bb157a99b",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Lobster:wght@400&display=swap",
+      "cssSha256": "4bd9f3ee84c9448aeee48c4d7a55fe87895255985f40bd94c74ce54101e484aa",
+      "cssFontFaceCount": 5,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Pacifico",
+      "slug": "pacifico",
+      "weight": 400,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/pacifico/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/pacifico/OFL.txt",
+      "metadataSha256": "397f1aaefe8d0e372e23f4959a95498373a7b03b1e373f0799b2896499286ae5",
+      "licenseSha256": "a47e5daeda73568969395c656823102678f2eefb0d7d7ecb47aac4cc17e42204",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Pacifico:wght@400&display=swap",
+      "cssSha256": "0ce6ebe3c2f92a9b09ac1838615eee49ba397dc6875ce39b28c069065a0f1977",
+      "cssFontFaceCount": 5,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Caveat",
+      "slug": "caveat",
+      "weight": 700,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          400.0,
+          700.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/caveat/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/caveat/OFL.txt",
+      "metadataSha256": "038342ea08d3f09e11b7f08cfd1e1d556b4f56a48269b0909395aa6fecd4c4f7",
+      "licenseSha256": "1f9d81d094273d82f3898a1ee8b598a717d050ecbf5ff7bede105b704880157b",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Caveat:wght@700&display=swap",
+      "cssSha256": "a674da3ad177d92129fb920f1f4b57a63c0704f183c27d77d90387e2fab6b0a9",
+      "cssFontFaceCount": 4,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "JetBrains Mono",
+      "slug": "jetbrainsmono",
+      "weight": 700,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {
+        "wght": [
+          100.0,
+          800.0
+        ]
+      },
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/jetbrainsmono/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/jetbrainsmono/OFL.txt",
+      "metadataSha256": "220f22dd4d2a3d9c77183fbbcb250779267725d90d9be673b403dc6bcfada0af",
+      "licenseSha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=JetBrains%20Mono:wght@700&display=swap",
+      "cssSha256": "ec3dc0d9e344585110dd4cb499cb9ba8e34e30d7e256bca2574be7cfb2781484",
+      "cssFontFaceCount": 6,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Bungee",
+      "slug": "bungee",
+      "weight": 400,
+      "language": "en",
+      "subsets": [
+        "latin",
+        "latin-ext",
+        "menu",
+        "vietnamese"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/bungee/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/bungee/OFL.txt",
+      "metadataSha256": "ec1a73318ff76d666c2e3cad5948b6799f4a9ed6d6af59e787f4e5372c291edf",
+      "licenseSha256": "d5787a50dde5be6c6daecab9ed459939b1bc37cff0d0e00257eaf1ec2cf4c16c",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Bungee:wght@400&display=swap",
+      "cssSha256": "7746bc42d9108044fe62b0f479899b0c8117b993b016499fcb230467db3a2187",
+      "cssFontFaceCount": 3,
+      "cssVerifiedAt": "2026-08-28"
+    },
+    {
+      "family": "Press Start 2P",
+      "slug": "pressstart2p",
+      "weight": 400,
+      "language": "en",
+      "subsets": [
+        "cyrillic",
+        "cyrillic-ext",
+        "greek",
+        "latin",
+        "latin-ext",
+        "menu"
+      ],
+      "normalWeights": [
+        400
+      ],
+      "axes": {},
+      "metadataUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/pressstart2p/METADATA.pb",
+      "licenseUrl": "https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/pressstart2p/OFL.txt",
+      "metadataSha256": "a8bd7db72790187aaabca90e81d8cd4549d9dce9058b5725d007f1a08bc2b12c",
+      "licenseSha256": "705960c3281a5765ecc0b59bd4ed7ca59eed165748076bc2fc3e8fdbfeb944b0",
+      "cssUrl": "https://fonts.googleapis.com/css2?family=Press%20Start%202P:wght@400&display=swap",
+      "cssSha256": "c432858c887f02896894b1e44507b18fa1d22287d3bac0c1da9883849c63a118",
+      "cssFontFaceCount": 5,
+      "cssVerifiedAt": "2026-08-28"
+    }
+  ],
+  "errors": []
+}

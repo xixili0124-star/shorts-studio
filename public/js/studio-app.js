@@ -1,7 +1,7 @@
 // UI는 편집 명령을 호출하고, 상태·자원·시간표·렌더러는 각각의 모듈이 담당합니다.
 import {project,FONTS,clipDuration,buildLayout,totalDuration,newOverlay,syncAnchoredItems,pinClipPositions,transitionPairs,timelineTracks,trackIdFor,trackLabel,trackKind,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES,MAX_TRACKS_PER_KIND} from './state.js';
 import {Player} from './player.js';
-import {loadFonts,measureVisual} from './render.js';
+import {loadFonts,measureVisual,renderCaptionPreview,renderGraphicPreview} from './render.js';
 import {detectEngine,exportVideo} from './exporter.js';
 import {parseSrt,buildSrt} from './srt.js';
 import {uid,clamp,download} from './util.js';
@@ -12,19 +12,24 @@ import {GRAPHICS,CAPTIONS,TRANSITIONS} from './presets.js';
 import {transformOf,alignVisual} from './visual-transform.js';
 import {safeAreaConfig} from './safe-areas.js';
 import {SOUND_EFFECTS,createSoundEffect} from './sound-effects.js';
-import {} from './font-catalog.js';
+import {ensureFont} from './font-catalog.js';
+import {refreshFontPickers,wireFontPickers} from './font-picker.js';
+import {typographyControls,textAppearanceControls,captionEffectControls} from './inspector-controls.js';
+import {evaluateItem,setValueAt,hasKeyframes,keyframeValue} from './keyframes.js';
 import {StudioTools} from './studio-tools.js';
 import {selectionKey,selectionRefs,resolveSelection,captureItemSettings,planPasteSettings,applySettingsPlan,applySharedProperty,deleteSelectedItems,planBatchSplit,applyBatchSplit,duplicateSelectedItems} from './batch-edits.js';
 import {MonitorEditor} from './monitor-editor.js';
+import {KeyframeEditor} from './keyframe-editor.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt=t=>`${Math.floor(t/60).toString().padStart(2,'0')}:${Math.floor(t%60).toString().padStart(2,'0')}`;
 let selection=null,view='media',mediaFilter='all',search='',isDemo=false,engine=null,exportCtrl=null,importing=false,captionScope='selected',activeTransition='dissolve',draftTimer,toastTimer,dirty=false;
 let smartTools;
-let monitor,selectedItems=[],settingsClipboard=null;
-let safeConfig=safeAreaConfig('shorts'),safeEnabled=false,soundPreview=null,soundPreviewUrl=null;
-const player=new Player($('preview'),{onTick:tick});
+let presetPreviewObserver,presetAnimation;
+let monitor,keyframeEditor,selectedItems=[],settingsClipboard=null;
+let safeConfig=safeAreaConfig('shorts'),safeEnabled=false,soundPreview=null,soundPreviewUrl=null,soundPreviewRequest=null;
+const player=new Player($('preview'),{onTick:tick,onAudioError:toast});
 const history=new History(()=>{selection=validSelection();refresh();scheduleDraft();});
 const timeline=new Timeline({
   select:(type,id)=>select(type,id,{timeline:false}),gap:gap=>select('gap',gap.id,{gap,timeline:false}),
@@ -32,7 +37,7 @@ const timeline=new Timeline({
   addTrack:id=>addTrackByRole(null,id),copySettings:ref=>copySettings(ref),pasteSettings:ref=>pasteSettings(ref),canPasteSettings:()=>!!settingsClipboard,
   removeTrack:id=>{try{edit('빈 트랙 삭제',()=>removeTimelineTrack(id));}catch(error){toast(error.message);}},
   sound:id=>SOUND_EFFECTS.find(s=>s.id===id),graphic:id=>GRAPHICS.find(g=>g.id===id),pause:()=>player.pause(),seek:t=>player.seek(t,{allowBeyond:true}),preview:()=>player.invalidate(),
-  busy:()=>!!(exportCtrl||importing||smartTools?.busy||monitor?.dragging),error:message=>toast(message),
+  busy:()=>!!(exportCtrl||importing||smartTools?.busy||monitor?.dragging||keyframeEditor?.dragging),error:message=>toast(message),
   commit:(before,label)=>commit(before,label),transition:(id,rightId)=>selectTransition(id,rightId),
   drop:async(kind,id,t,lane,plan)=>{
     if(kind==='asset')return placeAsset(id,t,lane,plan);
@@ -45,17 +50,32 @@ const timeline=new Timeline({
 });
 
 smartTools=new StudioTools({player,timeline,selection:()=>selection,view:()=>view,toast,renderLibrary,refresh,commit,select,saveDraft:()=>{dirty=true;scheduleDraft();}});
-monitor=new MonitorEditor({player,selection:()=>selection,selections:()=>editingSelection(),busy:()=>!!(exportCtrl||importing||smartTools.busy||timeline.dragging),
+monitor=new MonitorEditor({player,selection:()=>selection,selections:()=>editingSelection(),busy:()=>!!(exportCtrl||importing||smartTools.busy||timeline.dragging||keyframeEditor?.dragging),
   align:axis=>alignSelection(axis),commit,refresh,gestureStart:()=>clearTimeout(draftTimer),gestureEnd:()=>{if(dirty)scheduleDraft();}});
+keyframeEditor=new KeyframeEditor({host:$('inspectorContent'),range:()=>selection&&itemRange(selection.type,selection.id),
+  time:()=>player.time,fps:()=>project.fps,seek:time=>player.seek(time,{allowBeyond:true}),pause:()=>player.pause(),
+  edit,render:renderInspector,error:toast,busy:()=>!!(exportCtrl||importing||smartTools.busy||monitor?.dragging||timeline.dragging)});
 
 onAssetReady(()=>player.invalidate());
 
 function toast(message){clearTimeout(toastTimer);$('toast').textContent=message;$('toast').hidden=false;toastTimer=setTimeout(()=>$('toast').hidden=true,4200);}
 function tick(t){
-  const f=Math.floor((t%1)*project.fps);
-  $('timecode').innerHTML=`00:${fmt(t)}<span>:${String(f).padStart(2,'0')}</span>`;
+  const frame=Math.max(0,Math.round(t*project.fps)),f=frame%project.fps;
+  $('timecode').innerHTML=`00:${fmt(Math.floor(frame/project.fps))}<span>:${String(f).padStart(2,'0')}</span>`;
   $('play').classList.toggle('is-playing',player.playing);$('play').setAttribute('aria-label',player.playing?'일시정지':'재생');
   timeline?.tick(t);updateToolbar();
+  keyframeEditor?.update();syncAnimatedInspector();
+}
+function syncAnimatedInspector(){
+  const range=selection&&itemRange(selection.type,selection.id);if(!range)return;
+  const time=clamp(player.time-range.start,0,range.duration);
+  for(const input of $('inspectorContent').querySelectorAll('[data-prop]')){
+    const prop=input.dataset.prop,channel=prop==='volume'?'volume':prop.startsWith('transform.')?prop.slice(10):null;
+    if(!channel||!hasKeyframes(range.item,channel)||document.activeElement===input)continue;
+    const value=keyframeValue(range.item,channel,time),percent=channel!=='rotation';
+    input.value=value*(percent?100:1);
+    const output=input.parentElement.querySelector('output');if(output)output.textContent=Number(input.value).toFixed(0)+(percent?'%':'°');
+  }
 }
 const collection=type=>timelineCollection(type);
 function currentTransition(target=selection){
@@ -113,7 +133,7 @@ function refresh(){
   player.seek(player.time,{allowBeyond:true});
 }
 function commit(before,label){syncAnchoredItems();if(history.push(before,label)){dirty=true;isDemo=isDemo&&assets.size<=4;scheduleDraft();}refresh();}
-function edit(label,mutate){if(exportCtrl||importing||smartTools?.busy||monitor?.dragging)return false;player.pause();const before=captureDocument();try{mutate();commit(before,label);return true;}catch(error){restoreDocument(before);refresh();toast(error.message);return false;}}
+function edit(label,mutate){if(exportCtrl||importing||smartTools?.busy||monitor?.dragging||keyframeEditor?.dragging)return false;player.pause();const before=captureDocument();try{mutate();commit(before,label);return true;}catch(error){restoreDocument(before);refresh();toast(error.message);return false;}}
 function targetTrack(role,explicitId,create=false){
   const kind=TRACK_ROLES.find(entry=>entry.id===role)?.kind;
   const existing=timelineTracks().find(track=>track.id===explicitId&&track.kind===kind)?.id||timeline.preferredTrack(role);
@@ -145,7 +165,7 @@ function alignSelection(axis){
   edit(axis==='x'?'가로 중앙 정렬':'세로 중앙 정렬',()=>{
     const canvas=$('preview');
     for(const entry of entries){const time=clamp(player.time,entry.start,Math.max(entry.start,entry.end-1/project.fps));
-      alignVisual(entry.item,measureVisual(player.ctx,entry.type,entry.item,canvas.width,canvas.height,time),canvas.width,canvas.height,axis);
+      alignVisual(entry.item,measureVisual(player.ctx,entry.type,entry.item,canvas.width,canvas.height,time),canvas.width,canvas.height,axis,time-entry.start,{duration:entry.duration});
     }
   });
 }
@@ -161,17 +181,20 @@ function setView(next){
 }
 
 function renderLibrary(){
+  presetPreviewObserver?.disconnect();cancelAnimationFrame(presetAnimation);
   const titles={media:'소재 라이브러리',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'AI 음성 스튜디오',sounds:'효과음 라이브러리',mosaic:'트래킹 모자이크',silence:'무음 구간 자동 컷'};
-  $('libraryTitle').textContent=titles[view];$('libraryCount').textContent=view==='media'?String(assets.size).padStart(2,'0'):view==='graphics'?String(GRAPHICS.length):view==='captions'?String(CAPTIONS.length):view==='transitions'?'04':view==='sounds'?String(SOUND_EFFECTS.length):'LOCAL';
+  $('libraryTitle').textContent=titles[view];$('libraryCount').textContent=view==='media'?String(assets.size).padStart(2,'0'):view==='graphics'?String(GRAPHICS.length):view==='captions'?String(CAPTIONS.length):view==='transitions'?String(TRANSITIONS.length):view==='sounds'?String(SOUND_EFFECTS.length):'LOCAL';
   const host=$('libraryContent');
   if(['voice','mosaic','silence'].includes(view)){smartTools.render(view,host);return;}
   if(view==='media'){
     host.innerHTML=`<button class="import-zone" data-action="import"><span class="import-plus">＋</span><strong>파일 가져오기</strong><span>영상 · 이미지 · 오디오를 한곳에</span><small>또는 여기에 파일을 놓아주세요</small></button><div class="filter-tabs" aria-label="소재 종류">${[['all','전체'],['video','영상'],['image','이미지'],['audio','오디오']].map(([key,label])=>`<button data-filter="${key}" class="${mediaFilter===key?'active':''}">${label}</button>`).join('')}</div><label class="search-box"><span>⌕</span><input id="mediaSearch" type="search" placeholder="소재 검색" aria-label="소재 검색" value="${esc(search)}"><kbd>/</kbd></label><div id="assetGrid" class="asset-grid"></div><p class="library-hint">더블클릭·＋는 재생 막대 위치에 추가합니다.<br>끌어 넣을 때 초록색 범위가 실제 배치 위치예요.<br>이미지 기본 3초 · 영상은 원본 길이</p>`;
     renderAssets();
   }else if(view==='graphics'){
-    host.innerHTML=`<p class="preset-intro">움직임 하나로 장면에 포인트를.<br>클릭하면 그래픽 트랙에 추가돼요.</p><div class="preset-grid">${GRAPHICS.map(g=>`<button class="preset-card" draggable="true" data-preset="g:${g.id}" aria-label="${g.name} 추가"><div class="preset-art ${g.art}"><span>${g.label}</span><small>MOTION GRAPHIC</small></div><strong>${g.name}</strong><small>${g.hint}</small></button>`).join('')}</div><p class="library-hint">문구·색상·크기·표시 시간은<br>오른쪽 속성에서 자유롭게 바꿔보세요.</p>`;
+    host.innerHTML='<p class="preset-intro">직접 구성한 모션 타이포그래피.<br>클릭하거나 타임라인으로 끌어 넣으세요.</p><div class="preset-grid">'+GRAPHICS.map(g=>'<button class="preset-card" draggable="true" data-preset="g:'+g.id+'" aria-label="'+esc(g.name)+' 추가"><div class="preset-art real-preview"><canvas data-graphic-preview="'+g.id+'" width="420" height="300" aria-label="'+esc(g.name)+' 실제 그래픽"></canvas><span class="preview-loading">폰트 준비 중</span></div><strong>'+esc(g.name)+'</strong><small>'+esc(g.hint)+'</small></button>').join('')+'</div><p class="library-hint">문구·색상·크기는 오른쪽 속성에서,<br>길이와 배치는 타임라인에서 조절하세요.</p>';
+    preparePresetPreviews(host);
   }else if(view==='captions'){
-    host.innerHTML=`${smartTools.captionControls()}<div class="segmented"><button data-scope="selected" class="${captionScope==='selected'?'active':''}">선택 자막에 적용</button><button data-scope="all" class="${captionScope==='all'?'active':''}">전체 자막에 적용</button></div><div class="section-label">자막 스타일 <span>${CAPTIONS.length} STYLES</span></div><div class="preset-grid">${CAPTIONS.map(c=>`<button class="preset-card" draggable="true" data-preset="c:${c.id}" aria-label="${c.name} 자막 스타일"><div class="preset-art caption-preview ${c.art}"><span>${c.label}</span></div><strong>${c.name}</strong></button>`).join('')}</div><div class="section-label">자막 편집 <span>${project.captions.length}개</span></div><button class="button primary wide" data-action="add-caption">＋ 현재 위치에 자막</button><div class="field-grid"><button class="button subtle" data-action="import-srt">SRT 가져오기</button><button class="button subtle" data-action="export-srt">SRT 저장</button></div><div id="captionList" class="caption-list"></div>`;
+    host.innerHTML=smartTools.captionControls()+'<div class="segmented"><button data-scope="selected" class="'+(captionScope==='selected'?'active':'')+'">선택 자막에 적용</button><button data-scope="all" class="'+(captionScope==='all'?'active':'')+'">전체 자막에 적용</button></div><div class="section-label">자막 스타일 <span>'+CAPTIONS.length+' STYLES</span></div><div class="preset-grid">'+CAPTIONS.map(c=>'<button class="preset-card" draggable="true" data-preset="c:'+c.id+'" aria-label="'+esc(c.name)+' 자막 스타일"><div class="preset-art real-preview"><canvas data-caption-preview="'+c.id+'" width="420" height="300" aria-label="'+esc(c.name)+' 실제 스타일"></canvas><span class="preview-loading">폰트 준비 중</span></div><strong>'+esc(c.name)+'</strong></button>').join('')+'</div><div class="section-label">자막 편집 <span>'+project.captions.length+'개</span></div><button class="button primary wide" data-action="add-caption">＋ 현재 위치에 자막</button><div class="field-grid"><button class="button subtle" data-action="import-srt">SRT 가져오기</button><button class="button subtle" data-action="export-srt">SRT 저장</button></div><div id="captionList" class="caption-list"></div>';
+    preparePresetPreviews(host);
     renderCaptionList();
   }else if(view==='transitions'){
     const pair=currentTransition(),effect=pair?.type||activeTransition;
@@ -180,10 +203,38 @@ function renderLibrary(){
 
   }else if(view==='sounds'){
     host.innerHTML='<p class="preset-intro">컷 사이에 리듬을 더하세요.<br>미리 듣고, ＋ 또는 드래그로 넣을 수 있어요.</p>'+
-      ['전환','클릭','알림','강조'].map(category=>'<div class="section-label">'+category+'</div><div class="sound-list">'+SOUND_EFFECTS.filter(s=>s.category===category).map(s=>'<article class="sound-card" draggable="true" data-preset="sfx:'+s.id+'"><button class="sound-play" data-preview-sound="'+s.id+'" aria-label="'+s.name+' 미리 듣기"><span class="play-symbol" aria-hidden="true"></span></button><div><strong>'+s.name+'</strong><small>'+s.duration.toFixed(2)+'초 · 합성 효과음</small></div><button class="sound-add" data-add-sound="'+s.id+'" aria-label="'+s.name+' 추가">＋</button></article>').join('')+'</div>').join('')+
-      '<p class="library-hint">이 실험판이 직접 합성한 20종입니다.<br>외부 음원 샘플 없이 생성하며 영상에 사용할 수 있어요.</p><div class="external-sounds"><strong>더 많은 소리를 찾고 있다면</strong><a class="button secondary wide" href="https://www.myinstants.com/ko/instant/app/" target="_blank" rel="noopener noreferrer">Myinstants에서 찾기 ↗</a><p class="inspector-note">외부 사이트입니다. 자동 다운로드·음원 수집은 하지 않습니다. 다운로드 가능 여부와 상업적 재사용 권한은 다르므로, 권리를 확인한 파일만 소재함에 가져오세요.</p></div>';
+      ['전환','클릭','알림','강조'].map(category=>'<div class="section-label">'+category+'</div><div class="sound-list">'+SOUND_EFFECTS.filter(s=>s.category===category).map(s=>'<article class="sound-card" draggable="true" data-preset="sfx:'+s.id+'"><button class="sound-play" data-preview-sound="'+s.id+'" aria-label="'+s.name+' 미리 듣기"><span class="play-symbol" aria-hidden="true"></span></button><div><strong>'+s.name+'</strong><small>'+s.duration.toFixed(2)+'초 · CC0 효과음</small></div><button class="sound-add" data-add-sound="'+s.id+'" aria-label="'+s.name+' 추가">＋</button></article>').join('')+'</div>').join('')+
+      '<p class="library-hint">재배포 가능한 CC0 효과음을 제공합니다.<br>출처와 사용 조건은 포함된 크레딧에서 확인할 수 있어요.</p><div class="external-sounds"><strong>더 많은 소리를 찾고 있다면</strong><a class="button secondary wide" href="https://www.myinstants.com/ko/instant/app/" target="_blank" rel="noopener noreferrer">Myinstants에서 찾기 ↗</a><p class="inspector-note">외부 사이트입니다. 자동 다운로드·음원 수집은 하지 않습니다. 다운로드 가능 여부와 상업적 재사용 권한은 다르므로, 권리를 확인한 파일만 소재함에 가져오세요.</p></div>';
 
   }
+}
+
+function preparePresetPreviews(host){
+  const draw=async canvas=>{
+    const graphic=!!canvas.dataset.graphicPreview;
+    const preset=(graphic?GRAPHICS:CAPTIONS).find(item=>item.id===(canvas.dataset.graphicPreview||canvas.dataset.captionPreview));
+    if(!preset)return;const status=canvas.parentElement.querySelector('.preview-loading');
+    const paint=time=>graphic?renderGraphicPreview(canvas,preset,time):renderCaptionPreview(canvas,preset);
+    try{
+      await ensureFont(graphic?preset.font:preset.style.font,preset.label+' '+(preset.subtitle||''));
+      if(!canvas.isConnected)return;paint();status.hidden=true;
+      if(graphic&&!matchMedia('(prefers-reduced-motion: reduce)').matches){
+        const card=canvas.closest('.preset-card');
+        card.addEventListener('pointerenter',()=>{
+          cancelAnimationFrame(presetAnimation);const start=performance.now();
+          const animate=now=>{if(!canvas.isConnected)return;paint(((now-start)/1000)%Math.max(1,preset.duration||3));presetAnimation=requestAnimationFrame(animate);};
+          presetAnimation=requestAnimationFrame(animate);
+        });
+        card.addEventListener('pointerleave',()=>{cancelAnimationFrame(presetAnimation);if(canvas.isConnected)paint();});
+      }
+    }catch(error){if(canvas.isConnected){status.textContent='폰트 연결 실패';canvas.title=error.message;}}
+  };
+  const canvases=[...host.querySelectorAll('[data-caption-preview],[data-graphic-preview]')];
+  if(typeof IntersectionObserver!=='function'){canvases.forEach(draw);return;}
+  presetPreviewObserver=new IntersectionObserver(entries=>{
+    for(const entry of entries)if(entry.isIntersecting){presetPreviewObserver.unobserve(entry.target);draw(entry.target);}
+  },{root:host,rootMargin:'80px'});
+  canvases.forEach(canvas=>presetPreviewObserver.observe(canvas));
 }
 
 function renderAssets(){
@@ -204,14 +255,14 @@ const section=(title,body,sub='')=>`<section class="property-section"><h3>${titl
 function settingsControls(){
   return '<div class="settings-actions"><button class="button subtle" data-action="copy-settings" title="설정 복사 · Ctrl+Alt+C">설정 복사</button><button class="button subtle" data-action="paste-settings" title="설정 붙여넣기 · Ctrl+Alt+V" '+(settingsClipboard?'':'disabled')+'>설정 붙여넣기</button></div>';
 }
-function visualControls(item){let html='';
+function visualControls(item,type=selection?.type){let html='';
     const tr=transformOf(item),crop=item.crop||{};
     html+=section('변형',range('가로 이동','transform.offsetX',tr.offsetX*100,-150,150,1,'%')+range('세로 이동','transform.offsetY',tr.offsetY*100,-150,150,1,'%')+
       '<div class="field-grid"><button class="button subtle" data-action="align-x">가로 중앙</button><button class="button subtle" data-action="align-y">세로 중앙</button></div>'+
       range('가로 크기','transform.scaleX',tr.scaleX*100,5,400,1,'%')+range('세로 크기','transform.scaleY',tr.scaleY*100,5,400,1,'%')+
       range('회전','transform.rotation',tr.rotation,-180,180,1,'°')+range('불투명도','transform.opacity',tr.opacity*100,0,100,1,'%')+
       '<div class="field-grid"><label class="check-label"><input type="checkbox" data-prop="transform.flipX" '+(tr.flipX?'checked':'')+'>좌우 반전</label><label class="check-label"><input type="checkbox" data-prop="transform.flipY" '+(tr.flipY?'checked':'')+'>상하 반전</label></div><button class="button subtle wide" data-action="reset-transform">변형 초기화</button><p class="inspector-note">모니터의 변형 모드에서 직접 이동·확대·회전합니다. 모서리는 비율 유지, Shift는 자유 변형, Alt는 중앙 스냅을 해제합니다.</p>','TRANSFORM');
-    html+=section('화면 자르기',range('왼쪽','crop.left',(crop.left||0)*100,0,95,1,'%')+range('오른쪽','crop.right',(crop.right||0)*100,0,95,1,'%')+
+    if(type==='clip')html+=section('화면 자르기',range('왼쪽','crop.left',(crop.left||0)*100,0,95,1,'%')+range('오른쪽','crop.right',(crop.right||0)*100,0,95,1,'%')+
       range('위쪽','crop.top',(crop.top||0)*100,0,95,1,'%')+range('아래쪽','crop.bottom',(crop.bottom||0)*100,0,95,1,'%')+
       '<button class="button subtle wide" data-action="reset-crop">자르기 초기화</button><p class="inspector-note">모니터 위 자르기 모드에서 테두리를 끌어 숨길 범위를 바꿉니다. 원본 파일과 재생 길이는 유지합니다.</p>','CROP');
 
@@ -220,7 +271,7 @@ function visualControls(item){let html='';
 function sharedValue(entry,prop){
   const {type,item}=entry;
   if(prop.startsWith('transform.'))return type!=='audio'?transformOf(item)[prop.slice(10)]:undefined;
-  if(prop.startsWith('crop.'))return type!=='audio'?(item.crop?.[prop.slice(5)]||0):undefined;
+  if(prop.startsWith('crop.'))return type==='clip'?(item.crop?.[prop.slice(5)]||0):undefined;
   if(prop.startsWith('textStyle.'))return type==='caption'?({...project.captionStyle,...item.style})[prop.slice(10)]:type==='graphic'?item[prop.slice(10)]:undefined;
   if(prop.startsWith('style.'))return type==='caption'?({...project.captionStyle,...item.style})[prop.slice(6)]:undefined;
   if(['volume','muted'].includes(prop))return type==='audio'||(type==='clip'&&item.type==='video')?(prop==='muted'?!!item.muted:item.volume??1):undefined;
@@ -234,18 +285,18 @@ function renderBatchInspector(host,entries){
   const fading=entries.filter(entry=>['clip','audio'].includes(entry.type));
   $('selectionBadge').textContent=entries.length+'개 선택';
   let html='<div class="selected-item"><div class="item-icon">▧</div><div><strong>'+entries.length+'개 클립 함께 편집</strong><small>'+new Set(entries.map(entry=>entry.trackId)).size+'개 트랙 · Shift 클릭으로 추가 선택</small></div></div>'+settingsControls()+'<p class="inspector-note batch-note">변경한 설정만 호환되는 선택 클립에 함께 적용합니다. 문구·소재·재생 위치·길이는 유지해요. 서로 다른 값은 “여러 값”으로 표시합니다.</p>';
-  if(visual.length)html+=section('화면 설정 대상','<p class="note">영상·이미지·자막·그래픽 '+visual.length+'개</p>')+visualControls(visual[0].item);
+  if(visual.length)html+=section('화면 설정 대상','<p class="note">영상·이미지·자막·그래픽 '+visual.length+'개</p>')+visualControls(evaluateItem(visual[0].item,Math.max(0,player.time-visual[0].start)),media.length?'clip':'graphic');
   if(texts.length){
     const style=texts[0].type==='caption'?{...project.captionStyle,...texts[0].item.style}:texts[0].item;
-    html+=section('글자 스타일',selectField('폰트','textStyle.font',style.font,FONTS.map(font=>[font.css,font.group+' · '+font.label]))+range('크기','textStyle.size',style.size,24,160,1)+'<label class="property-row"><span>글자색</span><input type="color" data-prop="textStyle.color" value="'+esc(style.color==='#fff'?'#ffffff':style.color)+'" aria-label="글자색"></label>',texts.length+'개');
+    html+=typographyControls(style,'textStyle.')+textAppearanceControls(style,'textStyle.');
   }
   if(media.length)html+=section('원본 맞춤',selectField('맞춤','fit',media[0].item.fit,[['cover','꽉 채우기'],['contain','전체 보이기']])+selectField('여백','bg',media[0].item.bg,[['transparent','투명'],['blur','흐린 원본'],['black','검정'],['white','흰색']]),media.length+'개');
   const images=media.filter(entry=>entry.item.type==='image');
   if(images.length)html+=section('이미지 모션',selectField('움직임','ken',images[0].item.ken,[['none','없음'],['in','천천히 확대'],['out','천천히 축소'],['left','왼쪽으로 팬'],['right','오른쪽으로 팬']]),images.length+'개');
-  if(sound.length)html+=section('오디오',range('볼륨','volume',(sound[0].item.volume??1)*100,0,100,1,'%')+'<label class="property-row"><input type="checkbox" data-prop="muted" '+(sound[0].item.muted?'checked':'')+'>음소거</label>',sound.length+'개');
+  if(sound.length)html+=section('오디오',range('볼륨','volume',(sound[0].item.volume??1)*100,0,300,1,'%')+'<label class="property-row"><input type="checkbox" data-prop="muted" '+(sound[0].item.muted?'checked':'')+'>음소거</label>',sound.length+'개');
   if(fading.length)html+=section('클립 페이드',number('인','fadeIn',fading[0].item.fadeIn,0,10)+number('아웃','fadeOut',fading[0].item.fadeOut,0,10),fading.length+'개');
   html+='<div class="field-grid"><button class="button subtle delete-action" data-action="delete">선택 삭제</button><button class="button subtle delete-action" data-action="ripple-delete">당겨 삭제</button></div>';
-  host.innerHTML=html;
+  host.innerHTML=html;refreshFontPickers(host);
   for(const input of host.querySelectorAll('[data-prop]')){
     const values=entries.map(entry=>sharedValue(entry,input.dataset.prop)).filter(value=>value!==undefined);
     if(new Set(values.map(value=>JSON.stringify(value))).size<2)continue;
@@ -278,39 +329,43 @@ function renderInspector(){
   $('selectionBadge').textContent={clip:'클립',graphic:'그래픽',caption:'자막',audio:'오디오'}[type];
   const name=item.name||item.text;
   let html=`<div class="selected-item">${item.thumb?`<img src="${item.thumb}" alt="">`:`<div class="item-icon">${type==='audio'?'♫':type==='caption'?'T':'✧'}</div>`}<div><strong>${esc(name)}</strong><small>${type==='clip'?`${item.type==='image'?'이미지':'영상'} 클립 · ${clipDuration(item).toFixed(2)}초`:type==='audio'?(item.aiGenerated?'AI 생성 음성':'독립 오디오 클립'):`${item.start.toFixed(2)} → ${item.end.toFixed(2)}초`}</small></div></div>`;
-  html+=settingsControls();
-  html+=section('트랙',selectField('배치 트랙','trackId',trackIdFor(type,item),timelineTracks().filter(t=>t.kind===trackKind(type)).map(t=>[t.id,trackLabel(t.id)]))+'<p class="inspector-note">트랙 사이로 직접 끌어 옮길 수도 있어요. 다른 트랙은 따라오지 않습니다.</p>');
+  html+=settingsControls()+keyframeEditor.render(itemRange(type,item.id));
+  if(type!=='caption')html+=section('트랙',selectField('배치 트랙','trackId',trackIdFor(type,item),timelineTracks().filter(t=>t.kind===trackKind(type)).map(t=>[t.id,trackLabel(t.id)]))+'<p class="inspector-note">트랙 사이로 직접 끌어 옮길 수도 있어요. 다른 트랙은 따라오지 않습니다.</p>');
   html+=smartTools.inspector(type,item);
   if(type==='clip'){
     html+=section('원본 맞춤',selectField('맞춤','fit',item.fit,[['cover','꽉 채우기'],['contain','전체 보이기']])+selectField('여백','bg',item.bg,[['transparent','투명 · 아래 트랙 보이기'],['blur','흐린 원본'],['black','검정'],['white','흰색']]));
     const clipRange=itemRange('clip',item.id);
-    html+=section('타임라인 위치',number('위치','start',clipRange.start)+'<p class="inspector-note">빈 구간에 놓을 수 있습니다. 다른 영상 위에 놓으면 경계에 삽입하고 뒤 영상을 밀어냅니다.</p>');
+    html+=section('타임라인 위치',number('위치','start',clipRange.start)+'<p class="inspector-note">빈 구간에 놓을 수 있습니다. 다른 영상 위에 놓으면 두 클립의 자리를 교환합니다. 다른 클립은 이동하지 않습니다.</p>');
     html+=section('클립 구간',item.type==='image'?number('길이','imgDuration',item.imgDuration,1/project.fps,600,1/project.fps):number('원본 시작','trimStart',item.trimStart,0,item.trimEnd-1/project.fps)+number('원본 끝','trimEnd',item.trimEnd,item.trimStart+1/project.fps,item.srcDuration),item.type==='video'?'원본 기준':'DURATION');
     if(item.type==='image')html+=section('이미지 모션',selectField('움직임','ken',item.ken,[['none','없음'],['in','천천히 확대'],['out','천천히 축소'],['left','왼쪽으로 팬'],['right','오른쪽으로 팬']]));
-    if(item.type==='video')html+=section('원본 오디오',range('볼륨','volume',(item.volume??1)*100,0,100,1,'%')+`<label class="property-row"><input type="checkbox" data-prop="muted" ${item.muted?'checked':''}>음소거</label>${item.decoderOnly?'<p class="note warning">디코더 모드: 미리보기 소리는 지원하지 않으며 내보내기에만 포함됩니다.</p>':''}`);
+    if(item.type==='video')html+=section('원본 오디오',range('볼륨','volume',(item.volume??1)*100,0,300,1,'%')+`<label class="property-row"><input type="checkbox" data-prop="muted" ${item.muted?'checked':''}>음소거</label>${item.decoderOnly?'<p class="note warning">디코더 모드: 미리보기 소리는 지원하지 않으며 내보내기에만 포함됩니다.</p>':''}`);
     const pair=currentTransition({id:item.id});
     html+=section('다음 장면과 전환',pair?selectField('효과','transitionType',pair.type,TRANSITIONS.map(t=>[t.id,t.name]))+number('길이','transitionDuration',pair.duration||.5,0,2,.1)+'<p class="inspector-note">두 클립 사이의 아이콘을 누르면 전환을 선택할 수 있어요.</p>':'<p class="inspector-note">다음 영상과 맞닿아야 전환을 넣을 수 있어요.</p>');
 
     html+=section('클립 페이드',number('인','fadeIn',item.fadeIn,0,2)+number('아웃','fadeOut',item.fadeOut,0,2));
   }else if(type==='audio'){
     html+=section('트랙 위치',selectField('용도','role',item.role||item.lane,[['music','배경음악'],['voice','말소리 · 자막 인식 대상'],['effect','효과음']])+number('위치','start',item.start)+number('시작','trimStart',item.trimStart,0,item.trimEnd-.03)+number('끝','trimEnd',item.trimEnd,item.trimStart+.03,assets.get(item.assetId)?.duration||86400));
-    html+=section('오디오',range('볼륨','volume',(item.volume??1)*100,0,100,1,'%')+number('페이드 인','fadeIn',item.fadeIn,0,10)+number('페이드 아웃','fadeOut',item.fadeOut,0,10)+`<label class="property-row"><input type="checkbox" data-prop="muted" ${item.muted?'checked':''}>음소거</label><p class="inspector-note">영상 뒤에 있는 오디오도 끝까지 내보냅니다. 영상이 없는 구간은 검은 화면입니다.${item.aiGenerated?' 게시할 때 AI 생성 음성임을 알려주세요.':''}</p>`);
+    html+=section('오디오',range('볼륨','volume',(item.volume??1)*100,0,300,1,'%')+number('페이드 인','fadeIn',item.fadeIn,0,10)+number('페이드 아웃','fadeOut',item.fadeOut,0,10)+`<label class="property-row"><input type="checkbox" data-prop="muted" ${item.muted?'checked':''}>음소거</label><p class="inspector-note">영상 뒤에 있는 오디오도 끝까지 내보냅니다. 영상이 없는 구간은 검은 화면입니다.${item.aiGenerated?' 게시할 때 AI 생성 음성임을 알려주세요.':''}</p>`);
   }else{
-    html+=section('내용',`<textarea data-prop="text" rows="3" maxlength="3000" aria-label="${type==='caption'?'자막':'그래픽'} 내용">${esc(item.text)}</textarea>${item.graphic==='lower'?`<label class="field-label">보조 문구<input type="text" data-prop="subtitle" value="${esc(item.subtitle)}" maxlength="150"></label>`:''}`);
-    html+=section('표시 구간',number('시작','start',item.start)+number('끝','end',item.end)+'<p class="inspector-note">영상과 독립적으로 이동하고 길이를 유지합니다.</p>');
+    html+=section('내용',`<textarea data-prop="text" rows="3" maxlength="3000" aria-label="${type==='caption'?'자막':'그래픽'} 내용">${esc(item.text)}</textarea>${item.subtitle!==undefined?`<label class="field-label">보조 문구<input type="text" data-prop="subtitle" value="${esc(item.subtitle)}" maxlength="150" aria-label="보조 문구"></label>`:''}`);
+
     const s=type==='caption'?{...project.captionStyle,...item.style}:item,prefix=type==='caption'?'style.':'';
-    html+=section('글자 스타일',selectField('폰트',prefix+'font',s.font,FONTS.map(f=>[f.css,f.group+' · '+f.label]))+range('크기',prefix+'size',s.size,24,160,1)+`<label class="property-row"><span>글자색</span><input type="color" data-prop="${prefix}color" value="${esc(s.color==='#fff'?'#ffffff':s.color)}" aria-label="글자색"></label>`);
-    if(type==='caption')html+=section('배치',range('아래 여백','style.bottom',s.bottom*100,0,95,1,'%')+selectField('등장','style.anim',s.anim||'none',[['none','없음'],['fade','페이드'],['pop','팝업']]));
-    else html+=section('배치',range('가로','x',item.x*100,5,95,1,'%')+range('세로','y',item.y*100,5,95,1,'%'));
-  }
-  if(type!=='audio'){
-    html+=visualControls(item);
-    if(type==='caption'||type==='graphic'){
-      const font=FONTS.find(f=>f.css===(type==='caption'?(item.style?.font||project.captionStyle.font):item.font));
-      html+='<p class="font-license">한국어 폰트 30종 · 상업 영상 사용 가능<br><a href="'+(font?.licenseUrl||'https://openfontlicense.org/ofl-faq/')+'" target="_blank" rel="noopener noreferrer">'+esc(font?.label||'글꼴')+' · SIL OFL 사용 조건 ↗</a><br>선택한 글꼴은 Google Fonts에서 불러옵니다.</p>';
+    html+=typographyControls(s,prefix)+textAppearanceControls(s,prefix);
+    if(type==='caption')html+=captionEffectControls(s);
+    else{
+      if(!item.graphic)html+=captionEffectControls(s,'',true);
+      html+=section('배치',range('가로','x',item.x*100,5,95,1,'%')+range('세로','y',item.y*100,5,95,1,'%'));
     }
   }
-  html+='<button class="button subtle wide delete-action" data-action="delete">선택 항목 삭제</button>';host.innerHTML=html;
+  if(type==='audio'||(type==='clip'&&item.type==='video'))html+='<p class="inspector-note">100%를 넘기면 원본보다 증폭됩니다. 이미 큰 소리는 찌그러질 수 있으니 출력 전에 확인해 주세요.</p>';
+  if(type!=='audio'){
+    html+=visualControls(evaluateItem(item,Math.max(0,player.time-itemRange(type,item.id).start)),type);
+    if(type==='caption'||type==='graphic'){
+      const font=FONTS.find(f=>f.css===(type==='caption'?(item.style?.font||project.captionStyle.font):item.font));
+      html+='<p class="font-license">한글·영문 폰트 '+FONTS.length+'종 · SIL OFL<br><a href="'+(font?.licenseUrl||'https://openfontlicense.org/ofl-faq/')+'" target="_blank" rel="noopener noreferrer">'+esc(font?.label||'글꼴')+' · SIL OFL 사용 조건 ↗</a><br>선택한 글꼴은 Google Fonts에서 불러옵니다.</p>';
+    }
+  }
+  html+='<button class="button subtle wide delete-action" data-action="delete">선택 항목 삭제</button>';host.innerHTML=html;refreshFontPickers(host);
 }
 
 async function importFiles(files){
@@ -426,18 +481,18 @@ const controlBefore=new WeakMap();
 // 위치 변경·트림은 입력 완료 시 한 번만 적용합니다. 입력 중 뒤 클립을 여러 번 밀지 않습니다.
 const stagedProperties=new Set(['start','end','imgDuration','trimStart','trimEnd','transitionType','transitionDuration','trackId','role']);
 function applyProperty(input){
-  if(exportCtrl||importing||smartTools.busy||monitor?.dragging)return;
+  if(exportCtrl||importing||smartTools.busy||monitor?.dragging||keyframeEditor?.dragging)return;
   const item=selected(),type=selection?.type;if(!item||type==='asset'||type==='gap')return;
   const prop=input.dataset.prop;let value=input.type==='checkbox'?input.checked:input.type==='range'||input.type==='number'?Number(input.value):input.value;
   if(input.type==='number'&&!input.value.trim())return;
   if(typeof value==='number'&&!Number.isFinite(value))return;
   if(input.type==='range'||input.type==='number'){if(input.min!=='')value=Math.max(Number(input.min),value);if(input.max!=='')value=Math.min(Number(input.max),value);}
-  if(['scale','offX','offY','x','y','volume','style.bottom'].includes(prop))value/=100;
+  if(['scale','offX','offY','x','y','volume','style.bottom'].includes(prop)||/(^|\.)(boxOpacity|shadowOpacity)$/.test(prop))value/=100;
   const refs=editingSelection();
   if(refs.length>1){
     if(prop.startsWith('transform.')&&['offsetX','offsetY','scaleX','scaleY','opacity'].includes(prop.slice(10)))value/=100;
     if(prop.startsWith('crop.'))value/=100;
-    applySharedProperty(refs,prop,value);
+    applySharedProperty(refs,prop,value,{time:player.time});
   }else if(prop==='trackId'||prop==='start'){
     const r=itemRange(type,item.id);if(!r)return;
     const target=prop==='trackId'?value:r.trackId,start=prop==='start'?frameTime(value):r.start;
@@ -445,7 +500,8 @@ function applyProperty(input){
   }else if(prop.startsWith('transform.')){
     const key=prop.slice(10);
     if(['offsetX','offsetY','scaleX','scaleY','opacity'].includes(key))value/=100;
-    item.transform={...transformOf(item),[key]:value};
+    if(['flipX','flipY'].includes(key))item.transform={...transformOf(item),[key]:value};
+    else {const range=itemRange(type,item.id);setValueAt(item,key,clamp(player.time-range.start,0,range.duration),value,{duration:range.duration});}
   }else if(prop.startsWith('crop.')){
     const key=prop.slice(5),other={left:'right',right:'left',top:'bottom',bottom:'top'}[key];
     item.crop={...item.crop,[key]:Math.max(0,Math.min(value/100,.98-(item.crop?.[other]||0)))};
@@ -462,6 +518,8 @@ function applyProperty(input){
   }else if(type==='audio'&&['trimStart','trimEnd'].includes(prop)){
     const r=itemRange(type,item.id),edge=prop==='trimStart'?'start':'end';
     applyItemTrim(planItemTrim(type,item.id,edge,frameTime(prop==='trimStart'?r.start+value-item.trimStart:r.end+value-item.trimEnd)));
+  }else if(prop==='volume'){
+    const range=itemRange(type,item.id);setValueAt(item,'volume',clamp(player.time-range.start,0,range.duration),clamp(value,0,3),{duration:range.duration});
   }else if(prop.startsWith('style.'))item.style={...project.captionStyle,...item.style,[prop.slice(6)]:value};
   else{
     if(['fadeIn','fadeOut'].includes(prop))delete item.fadeEnvelope;
@@ -474,7 +532,7 @@ function applyProperty(input){
   const percent=['scale','offX','offY','x','y','volume','style.bottom'].includes(prop)||prop.startsWith('crop.')||/^transform\.(offsetX|offsetY|scaleX|scaleY|opacity)$/.test(prop);
   const output=input.parentElement.querySelector('output');if(output)output.textContent=Number(input.value).toFixed(Number(input.step)<1?1:0)+(percent?'%':prop==='transform.rotation'?'°':'');
   syncAnchoredItems();timeline.render();player.invalidate();updateToolbar();
-  if(prop==='font'||prop==='style.font'||prop==='textStyle.font'||prop==='text')prepareFonts();
+  if(prop==='font'||prop==='style.font'||prop==='textStyle.font'||prop==='text'||prop==='subtitle')prepareFonts();
 }
 
 async function startExport(){
@@ -538,13 +596,20 @@ function renderSafePanel(){
   $('safeAreaNote').textContent=safeConfig.note;$('safeAreaSource').href=safeConfig.source;
 }
 function stopSoundPreview(){
+  soundPreviewRequest?.abort();soundPreviewRequest=null;
   soundPreview?.pause();soundPreview=null;
   if(soundPreviewUrl)URL.revokeObjectURL(soundPreviewUrl);soundPreviewUrl=null;
   document.querySelectorAll('[data-preview-sound]').forEach(b=>b.classList.remove('is-playing'));
 }
 async function previewSound(id){
   if(soundPreview?.dataset.id===id){stopSoundPreview();return;}
-  stopSoundPreview();player.pause();soundPreviewUrl=URL.createObjectURL(createSoundEffect(id));
+  stopSoundPreview();player.pause();
+  const request=new AbortController();soundPreviewRequest=request;
+  let file;
+  try{file=await createSoundEffect(id,{signal:request.signal});}
+  catch(error){if(request.signal.aborted)return;throw error;}
+  if(request.signal.aborted||soundPreviewRequest!==request||view!=='sounds')return;
+  soundPreviewUrl=URL.createObjectURL(file);
   const audio=new Audio(soundPreviewUrl);audio.dataset.id=id;audio.volume=.5;soundPreview=audio;
   audio.onended=()=>{if(soundPreview===audio)stopSoundPreview();};
   try{await audio.play();if(soundPreview===audio)document.querySelector('[data-preview-sound="'+id+'"]')?.classList.add('is-playing');}
@@ -554,14 +619,14 @@ async function addSound(id,time=player.time,lane=timeline.preferredTrack('audio'
   if(importing||exportCtrl)return;
   stopSoundPreview();
   return mediaEdit(async()=>{
-    const asset=await addAsset(createSoundEffect(id),{id:'builtin-sfx-'+id});
+    const asset=await addAsset(await createSoundEffect(id),{id:'builtin-sfx-'+id});
     return placeAssetImpl(asset.id,time,lane,plan);
   });
 }
 
 function pickMedia(){ $('fileInput').accept='video/*,image/*,audio/*,.mkv,.ts,.srt,.vtt';$('fileInput').click(); }
 function routeAction(action){
-  if(exportCtrl||importing||smartTools.busy||monitor?.dragging)return;
+  if(exportCtrl||importing||smartTools.busy||monitor?.dragging||keyframeEditor?.dragging)return;
   if(action==='import')pickMedia();
   if(action==='add-caption')addCaption();
   if(action==='import-srt'){$('fileInput').accept='.srt,.vtt';$('fileInput').click();}
@@ -571,13 +636,18 @@ function routeAction(action){
   if(action==='ripple-delete')deleteSelection(true);
   if(action==='copy-settings')copySettings();
   if(action==='paste-settings')pasteSettings();
-  if(action==='reset-transform')edit('변형 초기화',()=>{for(const entry of resolveSelection(editingSelection()))if(entry.type!=='audio'){entry.item.transform={};if(entry.type==='clip')Object.assign(entry.item,{scale:1,offX:0,offY:0});}});
+  if(action==='reset-transform')edit('변형 초기화',()=>{for(const entry of resolveSelection(editingSelection()))if(entry.type!=='audio'){
+    entry.item.transform={};
+    if(entry.item.keyframes){const volume=entry.item.keyframes.tracks.volume;if(volume)entry.item.keyframes={version:1,tracks:{volume}};else delete entry.item.keyframes;}
+    if(entry.type==='clip')Object.assign(entry.item,{scale:1,offX:0,offY:0});
+  }});
   if(action==='reset-crop')edit('화면 자르기 초기화',()=>{for(const entry of resolveSelection(editingSelection()))if(entry.type!=='audio')delete entry.item.crop;});
   if(action==='align-x'||action==='align-y')alignSelection(action==='align-x'?'x':'y');
   if(action==='all-transitions')applyTransition(activeTransition,true);
 }
 
 function wire(){
+  wireFontPickers($('inspectorContent'));
   document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{if(view===b.dataset.view&&window.innerWidth<=650)$('workbench').classList.toggle('show-library');else setView(b.dataset.view);});
   $('play').onclick=()=>player.toggle();$('prevFrame').onclick=()=>player.step(-1);$('nextFrame').onclick=()=>player.step(1);
   $('safeArea').onclick=()=>{const panel=$('safeAreaPanel');panel.hidden=!panel.hidden;$('safeArea').setAttribute('aria-expanded',String(!panel.hidden));if(!panel.hidden)renderSafePanel();};
@@ -628,7 +698,7 @@ function wire(){
   $('inspectorContent').addEventListener('input',e=>{if(e.target.dataset.prop&&!stagedProperties.has(e.target.dataset.prop)){beginProperty(e.target);applyProperty(e.target);}});
   $('inspectorContent').addEventListener('change',e=>{if(e.target.dataset.prop&&!exportCtrl&&!importing&&!smartTools.busy&&!monitor?.dragging){const before=controlBefore.get(e.target)||captureDocument();try{applyProperty(e.target);commit(before,editingSelection().length>1?'선택 클립 속성 변경':'속성 변경');}catch(error){restoreDocument(before);refresh();toast(error.message);}finally{controlBefore.delete(e.target);}}});
   document.addEventListener('keydown',e=>{
-    if(e.defaultPrevented||exportCtrl||importing||timeline.dragging||monitor?.dragging||smartTools.busy)return;const typing=/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName),mod=e.ctrlKey||e.metaKey;
+    if(e.defaultPrevented||exportCtrl||importing||timeline.dragging||monitor?.dragging||keyframeEditor?.dragging||smartTools.busy)return;const typing=/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName),mod=e.ctrlKey||e.metaKey;
     if(mod&&e.key.toLowerCase()==='s'){e.preventDefault();saveProjectFile();return;}
     if(typing||document.querySelector('dialog[open]'))return;
     if(mod&&e.altKey&&e.key.toLowerCase()==='c'){e.preventDefault();copySettings();}

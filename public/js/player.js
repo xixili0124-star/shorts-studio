@@ -2,9 +2,11 @@
 import { project, layersAt, totalDuration, clipFadeGain } from './state.js';
 import { renderFrame } from './render.js';
 import { clamp } from './util.js';
+import { PreviewAudioGain, volumeAt } from './audio-gain.js';
+const tracksVisualSubject=clip=>!!(clip?.cropTracking&&clip.cropTracking.enabled!==false)||!!clip?.mosaics?.some(m=>m.enabled!==false&&m.mode==='tracked');
 
 export class Player {
-  constructor(canvas, { onTick } = {}) {
+  constructor(canvas, { onTick, onAudioError } = {}) {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d', { alpha: false });
     this.time = 0;
@@ -18,6 +20,7 @@ export class Player {
     this.bgmEl = null;
     this.narrationEl = null;
     this.previewMuted = false;
+    this.previewGain = new PreviewAudioGain(onAudioError);
     this.trackElements = new Map();
     // undo는 클립 데이터를 교체하므로 비동기 디코더 상태는 sink에 연결합니다.
     this.sinkStates = new WeakMap();
@@ -48,7 +51,7 @@ export class Player {
         this.presentedTimes.set(el, meta.mediaTime);
         const current = project.clips.find(c => c.el === el);
         if (!current) { this.watchedVideos.delete(el); return; }
-        if (current.mosaics?.some(m => m.enabled !== false && m.mode === 'tracked')) {
+        if (tracksVisualSubject(current)) {
           this.rememberPresentedFrame(el, el, meta.mediaTime);
         }
         if (!this.playing) this.draw();
@@ -56,7 +59,7 @@ export class Player {
       };
       el.requestVideoFrameCallback(remember);
     }
-    if (clip.mosaics?.some(m => m.enabled !== false && m.mode === 'tracked')) {
+    if (tracksVisualSubject(clip)) {
       const held = this.presentedFrames.get(el);
       if (held) return { img: held.canvas, w: held.canvas.width, h: held.canvas.height, sourceTime: held.time };
       return { img: el, w: el.videoWidth, h: el.videoHeight, timeReliable: false };
@@ -81,7 +84,7 @@ export class Player {
    */
   _sinkSource(clip, t) {
     const held = this._sinkState(clip).frame;
-    const tracked = clip.mosaics?.some(m => m.enabled !== false && m.mode === 'tracked');
+    const tracked = tracksVisualSubject(clip);
     const covers = held && (Number.isFinite(held.duration) && held.duration > 0
       ? t >= held.t - 1e-6 && t <= held.t + held.duration + 1e-6 : Math.abs(held.t - t) <= .06);
     if (!covers || (tracked && !held.owned)) this._requestSinkFrame(clip, t);
@@ -102,7 +105,7 @@ export class Player {
       .then(w => {
         if (!w) return;
         const current = project.clips.find(c => c.id === clip.id && c.sink === clip.sink);
-        if (current?.mosaics?.some(m => m.enabled !== false && m.mode === 'tracked')) {
+        if (tracksVisualSubject(current)) {
           const canvas = document.createElement('canvas');canvas.width = w.canvas.width;canvas.height = w.canvas.height;
           canvas.getContext('2d').drawImage(w.canvas, 0, 0);
           state.frame = { t: w.timestamp, duration: w.duration, canvas, owned: true };
@@ -157,6 +160,7 @@ export class Player {
 
   // ── 재생 ─────────────────────────────────────────────
   play() {
+    this.previewGain.resume().catch(error=>this.previewGain.report(error));
     if (this.playing || this.duration <= 0) return;
     if (this.time >= this.duration) this.time = 0;
     this.playing = true;
@@ -220,7 +224,7 @@ export class Player {
       }
       const want = c.trimStart + at.local;
       c.el.muted = !!c.muted || this.previewMuted;
-      c.el.volume = clamp((c.volume ?? 1) * project.audio.originalVolume * at.weight * clipFadeGain(c, at.local, at.duration), 0, 1);
+      this.previewGain.set(c.el,volumeAt(c,at.local)*project.audio.originalVolume*at.weight*clipFadeGain(c,at.local,at.duration));
 
       if (this.playing) {
         if (Math.abs(c.el.currentTime - want) > 0.22) c.el.currentTime = want;
@@ -283,7 +287,7 @@ export class Player {
     const tracks = project.audio.tracks || [];
     const ids = new Set(tracks.map(t => t.id));
     for (const [id, el] of this.trackElements) {
-      if (!ids.has(id)) { el.pause(); this.trackElements.delete(id); }
+      if (!ids.has(id)) { el.pause(); this.previewGain.disconnect(el);this.trackElements.delete(id); }
     }
     for (const track of tracks) {
       const el = track.el;
@@ -295,7 +299,7 @@ export class Player {
       const desired = track.trimStart + local;
       if (Math.abs(el.currentTime - desired) > (this.playing ? .2 : .02)) el.currentTime = desired;
       el.muted = this.previewMuted || !!track.muted;
-      el.volume = clamp((track.volume ?? 1) * clipFadeGain(track, local, duration), 0, 1);
+      this.previewGain.set(el,volumeAt(track,local)*clipFadeGain(track,local,duration));
       if (this.playing && el.paused) el.play().catch(() => {});
       if (!this.playing && !el.paused) el.pause();
     }

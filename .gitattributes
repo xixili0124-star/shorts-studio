@@ -2,3 +2,8 @@
 public/vendor/transformers/** -text
 public/vendor/onnxruntime-web/** -text
 public/vendor/supertonic/** -text
+# 출처 검증에 사용하는 라이선스·메타데이터의 원문 바이트를 보존합니다.
+# 외부 원문의 행 끝 공백은 원작자 파일과 해시를 일치시키기 위해 유지합니다.
+public/licenses/google-fonts/*/OFL.txt -text -whitespace
+public/licenses/google-fonts/*/METADATA.pb -text -whitespace
+public/sounds/licenses/*.txt -text

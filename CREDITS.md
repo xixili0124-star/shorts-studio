@@ -15,48 +15,98 @@
 `public/og.png`는 이 실험판을 위해 생성한 AI 이미지입니다. 앱의 실제 스크린샷이 아닙니다.
 
 
-## 한국어 폰트 30종
+## 한국어·영문 폰트 64종
 
-아래 폰트는 Google Fonts 저장소의 SIL Open Font License 1.1 파일을 확인한 목록입니다. 글꼴로 제작한 상업 영상은 OFL로 배포할 의무가 없습니다. 이 실험판은 원본 폰트를 수정·재배포하지 않고 Google Fonts CSS를 불러옵니다. 나중에 폰트를 직접 호스팅하거나 번들에 포함할 경우 해당 저작권·라이선스 고지를 함께 보존해야 합니다. [Google Fonts 공식 FAQ](https://developers.google.com/fonts/faq), [OFL 공식 FAQ](https://openfontlicense.org/ofl-faq/)
+한국어 37종과 영문 27종입니다. Google Fonts 공식 저장소의 고정 revision `ade3d1533e06b2b1462ffcde8e08b129627ca360`에서 각 `OFL.txt`와 `METADATA.pb`를 읽어 이름·지원 문자·선택 굵기를 확인했습니다(2026-08-28). [검증한 메타데이터·해시 목록](public/licenses/google-fonts/catalog-sources.json)에 원본 URL을 기록하고, 폰트별 OFL 고지와 메타데이터를 함께 보관합니다.
 
-| 이름 | CSS family | 원본 이용 조건 |
+글꼴로 제작한 상업 영상은 OFL로 배포할 의무가 없습니다. 폰트 바이너리는 수정하거나 번들에 포함하지 않고 Google Fonts CSS를 불러옵니다. 나중에 폰트를 직접 호스팅하거나 번들에 포함할 경우 해당 저작권·라이선스 고지를 함께 보존해야 합니다. [Google Fonts 공식 FAQ](https://developers.google.com/fonts/faq), [OFL 공식 FAQ](https://openfontlicense.org/ofl-faq/)
+
+| 이름 | Google Fonts family | 표시 굵기 | 문자 | 이용 조건 |
+| --- | --- | --- | --- | --- |
+| 본고딕 | Noto Sans KR | 900 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/notosanskr/OFL.txt) |
+| 나눔고딕 | Nanum Gothic | 800 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumgothic/OFL.txt) |
+| 고딕 A1 | Gothic A1 | 900 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gothica1/OFL.txt) |
+| IBM 플렉스 | IBM Plex Sans KR | 600 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/ibmplexsanskr/OFL.txt) |
+| 고운돋움 | Gowun Dodum | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gowundodum/OFL.txt) |
+| 오르빗 | Orbit | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/orbit/OFL.txt) |
+| 나눔고딕 코딩 | Nanum Gothic Coding | 700 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumgothiccoding/OFL.txt) |
+| 본명조 | Noto Serif KR | 900 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/notoserifkr/OFL.txt) |
+| 나눔명조 | Nanum Myeongjo | 800 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanummyeongjo/OFL.txt) |
+| 고운바탕 | Gowun Batang | 700 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gowunbatang/OFL.txt) |
+| 햄릿 | Hahmlet | 700 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/hahmlet/OFL.txt) |
+| 송명 | Song Myung | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/songmyung/OFL.txt) |
+| 산하엽 | Diphylleia | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/diphylleia/OFL.txt) |
+| 검은고딕 | Black Han Sans | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/blackhansans/OFL.txt) |
+| 도현 | Do Hyeon | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dohyeon/OFL.txt) |
+| 주아 | Jua | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/jua/OFL.txt) |
+| 구기 | Gugi | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gugi/OFL.txt) |
+| 해바라기 | Sunflower | 700 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/sunflower/OFL.txt) |
+| 동글 | Dongle | 700 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dongle/OFL.txt) |
+| 베이글 팻 | Bagel Fat One | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/bagelfatone/OFL.txt) |
+| 개구 | Gaegu | 700 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gaegu/OFL.txt) |
+| 감자꽃 | Gamja Flower | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gamjaflower/OFL.txt) |
+| 하이멜로디 | Hi Melody | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/himelody/OFL.txt) |
+| 싱글데이 | Single Day | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/singleday/OFL.txt) |
+| 나눔손글씨 펜 | Nanum Pen Script | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumpenscript/OFL.txt) |
+| 나눔손글씨 붓 | Nanum Brush Script | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/nanumbrushscript/OFL.txt) |
+| 연성 | Yeon Sung | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/yeonsung/OFL.txt) |
+| 기랑해랑 | Kirang Haerang | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/kiranghaerang/OFL.txt) |
+| 동해독도 | East Sea Dokdo | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/eastseadokdo/OFL.txt) |
+| 흑백사진 | Black And White Picture | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/blackandwhitepicture/OFL.txt) |
+| 42dot 산스 | 42dot Sans | 700 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/42dotsans/OFL.txt) |
+| 큐트 | Cute Font | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/cutefont/OFL.txt) |
+| 독도 | Dokdo | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dokdo/OFL.txt) |
+| 가석체 | Gasoek One | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/gasoekone/OFL.txt) |
+| 모이라이 | Moirai One | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/moiraione/OFL.txt) |
+| 푸어 스토리 | Poor Story | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/poorstory/OFL.txt) |
+| 스타일리시 | Stylish | 400 | 한국어 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/stylish/OFL.txt) |
+| Inter | Inter | 800 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/inter/OFL.txt) |
+| Montserrat | Montserrat | 800 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/montserrat/OFL.txt) |
+| Poppins | Poppins | 700 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/poppins/OFL.txt) |
+| Roboto | Roboto | 900 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/roboto/OFL.txt) |
+| Open Sans | Open Sans | 800 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/opensans/OFL.txt) |
+| Lato | Lato | 900 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/lato/OFL.txt) |
+| Oswald | Oswald | 700 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/oswald/OFL.txt) |
+| Bebas Neue | Bebas Neue | 400 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/bebasneue/OFL.txt) |
+| Anton | Anton | 400 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/anton/OFL.txt) |
+| Archivo Black | Archivo Black | 400 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/archivoblack/OFL.txt) |
+| Barlow Condensed | Barlow Condensed | 800 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/barlowcondensed/OFL.txt) |
+| League Spartan | League Spartan | 800 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/leaguespartan/OFL.txt) |
+| Outfit | Outfit | 800 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/outfit/OFL.txt) |
+| Manrope | Manrope | 800 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/manrope/OFL.txt) |
+| Space Grotesk | Space Grotesk | 700 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/spacegrotesk/OFL.txt) |
+| Playfair Display | Playfair Display | 800 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/playfairdisplay/OFL.txt) |
+| Lora | Lora | 700 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/lora/OFL.txt) |
+| DM Serif Display | DM Serif Display | 400 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/dmserifdisplay/OFL.txt) |
+| Libre Baskerville | Libre Baskerville | 700 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/librebaskerville/OFL.txt) |
+| Merriweather | Merriweather | 900 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/merriweather/OFL.txt) |
+| Abril Fatface | Abril Fatface | 400 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/abrilfatface/OFL.txt) |
+| Lobster | Lobster | 400 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/lobster/OFL.txt) |
+| Pacifico | Pacifico | 400 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/pacifico/OFL.txt) |
+| Caveat | Caveat | 700 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/caveat/OFL.txt) |
+| JetBrains Mono | JetBrains Mono | 700 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/jetbrainsmono/OFL.txt) |
+| Bungee | Bungee | 400 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/bungee/OFL.txt) |
+| Press Start 2P | Press Start 2P | 400 | 영문 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/ade3d1533e06b2b1462ffcde8e08b129627ca360/ofl/pressstart2p/OFL.txt) |
+
+영문 전용 글꼴은 한국어 글리프를 제공하지 않으므로 한국어 문구에는 기기의 대체 글꼴이 표시될 수 있습니다. 목록의 영문 미리보기에는 각 글꼴 이름을 사용합니다. 글꼴 요청에는 선택한 family와 weight만 들어가며, 사용자 자막·원고를 Google Fonts URL의 text 파라미터에 넣지 않습니다. 처음 글꼴을 불러올 때는 인터넷 연결이 필요합니다.
+
+## 기본 효과음 24종 · Kenney CC0
+
+라이브러리는 원작자 Kenney가 공개 배포한 아래 5개 팩에서 선별한 24개 샘플을 사용합니다. 앱이 실행 중에 수식으로 만드는 효과음이 아닙니다. 원작자 배포 ZIP의 `License.txt`에서 개인·상업 프로젝트 사용 허용과 CC0를 확인했습니다. [CC0 1.0 공식 조건](https://creativecommons.org/publicdomain/zero/1.0/)에 따라 복제·변환·재배포할 수 있으며, 원작자 고지를 함께 제공합니다.
+
+| 원본 팩 | 포함 수 | 동봉 고지 |
 | --- | --- | --- |
-| 본고딕 | Noto Sans KR | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/notosanskr/OFL.txt) |
-| 나눔고딕 | Nanum Gothic | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothic/OFL.txt) |
-| 고딕 A1 | Gothic A1 | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/gothica1/OFL.txt) |
-| IBM 플렉스 | IBM Plex Sans KR | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/ibmplexsanskr/OFL.txt) |
-| 고운돋움 | Gowun Dodum | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/gowundodum/OFL.txt) |
-| 오르빗 | Orbit | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/orbit/OFL.txt) |
-| 나눔고딕 코딩 | Nanum Gothic Coding | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/nanumgothiccoding/OFL.txt) |
-| 본명조 | Noto Serif KR | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/notoserifkr/OFL.txt) |
-| 나눔명조 | Nanum Myeongjo | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/nanummyeongjo/OFL.txt) |
-| 고운바탕 | Gowun Batang | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/gowunbatang/OFL.txt) |
-| 햄릿 | Hahmlet | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/hahmlet/OFL.txt) |
-| 송명 | Song Myung | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/songmyung/OFL.txt) |
-| 산하엽 | Diphylleia | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/diphylleia/OFL.txt) |
-| 검은고딕 | Black Han Sans | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/blackhansans/OFL.txt) |
-| 도현 | Do Hyeon | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/dohyeon/OFL.txt) |
-| 주아 | Jua | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/jua/OFL.txt) |
-| 구기 | Gugi | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/gugi/OFL.txt) |
-| 해바라기 | Sunflower | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/sunflower/OFL.txt) |
-| 동글 | Dongle | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/dongle/OFL.txt) |
-| 베이글 팻 | Bagel Fat One | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/bagelfatone/OFL.txt) |
-| 개구 | Gaegu | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/gaegu/OFL.txt) |
-| 감자꽃 | Gamja Flower | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/gamjaflower/OFL.txt) |
-| 하이멜로디 | Hi Melody | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/himelody/OFL.txt) |
-| 싱글데이 | Single Day | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/singleday/OFL.txt) |
-| 나눔손글씨 펜 | Nanum Pen Script | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/nanumpenscript/OFL.txt) |
-| 나눔손글씨 붓 | Nanum Brush Script | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/nanumbrushscript/OFL.txt) |
-| 연성 | Yeon Sung | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/yeonsung/OFL.txt) |
-| 기랑해랑 | Kirang Haerang | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/kiranghaerang/OFL.txt) |
-| 동해독도 | East Sea Dokdo | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/eastseadokdo/OFL.txt) |
-| 흑백사진 | Black And White Picture | [OFL 1.1](https://raw.githubusercontent.com/google/fonts/main/ofl/blackandwhitepicture/OFL.txt) |
+| [Interface Sounds](https://kenney.nl/assets/interface-sounds) | 7 | [Kenney 원문 고지](public/sounds/licenses/kenney-interface.txt) |
+| [UI Audio](https://kenney.nl/assets/ui-audio) | 2 | [Kenney 원문 고지](public/sounds/licenses/kenney-ui.txt) |
+| [Impact Sounds](https://kenney.nl/assets/impact-sounds) | 5 | [Kenney 원문 고지](public/sounds/licenses/kenney-impact.txt) |
+| [RPG Audio](https://kenney.nl/assets/rpg-audio) | 5 | [Kenney 원문 고지](public/sounds/licenses/kenney-rpg.txt) |
+| [Digital Audio](https://kenney.nl/assets/digital-audio) | 5 | [Kenney 원문 고지](public/sounds/licenses/kenney-digital.txt) |
 
-폰트 요청에는 선택한 family와 weight만 들어갑니다. 사용자 자막·원고를 Google Fonts URL의 text 파라미터에 넣지 않습니다. 글꼴 다운로드 시 네트워크 연결은 필요합니다.
+각 원본 Ogg Vorbis를 48 kHz·모노·PCM 16비트 WAV로 변환하고, RMS 목표 0.12·피크 상한 0.82 내에서 음량을 조정했습니다. 120 ms보다 짧은 샘플에는 끝에 무음만 덧붙였습니다. 피치·속도를 바꾸거나 새로운 합성음을 덧대지 않았습니다. 배포 WAV는 총 1,184,592바이트이며, 외부 음원 API 없이 앱의 정적 파일을 읽습니다.
 
-## 효과음과 Myinstants
+[샘플별 원본 파일·다운로드 URL·SHA-256·변환·검증 수치](public/sounds/manifest.json)에 출처를 기록하고 [디코딩한 24종 파형](public/sounds/waveforms.png)을 함께 제공합니다. 원문 고지는 줄바꿈·행 끝 공백만 정리했습니다. 기존 프로젝트에 저장된 효과음 WAV는 변경하지 않으며, 이전 합성 API는 호환용으로만 남겨 두었습니다. 기본 효과음은 자막 인식에 포함하는 음성이 아니라 효과음 트랙으로 취급합니다.
 
-기본 20종은 sound-effects.js의 수식·노이즈·엔벨로프로 직접 합성합니다. 외부 음원, 밈, 상용 음악 샘플을 포함하지 않으며 완성 영상에 사용할 수 있습니다. 유명 효과음이나 특정 작품의 소리를 복제하도록 만들지 않았습니다.
+## Myinstants 외부 탐색
 
 사용자가 제공한 [Myinstants app 페이지](https://www.myinstants.com/ko/instant/app/)는 외부 탐색 링크입니다. 사이트의 음원을 저장소에 포함하거나 자동 수집하지 않습니다. 다운로드·임베드 기능이 있다고 상업 영상 재사용 허락까지 확인된 것은 아니므로, 가져오는 음원은 이용자가 별도 권리를 확인해야 합니다. [이용약관](https://www.myinstants.com/ko/terms_of_use.html), [저작권 정책](https://www.myinstants.com/ko/dcma_copyright_policy.html)
 

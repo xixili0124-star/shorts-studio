@@ -9,6 +9,11 @@ import { withVisualTransform, visualCorners } from './visual-transform.js';
 import { safeAreaConfig, safeAreaRect } from './safe-areas.js';
 import { ensureFont } from './font-catalog.js';
 import { redactSource } from './mosaic.js';
+import { paintTransition } from './transition-effects.js';
+import { textAnimationAt, visibleText, withTextAnimation } from './text-effects.js';
+import { drawExtraGraphic } from './graphic-templates.js';
+import { evaluateItem } from './keyframes.js';
+import { cropTrackingGeometry } from './crop-tracking.js';
 
 const REF_H = 1920; // 스타일 수치의 기준 높이 (해상도가 달라져도 같은 비율로 보이게)
 const plateCache = new WeakMap();
@@ -38,12 +43,15 @@ export function renderFrame(ctx, t, opts = {}) {
     let source=opts.source?.(at.clip,at.local);
     if(!source?.img||source.w<=0||source.h<=0)return;
     source=redactSource(ctx,source,at.clip,at.clip.trimStart+at.local);
+    // 추적 좌표는 비동기 디코더가 실제 보여 주는 프레임과 같은 시각을 사용합니다.
+    const sourceAt=at.clip.cropTracking?.enabled!==false&&at.clip.cropTracking&&Number.isFinite(source.sourceTime)
+      ?{...at,local:Math.max(0,Math.min(at.duration,source.sourceTime-at.clip.trimStart))}:at;
     paintTransformed(target,'clip',at.clip,dest=>{
       if(band&&at.trackId===visualTracks[0]?.id){
         dest.save();dest.beginPath();dest.rect(band.x,band.y,band.w,band.h);dest.clip();
-        dest.translate(band.x,band.y);drawClipLayer(dest,band.w,band.h,at,source);dest.restore();
-      }else drawClipLayer(dest,W,H,at,source);
-    },clipFadeGain(at.clip,at.local,at.duration),at);
+        dest.translate(band.x,band.y);drawClipLayer(dest,band.w,band.h,sourceAt,source);dest.restore();
+      }else drawClipLayer(dest,W,H,sourceAt,source);
+    },clipFadeGain(at.clip,at.local,at.duration),{...at,geometryLocal:sourceAt.local});
   };
   const clearPlate=canvas=>{
     const target=canvas.getContext('2d');
@@ -51,10 +59,11 @@ export function renderFrame(ctx, t, opts = {}) {
     target.filter='none';target.clearRect(0,0,W,H);return target;
   };
   const paintTransformed=(target,type,item,painter,gain=1,timing=null)=>{
-    const alpha=(item.transform?.opacity??1)*gain;
+    const evaluated=evaluateItem(item,timing?.local??(atTime-(item.start||0)));
+    const alpha=(evaluated.transform?.opacity??1)*gain;
     if(alpha<=0)return;
     const bounds=measureVisual(target,type,item,W,H,atTime,timing);
-    const opaqueItem={...item,transform:{...item.transform,opacity:1}};
+    const opaqueItem={...evaluated,transform:{...evaluated.transform,opacity:1}};
     if(alpha>=1){withVisualTransform(target,bounds,opaqueItem,W,H,()=>painter(target));return;}
     // 배경·글자·테두리를 먼저 완성하고 요소 전체에 불투명도를 한 번만 적용합니다.
     const plate=transitionPlates(ctx.canvas)[3],dest=clearPlate(plate);
@@ -71,14 +80,7 @@ export function renderFrame(ctx, t, opts = {}) {
       const plates=transitionPlates(ctx.canvas);
       active.forEach((at,i)=>paintMedia(clearPlate(plates[i]),at));
       const mixed=clearPlate(plates[2]),p=active[1].weight;
-      mixed.globalAlpha=1-p;mixed.drawImage(plates[0],0,0);
-      mixed.globalCompositeOperation='lighter';mixed.globalAlpha=p;mixed.drawImage(plates[1],0,0);
-      mixed.globalAlpha=1;
-      const type=active[0].clip.transitionOut?.type;
-      if(type==='fade'||type==='flash'){
-        mixed.globalCompositeOperation='source-atop';mixed.fillStyle=type==='fade'?'#000':'#fff';
-        mixed.globalAlpha=Math.sin(Math.PI*p);mixed.fillRect(0,0,W,H);
-      }
+      paintTransition(mixed,plates[0],plates[1],p,active[0].clip.transitionOut?.type);
       ctx.drawImage(plates[2],0,0);
     }
     if(index===0&&band)drawTemplate(ctx,W,H,tpl,k);
@@ -97,7 +99,7 @@ export function renderFrame(ctx, t, opts = {}) {
     const selected=layout.items.find(e=>e.type===opts.selection.type&&e.id===opts.selection.id&&atTime>=e.start&&atTime<e.end);
     if(selected&&selected.type!=='audio'){
       const bounds=measureVisual(ctx,selected.type,selected.item,W,H,atTime);
-      drawSelection(ctx,visualCorners(bounds,selected.item,W,H),H);
+      drawSelection(ctx,visualCorners(bounds,evaluateItem(selected.item,atTime-selected.start),W,H),H);
     }
   }
 }
@@ -108,9 +110,10 @@ export function measureVisual(ctx,type,item,W,H,t=0,timing=null) {
   if(type==='clip'){
     const isBase=trackIdFor('clip',item)===timelineTracks().find(track=>track.kind==='visual')?.id;
     const band=isBase?videoBand(W,H):null,bw=band?.w||W,bh=band?.h||H;
-    const local=timing?.local??(t-(buildLayout().entries.find(e=>e.id===item.id)?.start||0));
+    const local=timing?.geometryLocal??timing?.local??(t-(buildLayout().entries.find(e=>e.id===item.id)?.start||0));
     const duration=item.motionDuration||(item.type==='image'?item.imgDuration:item.trimEnd-item.trimStart);
-    const g=clipGeometry(bw,bh,item.natW||W,item.natH||H,item,(local+(item.motionOffset||0))/Math.max(.001,duration));
+    const basic=clipGeometry(bw,bh,item.natW||W,item.natH||H,item,(local+(item.motionOffset||0))/Math.max(.001,duration));
+    const g=cropTrackingGeometry(item,local,basic,bw,bh);
     return {x:g.dx+(band?.x||0),y:g.dy+(band?.y||0),w:g.dw,h:g.dh};
   }
   const st=type==='caption'?{...project.captionStyle,...item.style}:item;
@@ -120,9 +123,12 @@ export function measureVisual(ctx,type,item,W,H,t=0,timing=null) {
   const textWidth=Math.max(size,...lines.map(line=>ctx.measureText(line).width));
   ctx.restore();
   const lineHeight=lines.length*size*1.28;
+  const boxed=st.box&&st.box!=='none';
+  const padX=boxed&&Number.isFinite(st.boxPaddingX)?st.boxPaddingX*k:size*.38;
+  const padY=boxed&&Number.isFinite(st.boxPaddingY)?st.boxPaddingY*k:size*.16;
   if(type==='caption'){
-    const w=textWidth+size*.76,h=lineHeight+size*.32;
-    return {x:(W-w)/2,y:H*(1-st.bottom)-lineHeight-size*.16,w,h};
+    const w=textWidth+padX*2,h=lineHeight+padY*2;
+    return {x:(W-w)/2,y:H*(1-st.bottom)-lineHeight-padY,w,h};
   }
   const x=(item.x??.5)*W,y=(item.y??.5)*H;
   if(item.graphic){
@@ -132,9 +138,9 @@ export function measureVisual(ctx,type,item,W,H,t=0,timing=null) {
     const width=W*(item.graphic==='ribbon'?.97:.86);
     return {x:x-width/2,y:y-h/2,w:width,h};
   }
-  const w=textWidth+size*.76,h=lineHeight+size*.32;
-  const bx=item.align==='left'?Math.max(maxWidth*.02,x-maxWidth/2)-size*.38
-    :item.align==='right'?x+maxWidth/2-w+size*.38:x-w/2;
+  const w=textWidth+padX*2,h=lineHeight+padY*2;
+  const bx=item.align==='left'?Math.max(maxWidth*.02,x-maxWidth/2)-padX
+    :item.align==='right'?x+maxWidth/2-w+padX:x-w/2;
   return {x:bx,y:y-h/2,w,h};
 }
 function drawSelection(ctx,corners,H){
@@ -170,12 +176,12 @@ export function clipGeometry(W, H, sw, sh, clip, progress = 0) {
   };
 }
 
-function drawClipLayer(ctx, W, H, at, src) {
+export function drawClipLayer(ctx, W, H, at, src) {
   const clip = at.clip;
   const duration = clip.type === 'image' ? clip.motionDuration || at.duration : at.duration;
   const offset = clip.type === 'image' ? clip.motionOffset || 0 : 0;
   const progress = duration > 0 ? (at.local + offset) / duration : 0;
-  const g = clipGeometry(W, H, src.w, src.h, clip, progress);
+  const g = cropTrackingGeometry(clip,at.local,clipGeometry(W, H, src.w, src.h, clip, progress),W,H);
 
   const covers = g.dx <= 0.5 && g.dy <= 0.5 && g.dx + g.dw >= W - 0.5 && g.dy + g.dh >= H - 0.5;
   if (!covers) drawBackdrop(ctx, W, H, clip, src);
@@ -214,58 +220,39 @@ function drawSource(ctx, src, dx, dy, dw, dh) {
 // ── 텍스트 ─────────────────────────────────────────────
 const easeOut = p => 1 - Math.pow(1 - p, 3);
 
+function textPaint(style,k=1) {
+  const out={};
+  for(const key of ['box','boxColor','boxOpacity','shadowEnabled','shadowColor','shadowOpacity','glow'])if(style[key]!==undefined)out[key]=style[key];
+  for(const key of ['boxPaddingX','boxPaddingY','boxRadius','shadowBlur','shadowX','shadowY'])if(Number.isFinite(style[key]))out[key]=style[key]*k;
+  return out;
+}
+
 function drawOverlay(ctx, W, H, o, t, k) {
   if (o.graphic) { drawGraphic(ctx, W, H, o, t, k); return; }
-  const ANIM = 0.35;
-  const inP = Math.min(1, Math.max(0, (t - o.start) / ANIM));
-  const outP = Math.min(1, Math.max(0, (o.end - t) / ANIM));
-  let alpha = 1, dy = 0, scale = 1;
-
-  if (o.anim === 'fade') alpha = Math.min(inP, outP);
-  else if (o.anim === 'up') { alpha = Math.min(inP, outP); dy = (1 - easeOut(inP)) * H * 0.05; }
-  else if (o.anim === 'pop') { alpha = Math.min(inP, outP); scale = 0.72 + 0.28 * easeOut(inP); }
-
-  if (alpha <= 0.001) return;
-
-  ctx.save();
-  if (scale !== 1) {
-    ctx.translate(o.x * W, o.y * H);
-    ctx.scale(scale, scale);
-    ctx.translate(-o.x * W, -o.y * H);
-  }
-  drawTextBlock(ctx, {
-    text: o.text,
+  const motion=textAnimationAt(o,t-o.start,o.end-o.start,true);
+  const bounds=measureVisual(ctx,'graphic',o,W,H,t);
+  withTextAnimation(ctx,motion,bounds,W,H,()=>drawTextBlock(ctx, {
+    ...textPaint(o,k),text:visibleText(o.text,motion.characters),
     font: o.font, size: o.size * k, color: o.color,
     stroke: o.stroke, strokeW: o.strokeW * k,
-    box: o.box, align: o.align,
-    x: o.x * W, y: o.y * H + dy,
+    align: o.align,x: o.x * W, y: o.y * H,
     maxWidth: W * 0.88,
-    anchor: 'middle',
-    alpha,
-  });
-  ctx.restore();
+    anchor: 'middle',alpha:1,
+  }));
 }
 
 function drawCaption(ctx, W, H, cap, st, k, t) {
-  const p = Math.min(1, Math.max(0, (t - cap.start) / .18));
-  ctx.save();
-  if (st.anim === 'pop') {
-    const s = .86 + .14 * easeOut(p);
-    ctx.translate(W / 2, H * (1 - st.bottom));
-    ctx.scale(s, s);
-    ctx.translate(-W / 2, -H * (1 - st.bottom));
-  }
-  drawTextBlock(ctx, {
-    text: cap.text,
+  const motion=textAnimationAt(st,t-cap.start,cap.end-cap.start);
+  const bounds=measureVisual(ctx,'caption',cap,W,H,t);
+  withTextAnimation(ctx,motion,bounds,W,H,()=>drawTextBlock(ctx, {
+    ...textPaint(st,k),text:visibleText(cap.text,motion.characters),
     font: st.font, size: st.size * k, color: st.color,
     stroke: st.stroke, strokeW: st.strokeW * k,
-    box: st.box, boxColor: st.boxColor, glow: st.glow, align: 'center',
+    align: 'center',
     x: W / 2, y: H * (1 - st.bottom),
     maxWidth: W * 0.86,
-    anchor: 'bottom',
-    alpha: st.anim === 'fade' ? p : 1,
-  });
-  ctx.restore();
+    anchor: 'bottom',alpha:1,
+  }));
 }
 
 /** 액션 프리셋도 같은 캔버스 렌더러에서 그려 내보내기에 그대로 들어갑니다. */
@@ -280,6 +267,8 @@ function drawGraphic(ctx, W, H, o, t, k) {
   const title = (extra = {}) => drawTextBlock(ctx, {
     text: o.text, font: o.font, size, color: accent, stroke: '#101510', strokeW: 0,
     align: 'center', x, y, maxWidth: w * .88, anchor: 'middle', alpha: 1, ...extra,
+    ...textPaint(o,k),
+    ...(o.strokeW!==undefined?{strokeW:o.strokeW*k,stroke:o.stroke||'#101510'}:{}),
   });
   ctx.save();
   ctx.globalAlpha *= Math.min(1, p * 3, q);
@@ -381,6 +370,8 @@ function drawGraphic(ctx, W, H, o, t, k) {
       ctx.save();ctx.beginPath();ctx.rect(x-w/2,sign<0?y-H:y,w,H);ctx.clip();
       title({x:x+sign*(1-progress)*W*.6,color:accent,strokeW:4*k});ctx.restore();
     }
+  } else if (drawExtraGraphic(ctx,W,H,o,t,k,title,roundRect)) {
+    // 추가 템플릿도 같은 텍스트 렌더러를 사용합니다.
   } else {
     ctx.translate(0, (1 - progress) * H * .04);
     ctx.strokeStyle = accent;ctx.lineWidth = 2 * k;
@@ -409,7 +400,8 @@ export function drawTextBlock(ctx, o) {
   else if (o.anchor === 'bottom') top = o.y - total;
   else top = o.y;
 
-  const padX = o.size * 0.38, padY = o.size * 0.16;
+  const padX = Number.isFinite(o.boxPaddingX)?o.boxPaddingX:o.size*.38;
+  const padY = Number.isFinite(o.boxPaddingY)?o.boxPaddingY:o.size*.16;
 
   lines.forEach((line, i) => {
     if (!line) return;
@@ -426,34 +418,60 @@ export function drawTextBlock(ctx, o) {
       const by = top + i * lineH - padY + lineH * 0.06;
       const bw = w + padX * 2;
       const bh = lineH + padY * 2 - lineH * 0.12;
-      ctx.fillStyle = o.box === 'dark' ? 'rgba(0,0,0,.62)'
-        : o.box === 'white' ? 'rgba(255,255,255,.92)'
-          : (o.boxColor || ACCENT);
-      roundRect(ctx, bx, by, bw, bh, o.size * 0.18);
-      ctx.fill();
-    } else {
-      ctx.shadowColor = 'rgba(0,0,0,.55)';
-      ctx.shadowBlur = o.size * 0.22;
-      ctx.shadowOffsetY = o.size * 0.05;
+      ctx.save();
+      ctx.globalAlpha*=Math.min(1,Math.max(0,o.boxOpacity??(o.box==='dark'?.62:o.box==='white'?.92:1)));
+      ctx.fillStyle = o.boxColor || (o.box === 'dark' ? '#000000'
+        : o.box === 'white' ? '#ffffff'
+          : ACCENT);
+      roundRect(ctx,bx,by,bw,bh,Number.isFinite(o.boxRadius)?o.boxRadius:o.size*.18);
+      ctx.fill();ctx.restore();
     }
-
+    const shadow=o.shadowEnabled??(!o.box||o.box==='none');
+    ctx.shadowColor=shadow?rgba(o.shadowColor||'#000000',o.shadowOpacity??.55):'transparent';
+    ctx.shadowBlur=shadow?(o.shadowBlur??o.size*.22):0;
+    ctx.shadowOffsetX=shadow?(o.shadowX??0):0;
+    ctx.shadowOffsetY=shadow?(o.shadowY??o.size*.05):0;
     ctx.textAlign = 'center';
-    if (o.strokeW > 0 && (!o.box || o.box === 'none')) {
+    if (o.strokeW > 0) {
       ctx.lineWidth = o.strokeW;
       ctx.strokeStyle = o.stroke;
       ctx.lineJoin = 'round';
       ctx.miterLimit = 2;
       ctx.strokeText(line, cx, baseline);
     }
-    ctx.shadowColor = 'transparent';
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
-    ctx.fillStyle = o.box === 'white' ? '#111' : o.color;
+    ctx.fillStyle = o.color || (o.box==='white'?'#111':'#fff');
     if (o.glow) { ctx.shadowColor = o.glow; ctx.shadowBlur = o.size * .28; }
     ctx.fillText(line, cx, baseline);
+    ctx.shadowColor='transparent';ctx.shadowBlur=0;ctx.shadowOffsetX=0;ctx.shadowOffsetY=0;
   });
 
   ctx.restore();
+}
+
+function rgba(color,opacity) {
+  const match=/^#([\da-f]{6})$/i.exec(String(color));
+  if(!match)return color;
+  const n=parseInt(match[1],16);
+  return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${Math.min(1,Math.max(0,opacity))})`;
+}
+
+/** 스타일 카드는 실제 글자 렌더러를 사용합니다. 작은 카드 안에서 문구 전체를 보존합니다. */
+export function renderCaptionPreview(canvas,preset) {
+  const ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height,st=preset.style;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#20262c';ctx.fillRect(0,0,W,H);
+  const size=Math.min(H*.24,Math.max(H*.16,st.size*H/340)),k=size/st.size;
+  drawTextBlock(ctx,{...textPaint(st,k),text:preset.label,font:st.font,size,color:st.color,
+    stroke:st.stroke,strokeW:(st.strokeW||0)*k,x:W/2,y:H/2,maxWidth:W*.84,align:'center',anchor:'middle',alpha:1});
+}
+
+export function renderGraphicPreview(canvas,preset,time=.65) {
+  const ctx=canvas.getContext('2d'),W=canvas.width,H=canvas.height;
+  ctx.clearRect(0,0,W,H);ctx.fillStyle='#20262c';ctx.fillRect(0,0,W,H);
+  const o={...preset,graphic:preset.id,text:preset.label,x:.5,y:.5,start:0,end:preset.duration||3};
+  // 카드의 넓은 비율에 맞춰 실제 그래픽을 축소하고 중앙에 그립니다.
+  const virtualW=1080,virtualH=1920,scale=Math.min(W/virtualW,H/650);
+  ctx.save();ctx.translate(W/2,H/2);ctx.scale(scale,scale);ctx.translate(-virtualW/2,-virtualH/2);
+  drawGraphic(ctx,virtualW,virtualH,o,Math.min(time,o.end*.6),1);ctx.restore();
 }
 
 function wrapLines(ctx, text, maxWidth) {
@@ -677,7 +695,9 @@ export async function loadFonts({signal}={}) {
     add(item.font,item.text);
     if(item.graphic==='count')add(item.font,'0123456789');
     if(item.graphic==='typewriter')add(item.font,'▌');
+    if(item.subtitle)add(item.font,item.subtitle);
     if(item.graphic==='chapter')add(item.font,item.subtitle||'CHAPTER 01');
+    if(item.graphic==='progress')add(item.font,'0123456789%');
     if(item.graphic==='lower')add('"Noto Sans KR"',item.subtitle||'SHORTS STUDIO');
   }
   if(project.template.mode==='band'){

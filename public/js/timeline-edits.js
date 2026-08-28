@@ -2,10 +2,22 @@
 import { project, buildLayout, clipDuration, pinClipPositions, transitionPairs, syncAnchoredItems, trackIdFor, trackItems, migrateTimeline, timelineTracks, trackKind } from './state.js';
 import { captureDocument, makeClip, makeAudio, assets, discardStagedInstance } from './project-store.js';
 import { complementRanges } from './silence.js';
+import { TRANSITIONS } from './presets.js';
+import { sliceKeyframes, splitKeyframes } from './keyframes.js';
+import { sliceCropTracking, splitCropTracking } from './crop-tracking.js';
 import { uid, clamp } from './util.js';
 
 const EPS = 1e-6;
 const cut = () => ({ type: 'cut', duration: 0 });
+const sliceMotion = (item, from, to) => ({
+  keyframes: sliceKeyframes(item, from, to), cropTracking: sliceCropTracking(item, from, to),
+});
+function applyMotion(item, motion) {
+  for (const key of ['keyframes', 'cropTracking']) {
+    if (motion[key] === undefined) delete item[key];
+    else item[key] = motion[key];
+  }
+}
 export const frameTime = (time, fps = project.fps) => Math.max(0, Math.round(time * fps) / fps);
 
 export function timelineCollection(type, doc = project) {
@@ -50,9 +62,85 @@ export function setItemRange(item, start, end) {
   delete item.anchor;
 }
 
-/** 빈 곳은 그대로, 점유된 곳은 가까운 클립 경계에 삽입합니다. 목적지 트랙만 이동합니다. */
-export function planPlacement(time, duration, trackId, excludeId = null, doc = project) {
-  const entries = trackItems(trackId, doc).filter(entry => entry.id !== excludeId);
+const placementSignature = entries => JSON.stringify(entries.map(entry =>
+  [entry.type, entry.id, entry.start, entry.end, entry.item.transitionOut || null]));
+const rangesOverlap = (a, b) => a.start < b.end - EPS && a.end > b.start + EPS;
+
+/** 전환은 자리의 연결점에 남깁니다. 새 클립 길이로 같은 겹침을 유지할 수 없으면 거절합니다. */
+function swapConnections(entries, source, target, moves) {
+  const remap = id => id === source.id ? target.id : id === target.id ? source.id : id;
+  const connections = entries.filter(entry => entry.overlapOut > EPS
+    && (remap(entry.id) !== entry.id || remap(entry.nextId) !== entry.nextId)).map(entry => ({
+    leftId: remap(entry.id), transition: { ...entry.item.transitionOut,
+      duration: entry.overlapOut, toId: remap(entry.nextId) },
+  }));
+  const row = entries.map(entry => {
+    const move = moves.find(move => move.id === entry.id);
+    return move ? { ...entry, start: move.start, end: move.end } : entry;
+  }).sort((a, b) => a.start - b.start || a.index - b.index);
+  for (const connection of connections) {
+    const index = row.findIndex(entry => entry.id === connection.leftId);
+    const left = row[index], right = row[index + 1];
+    if (left?.type !== 'clip' || right?.type !== 'clip' || right.id !== connection.transition.toId) return null;
+    const overlap = left.end - right.start, limit = Math.min(2, left.duration / 2, right.duration / 2);
+    if (overlap <= EPS || overlap > limit + EPS || Math.abs(overlap - connection.transition.duration) > EPS) return null;
+  }
+  return connections;
+}
+
+/** 같은 행의 기존 항목은 빈 곳으로 이동하거나 두 항목만 교환합니다. 다른 항목은 밀지 않습니다. */
+function planExistingMove(time, targetTime, source, entries) {
+  const start = Number.isFinite(time) ? Math.max(0, time) : source.start;
+  const plan = { ok: true, mode: 'move', start, end: start + source.duration,
+    duration: source.duration, trackId: source.trackId, shifts: [], shift: 0,
+    excludeId: source.id, requestTime: time, targetTime, guard: placementSignature(entries) };
+  const refuse = reason => ({ ...plan, ok: false, reason });
+  if (!Number.isFinite(time) || !Number.isFinite(targetTime) || !(source.duration > 0)) {
+    return refuse('유효한 클립 위치를 선택해 주세요.');
+  }
+  if (Math.abs(start - source.start) < EPS) return plan;
+  const targets = entries.filter(entry => entry.id !== source.id
+    && targetTime >= entry.start - EPS && targetTime < entry.end - EPS);
+  if (targets.length > 1) return refuse('겹쳐 있는 구간 밖에서 교환할 클립을 선택해 주세요.');
+  const target = targets[0];
+  if (target) {
+    const connected = source.overlapOut > EPS && source.nextId === target.id
+      || target.overlapOut > EPS && target.nextId === source.id;
+    if (rangesOverlap(source, target) && !connected) return refuse('전환으로 연결되지 않은 겹침은 먼저 해제한 뒤 교환해 주세요.');
+    const left = source.start < target.start ? source : target;
+    const right = left === source ? target : source;
+    // 두 항목의 바깥 경계를 고정하므로 길이가 달라도 인접한 세 번째 클립은 그대로입니다.
+    plan.mode = 'swap';
+    plan.start = source === right ? left.start : right.end - source.duration;
+    plan.end = plan.start + source.duration;
+    const swapStart = target === right ? left.start : right.end - target.duration;
+    plan.swap = { type: target.type, id: target.id, start: swapStart, end: swapStart + target.duration,
+      duration: target.duration, name: target.item.name || target.item.text || '교환할 클립' };
+  }
+  const moves = [{ ...plan, id: source.id, type: source.type }, ...(plan.swap ? [plan.swap] : [])];
+  if (plan.swap && source.type === 'clip' && target.type === 'clip') {
+    plan.connections = swapConnections(entries, source, target, moves);
+    if (!plan.connections) return refuse('교환할 공간이 부족합니다. 기존 전환의 겹침 길이를 유지할 수 없습니다.');
+  }
+  const illegalOverlap = (a, b) => rangesOverlap(a, b) && !(plan.connections || []).some(connection =>
+    connection.leftId === a.id && connection.transition.toId === b.id
+    || connection.leftId === b.id && connection.transition.toId === a.id);
+  const untouched = entries.filter(entry => entry.id !== source.id && entry.id !== target?.id);
+  if (moves.some(move => move.start < 0 || move.end > 86400
+    || untouched.some(entry => illegalOverlap(move, entry)))
+    || (plan.swap && illegalOverlap(moves[0], plan.swap))) {
+    return refuse(plan.swap
+      ? '교환할 공간이 부족합니다. 다른 클립과 겹치지 않도록 이번 교환은 적용하지 않습니다.'
+      : '빈 공간이 클립 길이보다 짧습니다. 다른 클립과 겹치지 않는 곳에 놓아 주세요.');
+  }
+  return plan;
+}
+
+/** 신규 소재는 경계에 삽입하고, 같은 행의 기존 클립 이동은 뒤 클립을 밀지 않습니다. */
+export function planPlacement(time, duration, trackId, excludeId = null, doc = project, { targetTime = time } = {}) {
+  const row = trackItems(trackId, doc), source = row.find(entry => entry.id === excludeId);
+  if (source) return planExistingMove(time, targetTime, source, row);
+  const entries = row.filter(entry => entry.id !== excludeId);
   let start = Math.max(0, time);
   let nextIndex = entries.findIndex(entry => entry.start >= start - EPS);
   const covering = entries.filter(entry => start > entry.start + EPS && start < entry.end - EPS).at(-1);
@@ -69,13 +157,13 @@ export function planPlacement(time, duration, trackId, excludeId = null, doc = p
   const shifts = shift > EPS ? entries.slice(nextIndex).map(entry => ({
     type: entry.type, id: entry.id, start: entry.start + shift,
   })) : [];
-  return { start, end, duration, trackId, shifts, shift,
+  return { ok: true, start, end, duration, trackId, shifts, shift,
     breakAfterId: next && previous?.type === 'clip' ? previous.id : null,
     mode: shifts.length ? 'insert' : 'place', excludeId };
 }
-export function planVideoPlacement(time, duration, excludeId = null, doc = project, trackId = null) {
+export function planVideoPlacement(time, duration, excludeId = null, doc = project, trackId = null, options = {}) {
   const item = doc.clips?.find(c => c.id === excludeId);
-  return planPlacement(time, duration, trackId || trackIdFor('clip', item, doc), excludeId, doc);
+  return planPlacement(time, duration, trackId || trackIdFor('clip', item, doc), excludeId, doc, options);
 }
 function disconnectClip(id) {
   for (const clip of project.clips) {
@@ -90,18 +178,36 @@ export function normalizeTransitions() {
 }
 function moveRange(range, start) {
   if (range.type === 'clip' || range.type === 'audio') range.item.start = Math.max(0, start);
-  else setItemRange(range.item, start, start + range.duration);
+  else {
+    range.item.start = Math.max(0, start);
+    range.item.end = range.item.start + range.duration;
+  }
   delete range.item.anchor;
 }
 export function placeTimelineItem(type, item, plan) {
+  if (!plan || plan.ok === false) throw new Error(plan?.reason || '클립을 놓을 위치를 다시 선택해 주세요.');
   const target = timelineTracks().find(t => t.id === plan.trackId && t.kind === trackKind(type));
   if (!target) throw new Error('호환되는 트랙에 놓아 주세요.');
-  migrateTimeline();
   const previousRange = itemRange(type, item.id);
-  if (previousRange && previousRange.trackId === target.id && Math.abs(previousRange.start - plan.start) < EPS) {
+  if (previousRange && previousRange.item !== item) throw new Error('클립이 변경되었습니다. 다시 선택해 주세요.');
+  if (previousRange?.trackId === target.id) {
+    const current = planPlacement(plan.requestTime, previousRange.duration, target.id, item.id, project,
+      { targetTime: plan.targetTime });
+    if (!current.ok) throw new Error(current.reason);
+    if (plan.guard !== current.guard || plan.mode !== current.mode
+      || plan.start !== current.start || plan.end !== current.end
+      || plan.swap?.id !== current.swap?.id || plan.swap?.start !== current.swap?.start) {
+      throw new Error('이동할 트랙이 변경되었습니다. 위치를 다시 선택해 주세요.');
+    }
+    plan = current;
+  }
+  if (previousRange && !plan.swap && previousRange.trackId === target.id && Math.abs(previousRange.start - plan.start) < EPS) {
     return { type, id: item.id, trackId: target.id, start: previousRange.start, end: previousRange.end, shifted: 0 };
   }
+  const partner = plan.swap && itemRange(plan.swap.type, plan.swap.id);
+  migrateTimeline();
   if (type === 'clip') disconnectClip(item.id);
+  if (partner?.type === 'clip') disconnectClip(partner.id);
   for (const shift of plan.shifts) {
     const range = itemRange(shift.type, shift.id);
     if (range && range.id !== item.id && range.trackId === target.id) moveRange(range, shift.start);
@@ -110,11 +216,17 @@ export function placeTimelineItem(type, item, plan) {
   if (previous) previous.transitionOut = cut();
   item.trackId = target.id;
   moveRange({ type, item, duration: plan.duration }, plan.start);
+  if (partner) moveRange(partner, plan.swap.start);
+  for (const connection of plan.connections || []) {
+    const left = project.clips.find(clip => clip.id === connection.leftId);
+    if (left) left.transitionOut = { ...connection.transition };
+  }
   const collection = timelineCollection(type);
   if (!collection.includes(item)) collection.push(item);
   normalizeTransitions();
   syncAnchoredItems();
-  return { type, id: item.id, trackId: target.id, start: plan.start, end: plan.end, shifted: plan.shifts.length };
+  return { type, id: item.id, trackId: target.id, start: plan.start, end: plan.end,
+    shifted: plan.shifts.length, mode: plan.mode, swapped: partner?.id };
 }
 export function placeVideoClip(clip, plan) {
   return placeTimelineItem('clip', clip, { ...plan, trackId: plan.trackId || trackIdFor('clip', clip) });
@@ -122,7 +234,7 @@ export function placeVideoClip(clip, plan) {
 
 /** 전환 길이 차이는 연결점 뒤의 같은 트랙 항목에만 적용합니다. */
 export function setTransition(leftId, rightId, type, requested = .5) {
-  if (!['cut', 'dissolve', 'fade', 'flash'].includes(type)) throw new Error('지원하지 않는 전환입니다.');
+  if (!TRANSITIONS.some(transition => transition.id === type)) throw new Error('지원하지 않는 전환입니다.');
   const pair = transitionPairs().find(p => p.left.id === leftId && p.right.id === rightId);
   if (!pair) throw new Error('같은 트랙에서 맞닿은 두 미디어 클립의 연결점을 선택해 주세요.');
   const value = Number.isFinite(Number(requested)) ? Number(requested) : .5;
@@ -192,15 +304,19 @@ export function planClipTrim(id, edge, time) {
 
 export function applyClipTrim(plan) {
   if (!plan) return;
+  const range = itemRange('clip', plan.id);
+  if (!range || (Math.abs(plan.start - range.start) < EPS && Math.abs(plan.end - range.end) < EPS)) return;
+  const clip = range.item, delta = plan.start - range.start;
+  // 키 시각은 클립 내부 기준이므로 원본 trimStart를 다시 더하지 않습니다.
+  const motion = sliceMotion(clip, delta, plan.end - range.start);
   pinClipPositions();
-  const clip = project.clips.find(clip => clip.id === plan.id);
-  const delta = plan.start - clip.start;
   if (clip.type === 'image') {
     clip.motionDuration = clip.motionDuration || clipDuration(clip);
     clip.motionOffset = Math.max(0, (clip.motionOffset || 0) + delta);
   }
   if (clip.fadeEnvelope) clip.fadeEnvelope = { ...clip.fadeEnvelope, offset: clip.fadeEnvelope.offset + delta };
   Object.assign(clip, { start: plan.start, trimStart: plan.trimStart, trimEnd: plan.trimEnd, imgDuration: plan.imgDuration });
+  applyMotion(clip, motion);
   normalizeTransitions();
   syncAnchoredItems();
 }
@@ -224,11 +340,13 @@ export function applyItemTrim(plan) {
   if (!plan) return;
   if (plan.type === 'clip') return applyClipTrim(plan);
   const range = itemRange(plan.type, plan.id);
-  if (!range) return;
+  if (!range || (Math.abs(plan.start - range.start) < EPS && Math.abs(plan.end - range.end) < EPS)) return;
+  const motion = sliceMotion(range.item, plan.start - range.start, plan.end - range.start);
   if (plan.type === 'audio') {
     if (range.item.fadeEnvelope) range.item.fadeEnvelope = { ...range.item.fadeEnvelope, offset: range.item.fadeEnvelope.offset + plan.start - range.start };
     Object.assign(range.item, { start: plan.start, trimStart: plan.trimStart, trimEnd: plan.trimEnd });
   } else setItemRange(range.item, plan.start, plan.end);
+  applyMotion(range.item, motion);
 }
 
 /** 선택한 종류와 ID만 분할합니다. 자막·그래픽·음성은 각각 별개의 클립입니다. */
@@ -238,6 +356,8 @@ export async function splitTimelineItem(selection, time) {
   const { item, type, local } = check;
   const document = captureDocument();
   const envelope = { ...(item.fadeEnvelope || { offset: 0, duration: check.duration, fadeIn: item.fadeIn || 0, fadeOut: item.fadeOut || 0 }) };
+  const keyframes = splitKeyframes(item, local, check.duration);
+  const tracking = splitCropTracking(item, local, check.duration);
   let right;
   if (type === 'clip') {
     const saved = document.clips.find(clip => clip.id === item.id);
@@ -265,6 +385,8 @@ export async function splitTimelineItem(selection, time) {
     item.fadeEnvelope = { ...envelope };
     right.fadeEnvelope = { ...envelope, offset: envelope.offset + local };
   }
+  applyMotion(item, { keyframes: keyframes.left, cropTracking: tracking.left });
+  applyMotion(right, { keyframes: keyframes.right, cropTracking: tracking.right });
   return { type, id: right.id, start: time, end: check.end };
 }
 
@@ -337,6 +459,7 @@ export async function applySilenceCuts(plan, { signal } = {}) {
       const r = plan.kept[i], saved = JSON.parse(JSON.stringify(plan.item));
       Object.assign(saved, { id: i ? uid() : id, start, trimStart: original.trimStart + r.start, trimEnd: original.trimStart + r.end,
         fadeEnvelope: { ...envelope, offset: envelope.offset + r.start } });
+      applyMotion(saved, sliceMotion(original, r.start, r.end));
       if (type === 'clip') saved.transitionOut = cut();
       const item = i ? (type === 'clip' ? await makeClip(original.assetId, saved) : makeAudio(original.assetId, saved)) : { ...original, ...saved };
       if (i) staged.push(item.id);

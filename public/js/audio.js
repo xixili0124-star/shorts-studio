@@ -1,6 +1,7 @@
 // 오디오 믹싱 — 클립 원본 소리 + 배경음악을 하나의 AudioBuffer 로 합친다.
 import { Input, BlobSource, ALL_FORMATS, AudioBufferSink } from '../vendor/mediabunny.min.js';
 import { project, clipDuration, totalDuration, buildLayout, clipFadeGain } from './state.js';
+import { automateVolume, hasAudibleVolume } from './audio-gain.js';
 
 const RATE = 48000;
 
@@ -16,7 +17,7 @@ export async function decodeAudioFile(file) {
 }
 
 export function hasClipAudio() {
-  return project.clips.some(c => c.type === 'video' && !c.muted && (c.volume ?? 1) > 0);
+  return project.clips.some(c => c.type === 'video' && !c.muted && hasAudibleVolume(c));
 }
 
 export function hasAnyAudio() {
@@ -114,7 +115,7 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
   master.connect(ctx.destination);
 
   // 1) 클립 원본 소리
-  const videoClips = project.clips.filter(c => c.type === 'video' && !c.muted && (c.volume ?? 1) > 0);
+  const videoClips = project.clips.filter(c => c.type === 'video' && !c.muted && hasAudibleVolume(c));
   for (let i = 0; i < videoClips.length; i++) {
     const clip = videoClips[i];
     onProgress?.(i / Math.max(1, videoClips.length), `소리 추출 중… (${i + 1}/${videoClips.length})`);
@@ -130,12 +131,13 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
     node.buffer = buf;
 
     const gain = ctx.createGain();
-    const vol = (clip.volume ?? 1) * project.audio.originalVolume;
-    applyFade(gain.gain, vol, at, dur, clip.fadeIn, clip.fadeOut, clip.fadeEnvelope);
+    automateVolume(gain.gain,clip,at,dur,project.audio.originalVolume);
+    const envelope=ctx.createGain();
+    applyFade(envelope.gain,1,at,dur,clip.fadeIn,clip.fadeOut,clip.fadeEnvelope);
     const e = buildLayout().entries.find(e => e.clip.id === clip.id);
     const crossfade = ctx.createGain();
     applyFade(crossfade.gain, 1, at, dur, e?.overlapIn || 0, e?.overlapOut || 0);
-    node.connect(gain).connect(crossfade).connect(master);
+    node.connect(gain).connect(envelope).connect(crossfade).connect(master);
     node.start(at, 0, Math.min(dur, buf.duration));
   }
 
@@ -148,8 +150,10 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
     const node = ctx.createBufferSource();
     node.buffer = track.buffer;
     const gain = ctx.createGain();
-    applyFade(gain.gain, track.volume ?? 1, track.start, duration, track.fadeIn, track.fadeOut, track.fadeEnvelope);
-    node.connect(gain).connect(master);
+    automateVolume(gain.gain,track,track.start,duration);
+    const envelope=ctx.createGain();
+    applyFade(envelope.gain,1,track.start,duration,track.fadeIn,track.fadeOut,track.fadeEnvelope);
+    node.connect(gain).connect(envelope).connect(master);
     node.start(track.start, track.trimStart, duration);
   }
 

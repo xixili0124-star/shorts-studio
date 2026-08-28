@@ -2,6 +2,7 @@
 import base64
 import binascii
 from contextlib import contextmanager
+import errno
 import io
 import hmac
 import hashlib
@@ -22,6 +23,17 @@ MAX_REFERENCE_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 32 * 1024 * 1024
 MAX_PROFILES = 12
 PROFILE_ID = re.compile(r'^[a-f0-9]{32}$')
+ASR_LEASE_TOKEN = re.compile(r'^[a-f0-9]{64}$')
+
+
+def validate_asr_reservation(data):
+    if not isinstance(data, dict) or set(data) != {'requiredFreeMiB', 'ttlSeconds'}:
+        raise VoiceError('INVALID_ASR_RESERVATION', 'PC 자막 예약 요청을 확인해 주세요.')
+    required, ttl = data['requiredFreeMiB'], data['ttlSeconds']
+    if (type(required) is not int or not 3200 <= required <= 4096
+            or type(ttl) is not int or not 30 <= ttl <= 660):
+        raise VoiceError('INVALID_ASR_RESERVATION', 'PC 자막 예약 범위를 확인해 주세요.')
+    return required, ttl
 
 
 def local_engine_key(settings_path):
@@ -52,7 +64,7 @@ def engine_proof(key, nonce, provider=None, model=None):
     return hmac.new(key.encode('ascii'), message.encode('ascii'), hashlib.sha256).hexdigest()
 
 
-def verified_engine(opener, endpoint, key, timeout=3, provider='gpt-sovits'):
+def verified_engine(opener, endpoint, key, timeout=3, provider='gpt-sovits', allow_offline=False):
     """Authenticate the expected provider before sending a key, text, or voice."""
     if provider not in PROVIDERS or not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{32,128}', key):
         return False
@@ -75,7 +87,13 @@ def verified_engine(opener, endpoint, key, timeout=3, provider='gpt-sovits'):
         model = PROVIDERS[provider][1]
         return (data.get('protocol') == 2 and data.get('provider') == provider and data.get('model') == model
             and hmac.compare_digest(data['proof'], engine_proof(key, nonce, provider, model)))
-    except (HTTPError, URLError, TimeoutError, OSError, ValueError, AttributeError, TypeError):
+    except (HTTPError, URLError, TimeoutError, OSError, ValueError, AttributeError, TypeError) as error:
+        reason = error.reason if isinstance(error, URLError) else error
+        # 연결 거절만 꺼진 엔진으로 취급한다. 시간 초과·잘못된 서명은 우회하지 않는다.
+        if allow_offline and isinstance(reason, OSError) and (
+                isinstance(reason, ConnectionRefusedError) or reason.errno in (errno.ECONNREFUSED, 10061)
+                or getattr(reason, 'winerror', None) == 10061):
+            return None
         return False
 
 
@@ -274,8 +292,10 @@ class VoiceCloneService:
                     result = response.read(MAX_RESULT_BYTES + 1)
                 info = wav_info(result)
                 return result, info
-            except HTTPError:
+            except HTTPError as error:
                 # Never forward model paths, prompt text, tracebacks, or redirects.
+                if error.code == 409:
+                    raise VoiceError('VOICE_BUSY', 'PC 음성 또는 자막 작업이 진행 중입니다. 작업이 끝난 뒤 다시 생성해 주세요.', 409) from None
                 raise VoiceError('ENGINE_REJECTED', 'PC 엔진이 생성하지 못했습니다. 모델 설정과 참고 음성의 읽은 문장을 확인해 주세요.', 502) from None
             except (TimeoutError, OSError, URLError):
                 # A disconnected request is not proof that GPU inference stopped.
@@ -285,3 +305,75 @@ class VoiceCloneService:
     def require_engine(self):
         if not verified_engine(self.opener, self.endpoint, self.engine_headers.get('X-Studio-Engine-Key'), provider=self.provider):
             raise VoiceError('ENGINE_NOT_READY', '안전한 PC 음성 엔진 연결을 확인하지 못했습니다. PC 음성 시작 후 연결을 다시 확인해 주세요.', 503)
+
+    def asr_engine_available(self):
+        """참고 음성을 읽지 않고 ASR과 조율할 엔진의 신원만 확인한다."""
+        if self.uncertain:
+            raise VoiceError('ENGINE_RESTART_REQUIRED', '이전 PC 음성 작업의 종료가 불확실합니다. 엔진과 편집기 서버를 다시 실행해 주세요.', 503)
+        key = self.engine_headers.get('X-Studio-Engine-Key')
+        if not key:
+            return False
+        ready = verified_engine(self.opener, self.endpoint, key, provider=self.provider, allow_offline=True)
+        if ready is None:
+            return False
+        if not ready:
+            raise VoiceError('ENGINE_NOT_READY', 'PC 음성 엔진의 신원이나 작업 상태를 확인하지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.', 503)
+        return True
+
+    def _asr_request(self, route, payload):
+        self.require_engine()
+        request = Request(self.endpoint + route, data=json.dumps(payload).encode('utf-8'),
+            headers={'Content-Type': 'application/json', 'Accept': 'application/json', **self.engine_headers}, method='POST')
+        try:
+            with self.opener.open(request, timeout=min(self.timeout, 30)) as response:
+                raw = response.read(4097)
+            if len(raw) > 4096:
+                raise ValueError()
+            data = json.loads(raw)
+            if not isinstance(data, dict):
+                raise ValueError()
+            return data
+        except HTTPError as error:
+            if error.code == 409:
+                raise VoiceError('VOICE_BUSY', 'PC 음성 엔진이 작업 중입니다. 작업이 끝난 뒤 자막을 만들어 주세요.', 409) from None
+            if error.code in (403, 404, 405):
+                raise VoiceError('ASR_COORDINATION_UNAVAILABLE', '현재 PC 음성 엔진은 자막 작업 예약을 지원하지 않습니다. PC 음성 엔진을 다시 실행해 주세요.', 503) from None
+            try:
+                raw = error.read(4097)
+                detail = json.loads(raw) if len(raw) <= 4096 else {}
+            except (OSError, ValueError, UnicodeError):
+                detail = {}
+            if error.code == 503 and isinstance(detail, dict) and detail.get('error') == 'ASR_GPU_MEMORY':
+                raise VoiceError('ASR_GPU_MEMORY', 'PC 자막용 GPU 메모리가 부족합니다. 다른 GPU 작업을 끝낸 뒤 다시 시도해 주세요.', 503) from None
+            self.uncertain = True
+            raise VoiceError('ENGINE_RESTART_REQUIRED', 'PC 자막 예약 상태를 확인하지 못했습니다. 엔진과 편집기 서버를 다시 실행해 주세요.', 503) from None
+        except (TimeoutError, OSError, URLError, ValueError, UnicodeError):
+            # 예약 응답 분실은 엔진이 예약하지 않았다는 증거가 아니다.
+            self.uncertain = True
+            raise VoiceError('ENGINE_RESTART_REQUIRED', 'PC 자막 예약 응답을 확인하지 못했습니다. 엔진과 편집기 서버를 다시 실행해 주세요.', 503) from None
+
+    def reserve_asr(self, required_free_mib=3584, ttl=660):
+        """호출자가 exclusive()를 ASR 자식 프로세스 종료까지 유지해야 한다."""
+        payload = {'requiredFreeMiB': required_free_mib, 'ttlSeconds': ttl}
+        validate_asr_reservation(payload)
+        if not self.asr_engine_available():
+            return None
+        data = self._asr_request('/studio/asr-reserve', payload)
+        if (not isinstance(data.get('token'), str) or not ASR_LEASE_TOKEN.fullmatch(data['token'])
+                or data.get('provider') != self.provider or type(data.get('modelUnloaded')) is not bool
+                or data.get('requiredFreeMiB') != required_free_mib or data.get('leaseSeconds') != ttl
+                or data.get('memoryStatus') not in ('sufficient', 'unknown', 'cpu', 'unmanaged')
+                or (data.get('freeMiB') is not None and (type(data['freeMiB']) is not int or data['freeMiB'] < 0))):
+            self.uncertain = True
+            raise VoiceError('ENGINE_RESTART_REQUIRED', 'PC 자막 예약 정보를 확인하지 못했습니다. 엔진과 편집기 서버를 다시 실행해 주세요.', 503)
+        return data
+
+    def release_asr(self, token):
+        """ASR 자식 프로세스의 실제 종료를 확인한 뒤에만 호출한다."""
+        if not isinstance(token, str) or not ASR_LEASE_TOKEN.fullmatch(token):
+            raise VoiceError('INVALID_ASR_RESERVATION', 'PC 자막 예약 정보를 확인해 주세요.')
+        data = self._asr_request('/studio/asr-release', {'token': token})
+        if data != {'released': True}:
+            self.uncertain = True
+            raise VoiceError('ENGINE_RESTART_REQUIRED', 'PC 자막 예약 해제를 확인하지 못했습니다. 엔진과 편집기 서버를 다시 실행해 주세요.', 503)
+        return data

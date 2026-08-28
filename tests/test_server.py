@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import threading
+import time
 import tempfile
 import subprocess
 import sys
@@ -19,10 +20,16 @@ from unittest.mock import patch, Mock
 from pc_voice import VoiceCloneService, VoiceError, wav_info, MAX_REFERENCE_BODY, local_engine_key, engine_proof
 from pc_voice_config import activate_config, provider_of, read_config, settings_path, service_identity
 from vox_voice_engine import VoxEngine, korean_score_text, speech_chunks, validate_request, validate_generation_length
+from pc_voice_engine import EngineASRReservation
+import pc_asr
+from pc_asr import PcAsrService, AsrError, validate_audio, public_result
 
 spec=importlib.util.spec_from_file_location('studio_server',Path(__file__).resolve().parents[1]/'studio_server.py')
 studio=importlib.util.module_from_spec(spec)
-spec.loader.exec_module(studio)
+# 모듈 초기화도 실제 PC 엔진 설정을 읽지 않도록 격리한다.
+with patch('pc_voice_config.service_identity',return_value=('gpt-sovits',None)):
+    spec.loader.exec_module(studio)
+studio.service_identity=service_identity
 
 class ServerTests(unittest.TestCase):
     @classmethod
@@ -50,6 +57,15 @@ class ServerTests(unittest.TestCase):
         self.addCleanup(temporary.cleanup)
         self.pc=VoiceCloneService(Path(temporary.name)/'private-voices')
         self.server.pc_voice=self.pc
+        self.asr=PcAsrService(Path(temporary.name)/'asr-config',voice=self.pc)
+        self.server.pc_asr=self.asr
+        self.addCleanup(self.asr.close)
+        self.asr_job_patch=patch.object(pc_asr,'WindowsJob')
+        self.asr_job_factory=self.asr_job_patch.start()
+        self.addCleanup(self.asr_job_patch.stop)
+        self.asr_job=self.asr_job_factory.return_value
+        self.asr_job.name=None
+        self.asr_job.close.return_value=True
         self.pc_mock=patch.object(self.pc.opener,'open')
         self.pc_call=self.pc_mock.start()
         self.addCleanup(self.pc_mock.stop)
@@ -74,6 +90,248 @@ class ServerTests(unittest.TestCase):
     def pc_request(self,path='status',body=None,headers=None):
         return self.request('/api/voice-clone/'+path,body,
                             {'X-Studio-PC-Voice':'1','X-Studio-Consent':'voice-clone-local',**(headers or {})})
+
+    def asr_request(self,path='status',body=None,headers=None):
+        selected={'Origin':self.base,'X-Studio-PC-ASR':'1','X-Studio-Consent':'audio-to-local-asr',
+            'Content-Type':'audio/wav' if isinstance(body,bytes) else 'application/json',**(headers or {})}
+        selected={key:value for key,value in selected.items() if value is not None}
+        data=body if body is None or isinstance(body,bytes) else json.dumps(body).encode()
+        request=Request(self.base+'/api/pc-asr/'+path,data=data,headers=selected)
+        try:
+            with urlopen(request,timeout=5) as response:return response.status,json.loads(response.read())
+        except HTTPError as error:return error.code,json.loads(error.read())
+
+    def wait_asr(self,job_id):
+        deadline=time.monotonic()+4
+        while time.monotonic()<deadline:
+            result=self.asr.get(job_id)
+            if result['state']!='running':return result
+            time.sleep(.01)
+        self.fail('ASR test job did not finish')
+
+    def asr_settings(self):
+        return {'engine':str(self.pc.directory.parent/'asr-engine'),'python':str(Path(sys.executable)),
+            'model':str(self.pc.directory.parent/'model'),'device':'cuda','computeType':'int8_float16',
+            'modelRevision':'test-revision'}
+
+    def test_asr_api_requires_same_origin_header_and_explicit_audio_consent(self):
+        audio=self.pcm_wave(1,16000)
+        with patch.object(pc_asr.subprocess,'Popen') as process:
+            for headers in ({'X-Studio-PC-ASR':None},{'Origin':'https://evil.test'},
+                    {'Host':'evil.test'},{'Sec-Fetch-Site':'cross-site'}):
+                self.assertEqual(self.asr_request(headers=headers)[0],403)
+                self.assertEqual(self.asr_request('transcribe',audio,headers)[0],403)
+            self.assertEqual(self.asr_request('transcribe',audio,{'Origin':None})[0],403)
+            self.assertEqual(self.asr_request('transcribe',audio,{'X-Studio-Consent':None})[0],403)
+            self.assertEqual(self.asr_request('transcribe',audio,{'X-Studio-Consent':'audio-to-openai'})[0],403)
+            process.assert_not_called()
+        self.call.assert_not_called()
+
+    def test_asr_status_without_install_does_not_use_cloud_or_read_voice_profiles(self):
+        with patch.object(self.pc,'profiles',side_effect=AssertionError('ASR must not read references')):
+            status,data=self.asr_request()
+        self.assertEqual(status,200)
+        self.assertFalse(data['configured'])
+        self.assertFalse(data['available'])
+        self.assertEqual(data['model'],'large-v3-turbo')
+        self.assertNotIn('profiles',data)
+        self.assertEqual(self.asr_request('jobs/'+'0'*32)[0],404)
+        self.assertEqual(self.asr_request('cancel',{'jobId':'../private'})[0],404)
+        self.assertEqual(self.asr_request('cancel',{'jobId':'0'*32,'path':'private'})[0],400)
+        self.call.assert_not_called()
+        self.pc_call.assert_not_called()
+
+    def test_asr_rejects_invalid_audio_and_never_starts_a_process(self):
+        with patch.object(pc_asr.subprocess,'Popen') as process:
+            self.assertEqual(self.asr_request('transcribe',b'not a wav')[0],413)
+            self.assertEqual(self.asr_request('transcribe',self.pcm_wave(1,32000))[0],400)
+            self.assertEqual(self.asr_request('transcribe',self.pcm_wave(1,16000)[:-2])[0],400)
+            self.assertEqual(self.asr_request('transcribe',{'endpoint':'https://evil.test'})[0],415)
+            self.assertEqual(self.asr_request('transcribe',self.pcm_wave(1,16000),{'Transfer-Encoding':'chunked'})[0],413)
+            process.assert_not_called()
+        self.call.assert_not_called()
+
+    def test_asr_completed_job_preserves_real_segment_fallback_and_releases_lease(self):
+        audio=self.pcm_wave(2,16000)
+        word={'word':'안녕','start':0.1,'end':0.6,'probability':.9}
+        payload={'model':'large-v3-turbo','text':'안녕 테스트','device':'cuda','computeType':'int8_float16',
+            'words':[word],'segments':[{'text':'안녕','start':.1,'end':.6,'words':[word]},
+                {'text':'테스트','start':1,'end':1.7,'words':[]}], 'secretPath':'C:/private/not-returned'}
+        process=Mock();process.returncode=None;process.poll.side_effect=lambda:process.returncode
+        def complete(input=None,timeout=None):
+            self.assertEqual(input,audio)
+            process.returncode=0
+            return json.dumps(payload).encode(),None
+        process.communicate.side_effect=complete
+        with patch.object(pc_asr,'read_settings',return_value=self.asr_settings()), \
+                patch.object(pc_asr.subprocess,'Popen',return_value=process) as launch, \
+                patch.object(self.pc,'reserve_asr',return_value={'token':'private-lease'}) as reserve, \
+                patch.object(self.pc,'release_asr') as release:
+            status,data=self.asr_request('transcribe',audio)
+            self.assertEqual(status,202)
+            result=self.wait_asr(data['jobId'])
+            self.assertEqual(result['state'],'done')
+            self.assertEqual(result['result']['segments'][1]['text'],'테스트')
+            self.assertEqual(result['result']['segments'][1]['start'],1)
+            self.assertEqual(result['result']['timingMode'],'mixed')
+            self.assertNotIn('secretPath',result['result'])
+            reserve.assert_called_once_with(required_free_mib=3584,ttl=660)
+            release.assert_called_once_with('private-lease')
+            self.asr_job.close.assert_called_once_with()
+            arguments=launch.call_args.args[0]
+            self.assertIn('--compute-type',arguments)
+            self.assertIn('int8_float16',arguments)
+            self.assertNotIn('https://',str(arguments))
+            self.assertEqual(launch.call_args.kwargs['env']['HF_HUB_OFFLINE'],'1')
+            self.assertNotIn('OPENAI_API_KEY',launch.call_args.kwargs['env'])
+        self.call.assert_not_called()
+
+    def test_asr_cancel_waits_for_owned_process_exit_before_releasing_voice_lease(self):
+        entered=threading.Event();stopped=threading.Event();order=[]
+        self.asr_job.close.side_effect=lambda:order.append('job-closed') or True
+        process=Mock();process.returncode=None;process.poll.side_effect=lambda:process.returncode
+        def pending(input=None,timeout=None):
+            entered.set();time.sleep(.01)
+            raise subprocess.TimeoutExpired('test-asr',.01)
+        def stop(target):
+            self.assertIs(target,process);process.returncode=-9;stopped.set();order.append('stopped')
+        def release(token):
+            self.assertTrue(stopped.is_set());order.append('released')
+        process.communicate.side_effect=pending
+        with patch.object(pc_asr,'read_settings',return_value=self.asr_settings()), \
+                patch.object(pc_asr.subprocess,'Popen',return_value=process), \
+                patch.object(pc_asr,'stop_process',side_effect=stop), \
+                patch.object(self.pc,'reserve_asr',return_value={'token':'private-lease'}), \
+                patch.object(self.pc,'release_asr',side_effect=release):
+            job_id=self.asr.start(self.pcm_wave(1,16000))
+            self.assertTrue(entered.wait(2))
+            with self.assertRaises(AsrError):self.asr.start(self.pcm_wave(1,16000))
+            self.assertEqual(self.asr_request('cancel',{'jobId':job_id})[0],200)
+            result=self.wait_asr(job_id)
+            self.assertEqual(result['state'],'cancelled')
+            self.assertNotIn('result',result)
+            self.assertEqual(order,['job-closed','stopped','released'])
+        self.assertFalse(self.pc.lock.locked())
+
+    def test_asr_job_close_failure_blocks_reuse_without_releasing_voice_lease(self):
+        process=Mock(returncode=0)
+        process.poll.return_value=0
+        process.communicate.return_value=(json.dumps({'text':'', 'model':'large-v3-turbo',
+            'device':'cuda','computeType':'int8_float16','words':[],'segments':[]}).encode(),None)
+        self.asr_job.close.side_effect=RuntimeError('private job detail')
+        with patch.object(pc_asr,'read_settings',return_value=self.asr_settings()), \
+                patch.object(pc_asr.subprocess,'Popen',return_value=process), \
+                patch.object(self.pc,'reserve_asr',return_value={'token':'private-lease'}), \
+                patch.object(self.pc,'release_asr') as release:
+            job_id=self.asr.start(self.pcm_wave(1,16000))
+            result=self.wait_asr(job_id)
+            self.assertEqual(result['state'],'failed')
+            self.assertEqual(result['error']['code'],'ASR_STOP_FAILED')
+            self.assertNotIn('result',result)
+            self.assertNotIn('private job detail',json.dumps(result))
+            self.assertTrue(self.asr.uncertain)
+            self.assertTrue(self.pc.uncertain)
+            release.assert_not_called()
+            with self.assertRaises(AsrError) as caught:self.asr.start(self.pcm_wave(1,16000))
+            self.assertEqual(caught.exception.code,'ASR_RESTART_REQUIRED')
+
+    def test_asr_results_must_match_supported_device_pair_and_requested_settings(self):
+        valid={'text':'test','model':'large-v3-turbo','device':'cuda','computeType':'int8_float16',
+            'words':[{'word':'test','start':.2,'end':.8}],'segments':[]}
+        expected={'device':'cuda','computeType':'int8_float16'}
+        self.assertEqual(public_result(valid,1,expected)['words'],valid['words'])
+        for device,compute in (('cpu','int8_float16'),('cuda','int8'),('auto','int8')):
+            with self.subTest(device=device,compute=compute):
+                with self.assertRaises(AsrError):public_result({**valid,'device':device,'computeType':compute},1)
+        with self.assertRaises(AsrError):
+            public_result({**valid,'device':'cpu','computeType':'int8'},1,expected)
+        with self.assertRaises(AsrError):
+            public_result(valid,1,{'device':'cpu','computeType':'int8'})
+
+    def test_asr_invalid_times_do_not_create_plausible_fake_subtitles(self):
+        valid={'text':'자막','model':'large-v3-turbo','device':'cuda','computeType':'int8_float16',
+            'words':[{'word':'자막','start':.2,'end':.8}], 'segments':[]}
+        self.assertEqual(public_result(valid,1)['words'][0]['start'],.2)
+        for start,end in ((None,.8),(.2,float('nan')),(-1,.8),(.8,.2),(.2,5),(True,.8),(1.01,1.05)):
+            with self.subTest(start=start,end=end):
+                with self.assertRaises(AsrError):public_result({**valid,'words':[{'word':'자막','start':start,'end':end}]},1)
+        self.assertAlmostEqual(validate_audio(self.pcm_wave(1.25,16000)),1.25)
+
+    def test_engine_asr_reservation_excludes_tts_and_other_asr_until_release(self):
+        prepare=Mock(return_value={'modelUnloaded':False,'freeMiB':8192,'memoryStatus':'sufficient'})
+        jobs=EngineASRReservation('voxcpm2',prepare)
+        request={'requiredFreeMiB':3584,'ttlSeconds':60}
+        jobs.begin_tts()
+        for operation in (jobs.begin_tts,lambda:jobs.reserve(request)):
+            with self.assertRaises(VoiceError) as caught:operation()
+            self.assertEqual(caught.exception.code,'VOICE_BUSY')
+        prepare.assert_not_called()
+        jobs.finish_tts()
+        lease=jobs.reserve(request)
+        prepare.assert_called_once_with(3584)
+        for operation in (jobs.begin_tts,lambda:jobs.reserve(request)):
+            with self.assertRaises(VoiceError) as caught:operation()
+            self.assertEqual(caught.exception.code,'VOICE_BUSY')
+        jobs.release({'token':lease['token']})
+        jobs.begin_tts()
+        jobs.finish_tts()
+
+    def test_engine_asr_release_requires_exact_current_token_and_is_retryable(self):
+        jobs=EngineASRReservation('voxcpm2')
+        request={'requiredFreeMiB':3584,'ttlSeconds':60}
+        with patch('pc_voice_engine.secrets.token_hex',side_effect=['a'*64,'b'*64]):
+            first=jobs.reserve(request)
+            for supplied in ({'token':'bad'},{'token':'c'*64},{'token':first['token'],'extra':True}):
+                with self.subTest(supplied=supplied):
+                    with self.assertRaises(VoiceError):jobs.release(supplied)
+                    with self.assertRaises(VoiceError) as caught:jobs.begin_tts()
+                    self.assertEqual(caught.exception.code,'VOICE_BUSY')
+            self.assertEqual(jobs.release({'token':first['token']}),{'released':True})
+            self.assertEqual(jobs.release({'token':first['token']}),{'released':True})
+            second=jobs.reserve(request)
+            with self.assertRaises(VoiceError) as caught:jobs.release({'token':first['token']})
+            self.assertEqual(caught.exception.code,'ASR_RESERVATION_MISMATCH')
+            with self.assertRaises(VoiceError):jobs.begin_tts()
+            jobs.release({'token':second['token']})
+            jobs.begin_tts()
+            jobs.finish_tts()
+
+    def test_engine_asr_expired_ttl_does_not_prove_worker_finished(self):
+        clock=Mock(return_value=100.0)
+        jobs=EngineASRReservation('voxcpm2',clock=clock)
+        request={'requiredFreeMiB':3584,'ttlSeconds':30}
+        lease=jobs.reserve(request)
+        clock.return_value=131.0
+        for operation in (jobs.begin_tts,lambda:jobs.reserve(request)):
+            with self.assertRaises(VoiceError) as caught:operation()
+            self.assertEqual(caught.exception.code,'ENGINE_RESTART_REQUIRED')
+        jobs.release({'token':lease['token']})
+        jobs.begin_tts()
+        jobs.finish_tts()
+
+    def test_engine_unconfirmed_memory_or_tts_failure_blocks_later_gpu_work(self):
+        request={'requiredFreeMiB':3584,'ttlSeconds':60}
+        for failure in ('prepare','tts'):
+            with self.subTest(failure=failure):
+                prepare=Mock(side_effect=RuntimeError('unknown GPU state'))
+                jobs=EngineASRReservation('voxcpm2',prepare)
+                if failure=='prepare':
+                    with self.assertRaises(RuntimeError):jobs.reserve(request)
+                else:
+                    jobs.begin_tts()
+                    jobs.finish_tts(completed=False)
+                for operation in (jobs.begin_tts,lambda:jobs.reserve(request)):
+                    with self.assertRaises(VoiceError) as caught:operation()
+                    self.assertEqual(caught.exception.code,'ENGINE_RESTART_REQUIRED')
+
+    def test_engine_known_memory_shortage_does_not_leave_an_unused_reservation(self):
+        prepare=Mock(side_effect=VoiceError('ASR_GPU_MEMORY','test memory shortage',503))
+        jobs=EngineASRReservation('voxcpm2',prepare)
+        with self.assertRaises(VoiceError) as caught:
+            jobs.reserve({'requiredFreeMiB':3584,'ttlSeconds':60})
+        self.assertEqual(caught.exception.code,'ASR_GPU_MEMORY')
+        jobs.begin_tts()
+        jobs.finish_tts()
 
     def private_engine_health(self):
         key='private_test_key_'+'a'*32
@@ -474,6 +732,73 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(tts.build_prompt_cache.call_args.kwargs['prompt_text'],profile['promptText']+' ')
         self.assertFalse(self.pc.lock.locked())
         self.assertEqual(before,{p.name:p.read_bytes() for p in self.pc.directory.iterdir()})
+
+    def vox_memory_fixture(self,free_mib):
+        engine=VoxEngine.__new__(VoxEngine)
+        engine.references=self.pc
+        engine.device='cuda'
+        engine.model_path=str(self.pc.directory.parent/'fake-vox-model')
+        engine.model=object()
+        cuda=Mock()
+        cuda.mem_get_info.side_effect=[(free*1024**2,12288*1024**2) for free in free_mib]
+        constructor=Mock(return_value=SimpleNamespace(tts_model=SimpleNamespace(sample_rate=48000)))
+        return engine,SimpleNamespace(cuda=cuda),constructor
+
+    def test_vox_asr_memory_keeps_loaded_model_when_enough_is_free(self):
+        engine,torch,constructor=self.vox_memory_fixture([5000])
+        original=engine.model
+        with patch.dict(sys.modules,{'torch':torch,'voxcpm':SimpleNamespace(VoxCPM=constructor)}):
+            result=engine.prepare_asr_memory(3584)
+            self.assertFalse(result['modelUnloaded'])
+            self.assertIs(engine._ensure_model(),original)
+            constructor.assert_not_called()
+        torch.cuda.empty_cache.assert_not_called()
+        torch.cuda.synchronize.assert_not_called()
+        self.assertFalse(self.pc.lock.locked())
+
+    def test_vox_asr_memory_releases_unused_cache_before_unloading_a_model(self):
+        engine,torch,constructor=self.vox_memory_fixture([2048,5000])
+        original=engine.model
+        with patch.dict(sys.modules,{'torch':torch,'voxcpm':SimpleNamespace(VoxCPM=constructor)}):
+            result=engine.prepare_asr_memory(3584)
+        self.assertFalse(result['modelUnloaded'])
+        self.assertIs(engine.model,original)
+        torch.cuda.empty_cache.assert_called_once_with()
+        torch.cuda.synchronize.assert_not_called()
+        constructor.assert_not_called()
+
+    def test_vox_asr_memory_unloads_only_when_needed_and_reloads_lazily(self):
+        engine,torch,constructor=self.vox_memory_fixture([1024,2048,6500])
+        def collect():
+            self.assertIsNone(engine.model)
+            self.assertTrue(self.pc.lock.locked())
+            return 0
+        with patch.dict(sys.modules,{'torch':torch,'voxcpm':SimpleNamespace(VoxCPM=constructor)}), \
+                patch('gc.collect',side_effect=collect) as garbage:
+            result=engine.prepare_asr_memory(3584)
+            self.assertTrue(result['modelUnloaded'])
+            self.assertIsNone(engine.model)
+            constructor.assert_not_called()
+            torch.cuda.synchronize.assert_called_once_with('cuda')
+            self.assertEqual(torch.cuda.empty_cache.call_count,2)
+            garbage.assert_called_once_with()
+            # 예약 해제가 아닌 다음 음성 요청의 모델 확인 시점에만 다시 만든다.
+            reloaded=engine._ensure_model()
+            self.assertIs(engine._ensure_model(),reloaded)
+            self.assertIs(reloaded,constructor.return_value)
+            constructor.assert_called_once()
+            self.assertEqual(constructor.call_args.kwargs['voxcpm_model_path'],engine.model_path)
+        self.assertFalse(self.pc.lock.locked())
+
+    def test_vox_asr_memory_shortage_after_unload_does_not_reload_to_retry(self):
+        engine,torch,constructor=self.vox_memory_fixture([512,1024,2048])
+        with patch.dict(sys.modules,{'torch':torch,'voxcpm':SimpleNamespace(VoxCPM=constructor)}), \
+                patch('gc.collect',return_value=0):
+            with self.assertRaises(VoiceError) as caught:engine.prepare_asr_memory(3584)
+            self.assertEqual(caught.exception.code,'ASR_GPU_MEMORY')
+        self.assertIsNone(engine.model)
+        constructor.assert_not_called()
+        self.assertFalse(self.pc.lock.locked())
 
     def test_pc_installer_does_not_publish_settings_before_resources_succeed(self):
         import setup_pc_voice as setup

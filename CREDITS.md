@@ -91,6 +91,23 @@ Meta 자료는 표지에 Last Updated June 15th, 2023으로 표시된 구형 참
 
 설치된 기기 음성은 [Web Speech API](https://webaudio.github.io/web-speech-api/)의 `localService` 보이스만 사용합니다. 파일을 반환하지 않는 재생 전용 API이므로 WAV 생성과 구분했습니다. 운영체제에 설치된 보이스 자체의 사용 조건은 해당 제공자의 조건을 확인하세요.
 
+## 선택형 PC 자동자막 엔진 · Whisper large-v3-turbo
+
+브라우저 Tiny와 별도로 사용하는 PC 인식 환경입니다. 모델·Python·CUDA 런타임은 저장소나 배포 ZIP에 넣지 않고, 사용자가 `setup-pc-asr.cmd`의 다운로드에 동의하면 별도 환경에 준비합니다. Vox·GPT-SoVITS의 Python 환경에 설치하지 않습니다.
+
+| 구성 | 고정 버전 / 원본 | 이용 조건 |
+| --- | --- | --- |
+| Whisper large-v3-turbo CTranslate2 모델 | [dropbox-dash 고정 revision 0a363e91](https://huggingface.co/dropbox-dash/faster-whisper-large-v3-turbo/tree/0a363e9161cbc7ed1431c9597a8ceaf0c4f78fcf), 원본은 OpenAI Whisper large-v3-turbo | 고정 모델 카드의 `license: mit` 표기. [원본 Whisper MIT 고지 · v20250625](https://github.com/openai/whisper/blob/v20250625/LICENSE)도 함께 확인 |
+| faster-whisper | [SYSTRAN v1.2.1](https://github.com/SYSTRAN/faster-whisper/tree/v1.2.1) | [MIT 원문](https://github.com/SYSTRAN/faster-whisper/blob/v1.2.1/LICENSE), SYSTRAN 저작권 고지 |
+| CTranslate2 | [OpenNMT v4.8.1](https://github.com/OpenNMT/CTranslate2/tree/v4.8.1) | [MIT 원문](https://github.com/OpenNMT/CTranslate2/blob/v4.8.1/LICENSE), SYSTRAN·OpenNMT 저작권 고지 |
+| GPU 실행 라이브러리 | cuBLAS 12.8.4.1, CUDA runtime 12.8.90. `setup_pc_asr.py`의 고정 Windows wheel 사용 | 각 NVIDIA 패키지의 별도 제공 조건·고지를 유지. 위 모델·추론 코드의 MIT로 묶지 않음 |
+
+모델 파일의 크기·SHA-256·revision은 `pc_asr_worker.py`, Python 패키지 버전은 `pc-asr-requirements.txt`, CUDA wheel의 URL·크기·SHA-256은 `setup_pc_asr.py`에 기록합니다. 다운로드한 모델 카드도 해시를 확인해 유지합니다. PyAV·ONNX Runtime 등 다른 실행 의존성의 라이선스·제3자 고지는 각 설치 패키지에 따르며 전체 환경을 하나의 MIT 라이선스로 간주하지 않습니다.
+
+모델 카드는 저장된 가중치를 FP16으로 설명하지만 앱의 기본 GPU 계산 형식은 `int8_float16`입니다. CPU 설치를 명시 선택하면 `int8`를 사용합니다. 설치 시 장치와 실행 환경을 검사하며, 실제 인식 품질·처리 속도를 보장하는 표기는 아닙니다.
+
+인식은 사용자가 실행한 뒤 같은 PC의 루프백 연결에서만 처리하며 오디오를 외부 모델 API로 보내지 않습니다. Whisper의 사용 조건은 사용자가 가져온 영상·음성의 권리를 대신하지 않습니다. 본인 또는 이용 권한이 있는 소재를 사용하세요.
+
 ## 선택형 PC 음성 엔진
 
 모델·Python 런타임·참고 녹음은 이 저장소와 배포 ZIP에 포함하지 않습니다. 사용자가 Windows 설치 도구에서 동의하면 공식 저장소·PyPI·PyTorch 배포처에서 별도 다운로드합니다. 원문 라이선스는 내려받은 소스와 설치된 각 패키지에 유지합니다.

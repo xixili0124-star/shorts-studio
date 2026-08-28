@@ -9,6 +9,7 @@ import { normalizedRect, mosaicAt, redactSource, unresolvedMosaics, MAX_MOSAICS 
 import { videoFrameReader, trackMosaic } from './video-analysis.js';
 import { TTS_MODEL, runLocalAI, whisperCaptions, installedVoices, speakInstalled } from './local-ai.js';
 import { isPcVoiceOrigin, pcVoiceStatus, saveVoiceReference, deleteVoiceReference, generatePcVoice, decodeVoiceReference, recordVoiceReference } from './pc-voice.js';
+import { isPcAsrOrigin, pcAsrStatus, pcAsrDeviceLabel, pcAsrCaptions, transcribePcAudio, PC_ASR_SETUP_URL } from './pc-asr.js';
 import { uid, clamp } from './util.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
@@ -38,7 +39,8 @@ export class StudioTools {
     this.hooks=hooks;this.job=null;this.state=null;
     this.voice={text:'안녕하세요. 오늘은 짧은 영상을 함께 편집합니다.',engine:'local',voice:'F1',speed:1,steps:5,systemVoice:'',accepted:false};
     this.pcVoice={status:null,error:'',checking:false,profileId:'',accepted:false};
-    this.captionScope='selected';this.cutOptions={thresholdDb:-38,minSilence:.45,padding:.1};
+    this.captionScope='selected';this.captionEngine='local';this.captionEngineChosen=false;
+    this.pcAsr={status:null,error:'',checking:false,checked:false};this.cutOptions={thresholdDb:-38,minSilence:.45,padding:.1};
     this.dialog=document.createElement('dialog');this.dialog.className='modal smart-modal';this.dialog.id='smartToolsDialog';
     this.dialog.innerHTML='<div class="modal-heading"><h2 id="smartToolsTitle"></h2><button class="icon-button" data-smart-action="cancel" aria-label="작업 창 닫기">×</button></div><div class="modal-body smart-body"></div>';
     this.dialog.setAttribute('aria-labelledby','smartToolsTitle');document.body.append(this.dialog);
@@ -56,6 +58,8 @@ export class StudioTools {
       host.addEventListener('change',event=>this.change(event.target));
     }
     if (typeof speechSynthesis!=='undefined') speechSynthesis.addEventListener('voiceschanged',()=>{if(this.hooks.view()==='voice'&&this.voice.engine==='device')this.hooks.renderLibrary();});
+    // 확인 요청에는 오디오가 없습니다. 공개·모바일 주소에서는 PC 서버를 탐색하지 않습니다.
+    if(isPcAsrOrigin())queueMicrotask(()=>this.refreshPcAsr().catch(()=>{}));
   }
   get busy(){return !!this.job;}
   get body(){return this.dialog.querySelector('.smart-body');}
@@ -108,8 +112,37 @@ export class StudioTools {
     return '';
   }
   captionControls(){
-    const r=this.audioRange();
-    return '<section class="smart-card"><h3>자동 자막 <span class="local-badge">기기에서 처리</span></h3><p class="note">API 키 없이 한국어 말소리를 인식해요. 기존 자막은 보존하고 새 영상 트랙에 추가합니다.</p><label class="field-label">인식 범위<select data-smart-input="caption-scope"><option value="selected" '+(this.captionScope==='selected'?'selected':'')+'>선택한 영상 / 오디오</option><option value="sequence" '+(this.captionScope==='sequence'?'selected':'')+'>전체 말소리 · 영상 + 보이스</option></select></label><p class="inspector-note">'+(this.captionScope==='selected'?(r?esc(r.item.name)+' · '+r.duration.toFixed(2)+'초':'타임라인에서 영상 또는 오디오를 선택하세요.'):'배경음악·효과음·음소거한 클립은 제외합니다.')+'</p>'+button('captions','자동 자막 만들기',this.captionScope==='selected'?!r:totalDuration()<=0,true)+'<p class="inspector-note">최초 약 66MB(모델·엔진) 다운로드 · 최대 3분<br>숫자·고유명사·소음이 있는 부분은 직접 확인해 주세요.</p></section>';
+    const r=this.audioRange(),pc=this.captionEngine==='pc';
+    const disabled=(this.captionScope==='selected'?!r:totalDuration()<=0)||(pc&&(!isPcAsrOrigin()||this.pcAsr.checking||!this.pcAsr.status?.available||this.pcAsr.status?.busy));
+    return '<section class="smart-card"><h3>자동 자막 <span class="local-badge">기기에서 처리</span></h3><p class="note">API 키 없이 한국어 말소리를 인식해요. 기존 자막은 보존하고 새 자막 트랙에 추가합니다.</p><label class="field-label">인식 엔진<select data-smart-input="caption-engine"><option value="local" '+(!pc?'selected':'')+'>브라우저 · Whisper Tiny</option><option value="pc" '+(pc?'selected':'')+'>PC 고정밀 · Whisper large-v3-turbo</option></select></label><div id="pcAsrSettings">'+this.pcAsrMarkup()+'</div><label class="field-label">인식 범위<select data-smart-input="caption-scope"><option value="selected" '+(this.captionScope==='selected'?'selected':'')+'>선택한 영상 / 오디오</option><option value="sequence" '+(this.captionScope==='sequence'?'selected':'')+'>전체 말소리 · 영상 + 보이스</option></select></label><p class="inspector-note">'+(this.captionScope==='selected'?(r?esc(r.item.name)+' · '+r.duration.toFixed(2)+'초':'타임라인에서 영상 또는 오디오를 선택하세요.'):'배경음악·효과음·음소거한 클립은 제외합니다. 일반 오디오로 등록한 말소리는 해당 클립을 선택해서 인식하세요.')+'</p>'+button('captions','자동 자막 만들기',disabled,true)+'<p class="inspector-note">최대 3분 · 숫자·고유명사·소음이 있는 부분은 직접 확인해 주세요.</p></section>';
+  }
+  pcAsrMarkup(){
+    const pc=this.pcAsr,status=pc.status;
+    if(this.captionEngine!=='pc')return '<p class="inspector-note">Whisper Tiny는 브라우저에서 처리합니다. 최초 약 66MB(모델·엔진)를 내려받으며 음성을 서버로 보내지 않습니다.</p>'+(isPcAsrOrigin()?'<div class="pc-voice-actions">'+button('pc-asr-refresh',pc.checking?'PC 연결 확인 중…':'PC 고정밀 연결 확인',pc.checking)+'<a class="button subtle" href="'+PC_ASR_SETUP_URL+'" target="_blank" rel="noopener">PC 고정밀 설치 안내</a></div><p class="inspector-note" role="status">'+esc(pc.checking?'PC 연결 확인 중…':pc.error||(!status?.configured?'Turbo를 사용하려면 PC 초기 설치가 필요합니다.':status.available?'PC 고정밀 준비됨 · '+pcAsrDeviceLabel(status):status.reason||'PC 자막 엔진의 실행 상태를 확인해 주세요.'))+'</p>':'<a class="button subtle wide" href="'+PC_ASR_SETUP_URL+'" target="_blank" rel="noopener">PC 고정밀 자막 사용 안내</a>');
+    if(!isPcAsrOrigin())return '<div class="pc-voice-card"><span class="local-badge">PC 확장 기능</span><h3>Whisper large-v3-turbo</h3><p>PC용 로컬 편집기와 자막 엔진이 필요합니다. 현재 주소에서는 PC 서버에 연결하지 않아요. 작업을 .shorts 파일로 저장한 뒤 PC용 편집기에서 열어 주세요.</p><a class="button secondary wide" href="'+PC_ASR_SETUP_URL+'" target="_blank" rel="noopener">PC 설치·실행 안내</a>'+button('use-browser-captions','브라우저 Tiny 사용')+'</div>';
+    const state=pc.checking?'checking':status?.busy?'busy':status?.available?'ready':'offline';
+    const headline=status?.busy?'다른 PC AI 작업이 진행 중입니다. 잠시 뒤 연결을 확인해 주세요.':status?.available?'Whisper large-v3-turbo 연결됨.':status?.configured?'PC 자막 엔진을 실행할 수 없습니다.':'PC 고정밀 자막의 초기 설치가 필요합니다.';
+    const message=pc.checking?'PC 연결 확인 중…':pc.error||headline+(status?.reason?' '+status.reason:'');
+    return '<div class="voice-card"><div class="voice-avatar pc-voice-avatar">PC</div><div><strong>Whisper large-v3-turbo</strong><p>한국어 · PC에서 인식</p></div></div><div class="pc-engine-status" data-state="'+state+'" role="status"><span class="status-dot"></span><span>'+esc(message)+'</span></div>'+(status?.configured?'<p class="inspector-note">'+(status.available?'실행 장치: ':'설정 장치: ')+esc(pcAsrDeviceLabel(status))+'</p>':'')+'<div class="pc-voice-actions">'+button('pc-asr-refresh',pc.checking?'확인 중…':'PC 연결 확인',pc.checking)+'<a class="button subtle" href="'+PC_ASR_SETUP_URL+'" target="_blank" rel="noopener">설치·실행 안내</a></div><p class="inspector-note">실행할 때만 선택 범위의 소리를 이 PC의 서버로 보냅니다. 외부 API로 전환하지 않습니다. 연결 실패 시 Tiny로 자동 대체하지 않아요.</p>';
+  }
+  updatePcAsrStatus(){
+    if(this.hooks.view?.()!=='captions')return;
+    const host=document.getElementById('pcAsrSettings');if(!host)return;
+    const active=host.contains(document.activeElement)?document.activeElement:null,action=active?.dataset.smartAction;
+    host.innerHTML=this.pcAsrMarkup();
+    if(action){const next=host.querySelector('[data-smart-action="'+action+'"]');if(next&&!next.disabled)next.focus();}
+    const library=document.getElementById('libraryContent'),engine=library?.querySelector('[data-smart-input="caption-engine"]');
+    if(engine)engine.value=this.captionEngine;
+    const create=library?.querySelector('[data-smart-action="captions"]'),r=this.audioRange(),pc=this.captionEngine==='pc';
+    if(create)create.disabled=this.busy||(this.captionScope==='selected'?!r:totalDuration()<=0)||(pc&&(!isPcAsrOrigin()||this.pcAsr.checking||!this.pcAsr.status?.available||this.pcAsr.status?.busy));
+  }
+  async refreshPcAsr(){
+    const pc=this.pcAsr;if(pc.checking||!isPcAsrOrigin())return pc.status;
+    pc.checking=true;pc.error='';this.updatePcAsrStatus();
+    try{pc.status=await pcAsrStatus();if(!this.captionEngineChosen&&pc.status.available)this.captionEngine='pc';}
+    catch(error){pc.status=null;pc.error=error.message;}
+    finally{pc.checking=false;pc.checked=true;this.updatePcAsrStatus();}
+    return pc.status;
   }
   render(view,host){
     if(view==='voice'){this.renderVoice(host);return;}
@@ -214,6 +247,8 @@ export class StudioTools {
     if(action==='stop-voice-reference'){this.referenceRecording?.stop();return;}
     if(this.referenceRecording)return;
     if(this.busy)return;
+    if(action==='pc-asr-refresh')return this.refreshPcAsr();
+    if(action==='use-browser-captions'){this.captionEngine='local';this.captionEngineChosen=true;this.hooks.renderLibrary();return;}
     if(action==='pc-voice-refresh')return this.refreshPcVoice();
     if(action==='use-browser-voice'){this.voice.engine='local';this.hooks.renderLibrary();return;}
     if(action==='voice-reference')return this.openVoiceReference();
@@ -279,6 +314,7 @@ export class StudioTools {
     const key=input.dataset.smartInput;if(this.busy)return;
     if(key==='voice-engine'){this.voice.engine=input.value;this.hooks.renderLibrary();if(input.value==='pc'&&!this.pcVoice.status)this.refreshPcVoice();}
     if(key==='reference-file'){const file=input.files?.[0];input.value='';this.loadVoiceReference(file).catch(error=>this.showError(error));}
+    if(key==='caption-engine'&&['local','pc'].includes(input.value)){this.captionEngine=input.value;this.captionEngineChosen=true;this.hooks.renderLibrary();if(input.value==='pc'&&!this.pcAsr.status)this.refreshPcAsr();}
     if(key==='caption-scope'){this.captionScope=input.value;this.hooks.renderLibrary();}
     if(key==='mosaic-index'){this.state.index=Number(input.value);this.renderMosaic();}
     if(key?.startsWith('cut-')&&this.state?.buffer){this.reanalyze();}
@@ -427,27 +463,29 @@ export class StudioTools {
     });
   }
   async openCaptions(){
-    const range=this.captionScope==='selected'?this.audioRange():null;
+    const range=this.captionScope==='selected'?this.audioRange():null,engine=this.captionEngine||'local',pc=engine==='pc';
     if(this.captionScope==='selected'&&!range)throw new Error('타임라인에서 영상 또는 오디오 클립을 선택해 주세요.');
     if(!range&&totalDuration()<=0)throw new Error('먼저 영상 또는 말소리 오디오를 추가해 주세요.');
     if((range?.duration||totalDuration())>180)throw new Error('자동 자막은 한 번에 3분까지 지원합니다. 클립을 선택하거나 구간을 나눠 주세요.');
-    if(!confirm('처음 사용하면 공개 자막 모델·엔진 약 66MB를 내려받습니다. 음성은 서버에 보내지 않고 이 기기에서 인식합니다. 기존 자막은 유지합니다. 시작할까요?'))return;
-    this.open('자동 자막 · 한국어','<p class="note">말소리를 읽고 있어요. 원본 오디오는 이 기기 안에서 처리됩니다.</p>'+progressMarkup);
-    const s={kind:'captions',before:captureDocument(),range};this.state=s;
-    await this.run('captions',async signal=>{
+    if(pc&&(!isPcAsrOrigin()||this.pcAsr.checking||!this.pcAsr.status?.available||this.pcAsr.status?.busy))throw new Error('자막 패널에서 PC 고정밀 설치·연결 상태를 확인해 주세요. Tiny로 자동 전환하지 않습니다.');
+    const consent=pc?'선택 범위의 오디오를 이 PC의 로컬 서버에 보내 Whisper large-v3-turbo로 인식합니다. 외부 서비스로는 보내지 않습니다. 기존 자막은 유지합니다. 시작할까요?':'처음 사용하면 공개 자막 모델·엔진 약 66MB를 내려받습니다. 음성은 서버에 보내지 않고 이 기기에서 인식합니다. 기존 자막은 유지합니다. 시작할까요?';
+    if(!confirm(consent))return;this.captionEngineChosen=true;
+    this.open(pc?'자동 자막 · Whisper large-v3-turbo':'자동 자막 · Whisper Tiny','<p class="note">'+(pc?'말소리를 준비해 이 PC의 자막 엔진으로 보냅니다. 창을 닫으면 결과 받기를 멈추고 PC 작업에 취소를 요청합니다.':'말소리를 읽고 있어요. 원본 오디오는 브라우저 안에서 처리됩니다.')+'</p>'+progressMarkup);
+    const s={kind:'captions',before:captureDocument(),range,engine};this.state=s;
+    try{await this.run('captions',async signal=>{
       this.progress(.01,'인식할 소리 준비 중…');
       const buffer=range?await selectedPcm(range,signal,true):await mixTimeline({includeBgm:false,includeVoice:true,signal,strictSources:true});
       if(!buffer)throw new Error('인식할 영상 소리 또는 보이스 오디오가 없습니다.');
       const pcm=monoPcm(buffer,16000);let energy=0;for(const x of pcm)energy+=x*x;
       if(Math.sqrt(energy/pcm.length)<.0002)throw new Error('인식할 말소리가 너무 작거나 무음입니다. 기존 자막은 유지합니다.');
       const duration=Math.min(range?.duration??totalDuration(),buffer.length/buffer.sampleRate);
-      const result=await runLocalAI('asr',{audio:pcm},{signal,onProgress:(p,m)=>this.progress(p,m)});
-      if(signal.aborted)return;
-      const normalized=whisperCaptions(result,duration,range?.start||0);
+      const result=pc?await transcribePcAudio(pcm,{signal,onProgress:(p,m)=>this.progress(p,m)}):await runLocalAI('asr',{audio:pcm},{signal,onProgress:(p,m)=>this.progress(p,m)});
+      if(signal.aborted||this.state!==s||!this.dialog.open)return;
+      const normalized=pc?pcAsrCaptions(result,duration,range?.start||0):whisperCaptions(result,duration,range?.start||0);
       if(!normalized.captions.length)throw new Error('유효한 시각이 있는 자막을 만들지 못했습니다. 말소리가 분명한 구간으로 다시 시도해 주세요.');
       Object.assign(s,normalized);s.gaps=findUncaptioned(buffer,s.captions.map(c=>({...c,start:c.start-(range?.start||0),end:c.end-(range?.start||0)})));
-      this.setBody('<div class="smart-success">'+s.captions.length+'개 자막을 만들었어요.</div><p class="note">틀린 문구는 여기서 고친 뒤 적용하세요. 기존 자막은 지우지 않습니다.</p><p class="note warning">숫자·이름은 틀릴 수 있습니다.'+(s.skipped?' 시각이 불확실한 '+s.skipped+'개 항목은 제외했습니다.':'')+(s.gaps.length?' 소리는 있으나 자막이 없는 '+s.gaps.length+'개 구간도 확인해 주세요.':'')+'</p><div class="smart-caption-review">'+s.captions.map((c,i)=>'<label><span>'+c.start.toFixed(2)+' → '+c.end.toFixed(2)+'초</span><textarea data-caption-index="'+i+'" maxlength="3000" aria-label="자막 '+(i+1)+' 내용">'+esc(c.text)+'</textarea></label>').join('')+'</div><details class="smart-details"><summary>전체 인식 원문</summary><p>'+esc(s.text)+'</p></details>'+progressMarkup+button('apply-captions','새 자막 트랙에 추가',false,true));
-    });
+      this.setBody('<div class="smart-success">'+s.captions.length+'개 자막을 만들었어요.</div><p class="inspector-note">'+(pc?'Whisper large-v3-turbo · '+esc(pcAsrDeviceLabel(result)):'Whisper Tiny · 브라우저 처리')+'</p><p class="note">틀린 문구는 여기서 고친 뒤 적용하세요. 기존 자막은 지우지 않습니다.</p><p class="note warning">숫자·이름은 틀릴 수 있습니다.'+(s.segmentFallback?' 일부 문장은 단어 시각 대신 실제 문장 시각으로 보존했습니다.':'')+(s.skipped?' 시각이 불확실한 '+s.skipped+'개 항목은 제외했습니다.':'')+(s.gaps.length?' 소리는 있으나 자막이 없는 '+s.gaps.length+'개 구간도 확인해 주세요.':'')+'</p><div class="smart-caption-review">'+s.captions.map((c,i)=>'<label><span>'+c.start.toFixed(2)+' → '+c.end.toFixed(2)+'초</span><textarea data-caption-index="'+i+'" maxlength="3000" aria-label="자막 '+(i+1)+' 내용">'+esc(c.text)+'</textarea></label>').join('')+'</div><details class="smart-details"><summary>전체 인식 원문</summary><p>'+esc(s.text)+'</p></details>'+progressMarkup+button('apply-captions','새 자막 트랙에 추가',false,true));
+    });}finally{if(pc)this.refreshPcAsr().catch(()=>{});}
   }
   applyCaptions(){
     const s=this.state;if(s?.kind!=='captions'||!s.captions)return;
@@ -456,7 +494,7 @@ export class StudioTools {
     if(project.captions.length+captions.length>5000)throw new Error('자막은 최대 5,000개입니다. 구간을 나눠 작업해 주세요.');
     const track=addTimelineTrack('visual',{role:'caption'});
     for(const c of captions)c.trackId=track.id;
-    project.captions.push(...captions);this.hooks.commit(s.before,'브라우저 자동 자막 추가');
+    project.captions.push(...captions);this.hooks.commit(s.before,s.engine==='pc'?'PC Turbo 자동 자막 추가':'브라우저 자동 자막 추가');
     this.hooks.select('caption',captions[0].id);this.hooks.timeline.reveal({...captions[0],type:'caption'});
     this.close(false);this.hooks.toast(captions.length+'개 자막을 '+trackLabel(track.id)+'에 추가했어요. 기존 자막은 그대로입니다.');
   }

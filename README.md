@@ -2,15 +2,39 @@
 
 > **이 브랜치는 공동 검토용 실험판입니다.** 운영 `main`은 유지하고 아직 병합하지 않습니다.
 >
-> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 기존 편집·Supertonic 2 기본 TTS·Whisper Tiny 자막을 유지하며 **VoxCPM2 내 목소리 TTS**를 PC 확장 기본 엔진으로 추가했습니다. 기존 GPT-SoVITS와 참고 녹음도 유지합니다.
+> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 기존 편집·Supertonic 2 기본 TTS·브라우저 Whisper Tiny 자막을 유지합니다. PC 확장에는 **VoxCPM2 내 목소리 TTS**와 **Whisper large-v3-turbo 자동자막**을 연결했습니다. 기존 GPT-SoVITS와 참고 녹음도 유지합니다. 이번 Turbo 변경은 로컬에서 검증했으며 아직 공유 주소에 반영하지 않았습니다.
 >
 > 모바일은 기존 브라우저 기능으로 편집하고, PC에서는 짧은 참고 녹음으로 음성을 생성해 같은 타임라인에 넣습니다. 생성 WAV는 .shorts로 이동할 수 있고 참고 녹음·읽은 문장·엔진 키는 PC에만 따로 보관합니다. 개인 모델 학습 기능은 포함하지 않습니다.
 >
-> [실험판 사용 안내](START-HERE.md) · [PC 설치·실행 안내](public/pc-voice-setup.html) · [변경 범위](CHANGELOG-LAB.md) · [검증 기록](VERIFICATION.md)
+> [실험판 사용 안내](START-HERE.md) · [PC 내 목소리 안내](public/pc-voice-setup.html) · [PC Turbo 자막 안내](public/pc-asr-setup.html) · [변경 범위](CHANGELOG-LAB.md) · [검증 기록](VERIFICATION.md)
 >
-> Windows 기본 편집은 `start-studio.cmd`, PC 확장은 처음 `setup-pc-voice.cmd`로 준비한 뒤 `start-pc-voice.cmd`로 실행합니다. Vox 모델 약 5GB와 별도 수 GB의 실행 환경을 받으며 15GB 이상 여유 공간을 확보하세요. 기존 설치가 있으면 작업 저장 후 이전 실행기를 종료하고 다시 실행합니다. 유료 API·외부 TTS 사이트는 필요하지 않습니다.
+> Windows 기본 편집은 `start-studio.cmd`, PC 내 목소리는 처음 `setup-pc-voice.cmd`로 준비한 뒤 `start-pc-voice.cmd`로 실행합니다. Vox 모델 약 5GB와 별도 수 GB의 실행 환경을 받으며 15GB 이상 여유 공간을 확보하세요. PC Turbo 자막은 별도로 `setup-pc-asr.cmd`를 실행합니다. 기존 설치가 있으면 작업 저장 후 이전 실행기를 종료하고 다시 실행합니다. 유료 API·외부 TTS 사이트는 필요하지 않습니다.
 >
-> Node 135개·Python 36개 검사와 RTX 3060의 실제 Vox 한국어 WAV 생성 5개 사례를 확인했습니다. 사용자 녹음의 유사도·자연스러움, 모바일 실기, 브라우저 전체 조작·실제 MP4 출력 평가는 아직 남아 있습니다. 아래는 변경하지 않은 기준 버전의 원본 안내입니다.
+> Turbo는 RTX 3060에서 한국어 합성 음성 두 개의 실제 인식, 취소·GPU 메모리 반환·재실행, 자막 검수·새 트랙 추가·undo/redo를 확인했습니다. 자막 작업 이후 Vox 음성 생성도 성공했습니다. Node 146개·Python 53개 회귀 검사가 통과했습니다. [검증 기록](VERIFICATION.md)의 범위에 한정되며 실제 사용자 녹음의 인식률, 모바일 실기·이번 변경 후 MP4 출력 평가는 별도입니다.
+
+## 실험판 자동자막 · 브라우저 Tiny / PC Turbo
+
+새 편집기 `public/studio.html`의 **자막 → 인식 엔진**에서 선택합니다. 모바일·공유 웹주소는 브라우저 Tiny를 기본으로 유지합니다. PC 로컬 편집기는 설치·연결이 확인되면 Turbo를 기본 선택하며, 사용자가 선택한 Tiny는 그대로 둡니다. PC 인식 실패를 Tiny·CPU·외부 API로 자동 대체하지 않습니다.
+
+| 항목 | 브라우저 Whisper Tiny | PC Whisper large-v3-turbo |
+| --- | --- | --- |
+| 준비 | 처음 실행할 때 모델·엔진 약 66MB 다운로드 | Windows에서 `setup-pc-asr.cmd` 실행, 모델 약 1.62GB와 전용 Python 환경 준비 |
+| 실행 위치 | 현재 브라우저의 WASM | 같은 PC의 `localhost` / `127.0.0.1` 서버와 별도 인식 프로세스 |
+| 실행 장치 | 브라우저에서 처리, GPU 필수 아님 | 기본 `cuda` / `int8_float16`. CPU는 `setup-pc-asr.cmd --device cpu`로 명시 선택하며 `int8` 사용 |
+| 한 번에 처리하는 길이 | 최대 3분 | 최대 3분 |
+| 오디오 전송 | 서버 전송 없음 | 실행 동의 후 같은 PC에만 16kHz 모노 PCM16 WAV 전달, 외부 서비스 전송 없음 |
+
+PC 자막 환경은 Vox·GPT-SoVITS 환경과 분리합니다. 설치 후 `start-studio.cmd`를 실행하고, 내 목소리 TTS도 함께 쓰려면 `start-pc-voice.cmd`를 사용하세요. 이미 실행 중이면 프로젝트를 저장하고 최신 실행기로 다시 시작합니다. 자세한 준비·디스크 용량·문제 해결은 [PC Turbo 자막 안내](public/pc-asr-setup.html)를 보세요.
+
+**인식 범위:** 선택 클립은 해당 영상·오디오의 잘라낸 원본 소리를 사용합니다. 전체 말소리는 영상 소리와 용도가 **보이스**인 오디오를 섞고 배경음악·효과음·음소거한 클립은 제외합니다. 일반 오디오로 등록한 내레이션은 해당 클립을 선택해서 인식하세요. 영상에 이미 합쳐진 음악을 분리하는 기능은 아닙니다.
+
+**결과 검수:** 원문과 실제 시각을 확인한 뒤 새 자막 트랙에 추가하며 기존 자막은 유지합니다. 원문과 일치하는 단어 조각은 실제 시작·끝을 유지해 합치므로 `12,000원` 같은 어절이 중간에서 갈라지지 않습니다. Turbo에서 단어 시각이 없더라도 실제 문장 시작·끝이 있으면 문장 전체를 한 자막으로 보존하고 경고합니다. 단어 시각을 임의로 만들지 않습니다. 숫자·이름·빠른 말과 소음 구간은 직접 교정하세요.
+
+**GPU 메모리:** 같은 PC 실행기의 TTS와 자막 요청은 순서대로 처리합니다. 자막 작업이 끝나면 ASR 자식 프로세스를 종료해 해당 GPU 메모리를 반환하도록 구현했습니다. Vox는 GPU 여유가 부족할 때만 모델을 내리며, 다음 TTS 요청에서 로컬 파일을 다시 읽습니다. 재다운로드하거나 참고 녹음을 바꾸지 않습니다. 다른 프로그램은 강제로 종료하지 않습니다.
+
+## 원본 운영 버전 안내
+
+아래는 기준 버전의 안내입니다. Cloudflare Worker 자막 설명은 새 실험판의 PC Turbo 경로와 별개이며, 실험판은 해당 Worker로 자동 전환하지 않습니다.
 
 **https://shorts-studio-75p.pages.dev**
 
@@ -124,7 +148,9 @@ MPEG-TS 처럼 브라우저가 컨테이너를 모르는 파일, 인덱스(moov)
 댓글 카드는 **특정 플랫폼 UI 를 그대로 베끼지 않는다.** 아바타(이름 첫 글자) + 이름 + 내용 +
 좋아요 정도만 있는 일반적인 모양으로 그린다.
 
-## 자동 자막
+## 자동 자막 · 원본 운영 버전
+
+실험판 `studio.html`의 Tiny·PC Turbo 설치와 인식 범위는 위의 **실험판 자동자막** 안내를 따르세요. 아래 처리 시간·비용·표시 방식은 기준 버전 당시의 설명이며 이번 PC Turbo 검증 결과가 아닙니다.
 
 [자막] 탭의 **자동 자막 만들기** 를 누르면 영상 속 말소리를 알아듣고 자막을 채운다.
 14초 영상 기준 4초쯤 걸린다.

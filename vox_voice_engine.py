@@ -62,17 +62,61 @@ class VoxEngine:
     def __init__(self, settings):
         from importlib.metadata import version
         import torch
-        from voxcpm import VoxCPM
         if version('voxcpm') != '2.0.3':
             raise RuntimeError('Unexpected VoxCPM package version')
         if settings['device'] == 'cuda' and not torch.cuda.is_available():
             raise RuntimeError('CUDA is unavailable')
         self.references = VoiceCloneService(settings['references'], provider='voxcpm2')
-        self.model = VoxCPM(voxcpm_model_path=settings['model'], zipenhancer_model_path=None,
-                            enable_denoiser=False, optimize=False, device=settings['device'])
-        self.sample_rate = int(self.model.tts_model.sample_rate)
-        if self.sample_rate != 48000:
+        self.model_path = settings['model']
+        self.device = settings['device']
+        self.model = None
+        self.sample_rate = 48000
+        self._ensure_model()
+
+    def _ensure_model(self):
+        # ASR 종료나 상태 조회만으로 다시 올리지 않고, 다음 TTS에서만 읽는다.
+        if self.model is not None:
+            return self.model
+        from voxcpm import VoxCPM
+        model = VoxCPM(voxcpm_model_path=self.model_path, zipenhancer_model_path=None,
+                       enable_denoiser=False, optimize=False, device=self.device)
+        if int(model.tts_model.sample_rate) != 48000:
             raise RuntimeError('Unexpected VoxCPM2 sample rate')
+        self.model = model
+        return model
+
+    def prepare_asr_memory(self, required_free_mib):
+        import gc
+        import torch
+        # 엔진 전체 예약과 기존 참고 음성 락을 모두 잡은 동안에만 메모리를 회수한다.
+        with self.references.exclusive():
+            if self.device != 'cuda':
+                return {'modelUnloaded': False, 'freeMiB': None, 'memoryStatus': 'cpu'}
+
+            def free_mib():
+                try:
+                    free, _ = torch.cuda.mem_get_info(self.device)
+                    return int(free) // (1024 * 1024)
+                except (RuntimeError, TypeError, ValueError, OSError):
+                    return None
+
+            free = free_mib()
+            unloaded = False
+            if free is not None and free < required_free_mib:
+                # 비어 있는 캐시만 먼저 반환한다. 살아 있는 모델은 그대로 둔다.
+                torch.cuda.empty_cache()
+                free = free_mib()
+            if free is not None and free < required_free_mib and self.model is not None:
+                torch.cuda.synchronize(self.device)
+                self.model = None
+                unloaded = True
+                gc.collect()
+                torch.cuda.empty_cache()
+                free = free_mib()
+            if free is not None and free < required_free_mib:
+                raise VoiceError('ASR_GPU_MEMORY', 'PC 자막용 GPU 메모리가 부족합니다. 다른 GPU 작업을 끝낸 뒤 다시 시도해 주세요.', 503)
+            return {'modelUnloaded': unloaded, 'freeMiB': free,
+                    'memoryStatus': 'unknown' if free is None else 'sufficient'}
 
     def synthesize(self, data):
         import numpy as np
@@ -81,6 +125,7 @@ class VoxEngine:
         # Includes reference reads and postprocessing. Cancellation does not
         # release this lock while the GPU is still using shared KV caches.
         with self.references.exclusive():
+            self._ensure_model()
             profile = self.references._load(profile_id)
             reference = self.references._path(profile_id, '.wav')
             with reference.open('rb') as stream:
@@ -139,6 +184,7 @@ def build_vox_app(settings):
     import json
     engine = VoxEngine(settings)
     app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+    app.state.vox_engine = engine
 
     @app.post('/tts')
     async def synthesize(request: Request):

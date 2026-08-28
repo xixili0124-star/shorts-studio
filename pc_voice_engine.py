@@ -10,9 +10,103 @@ import re
 import secrets
 import socket
 import sys
+import threading
+import time
 
-from pc_voice import engine_proof
+from pc_voice import ASR_LEASE_TOKEN, VoiceError, engine_proof, validate_asr_reservation
 from pc_voice_config import PROVIDERS, provider_of, read_config
+
+
+class EngineASRReservation:
+    """같은 엔진을 사용하는 여러 편집기 사이에서도 GPU 작업을 직렬화한다."""
+    def __init__(self, provider, prepare_memory=None, clock=time.monotonic):
+        self.provider = provider
+        self.prepare_memory = prepare_memory
+        self.clock = clock
+        self.lock = threading.Lock()
+        self.tts_active = False
+        self.uncertain = False
+        self.token = None
+        self.deadline = 0
+        self.last_released = None
+
+    def _require_idle(self):
+        if self.uncertain or (self.token is not None and self.clock() >= self.deadline):
+            # 시간 경과는 GPU 작업 종료의 증거가 아니므로 소유자의 해제만 받는다.
+            raise VoiceError('ENGINE_RESTART_REQUIRED', 'PC 작업의 종료를 확인하지 못했습니다. 엔진과 편집기 서버를 다시 실행해 주세요.', 503)
+        if self.tts_active or self.token is not None:
+            raise VoiceError('VOICE_BUSY', 'PC 음성 또는 자막 작업이 진행 중입니다.', 409)
+
+    def begin_tts(self):
+        with self.lock:
+            self._require_idle()
+            self.tts_active = True
+
+    def finish_tts(self, completed=True):
+        with self.lock:
+            self.tts_active = False
+            if not completed:
+                self.uncertain = True
+
+    def reserve(self, data):
+        required, ttl = validate_asr_reservation(data)
+        with self.lock:
+            self._require_idle()
+            self.token = secrets.token_hex(32)
+            self.deadline = self.clock() + ttl
+            token = self.token
+        try:
+            info = (self.prepare_memory(required) if self.prepare_memory is not None else
+                    {'modelUnloaded': False, 'freeMiB': None, 'memoryStatus': 'unmanaged'})
+            return {**info, 'token': token, 'provider': self.provider,
+                    'requiredFreeMiB': required, 'leaseSeconds': ttl}
+        except BaseException as error:
+            with self.lock:
+                self.token = None
+                self.deadline = 0
+                if not isinstance(error, VoiceError):
+                    self.uncertain = True
+            raise
+
+    def release(self, data):
+        if (not isinstance(data, dict) or set(data) != {'token'}
+                or not isinstance(data.get('token'), str) or not ASR_LEASE_TOKEN.fullmatch(data['token'])):
+            raise VoiceError('INVALID_ASR_RESERVATION', 'PC 자막 예약 정보를 확인해 주세요.')
+        supplied = data['token']
+        with self.lock:
+            if self.token is None and self.last_released is not None and secrets.compare_digest(supplied, self.last_released):
+                return {'released': True}
+            if self.token is None or not secrets.compare_digest(supplied, self.token):
+                raise VoiceError('ASR_RESERVATION_MISMATCH', '해제할 PC 자막 예약이 일치하지 않습니다.', 409)
+            self.last_released = self.token
+            self.token = None
+            self.deadline = 0
+            return {'released': True}
+
+
+class EngineJobMiddleware:
+    """TTS 응답 본문과 생성 스레드가 끝날 때까지 예약을 막는다."""
+    def __init__(self, app, jobs, engine_key):
+        self.app, self.jobs, self.engine_key = app, jobs, engine_key
+
+    async def __call__(self, scope, receive, send):
+        if scope['type'] != 'http' or (scope.get('method'), scope.get('path')) != ('POST', '/tts'):
+            return await self.app(scope, receive, send)
+        from starlette.responses import JSONResponse
+        supplied = [value for name, value in scope.get('headers', ()) if name.lower() == b'x-studio-engine-key']
+        if len(supplied) != 1 or not secrets.compare_digest(supplied[0], self.engine_key.encode('ascii')):
+            return await JSONResponse({'error': 'Private PC voice engine'}, status_code=403)(scope, receive, send)
+        try:
+            self.jobs.begin_tts()
+        except VoiceError as error:
+            from starlette.responses import JSONResponse
+            return await JSONResponse({'error': error.code}, status_code=error.status)(scope, receive, send)
+        completed = False
+        try:
+            await self.app(scope, receive, send)
+            completed = True
+        finally:
+            self.jobs.finish_tts(completed)
 
 
 def loopback_host(host):
@@ -138,13 +232,44 @@ def build_app(settings, port):
         sys.argv = ['api_v2.py', '-a', '127.0.0.1', '-p', str(port), '-c', settings['config']]
         namespace = runpy.run_path(str(Path(settings['engine']) / 'api_v2.py'), run_name='studio_private_sovits')
         app = namespace['APP']
+    prepare_memory = app.state.vox_engine.prepare_asr_memory if provider == 'voxcpm2' else None
+    jobs = EngineASRReservation(provider, prepare_memory)
+    app.state.engine_jobs = jobs
     # Even loopback must reject websites trying to call /control or weight setters.
     app.router.routes = [route for route in app.router.routes
         if (route.path == '/openapi.json' and 'GET' in route.methods)
         or (route.path == '/tts' and 'POST' in route.methods)]
     app.openapi_schema = None
     from fastapi import Request
+    from starlette.concurrency import run_in_threadpool
     from starlette.responses import JSONResponse
+
+    async def asr_control(request, operation):
+        try:
+            if request.headers.get('content-type', '').split(';')[0] != 'application/json':
+                return JSONResponse({'error': 'Invalid reservation request'}, status_code=415)
+            body = bytearray()
+            async for chunk in request.stream():
+                body.extend(chunk)
+                if len(body) > 2048:
+                    return JSONResponse({'error': 'Reservation request too large'}, status_code=413)
+            result = await run_in_threadpool(operation, json.loads(body))
+            return JSONResponse(result, headers={'Cache-Control': 'no-store'})
+        except VoiceError as error:
+            return JSONResponse({'error': error.code}, status_code=error.status)
+        except (ValueError, UnicodeError, TypeError):
+            return JSONResponse({'error': 'Invalid reservation request'}, status_code=400)
+        except Exception:
+            return JSONResponse({'error': 'Reservation failed'}, status_code=500)
+
+    @app.post('/studio/asr-reserve')
+    async def asr_reserve(request: Request):
+        return await asr_control(request, jobs.reserve)
+
+    @app.post('/studio/asr-release')
+    async def asr_release(request: Request):
+        return await asr_control(request, jobs.release)
+
     @app.get('/studio/health')
     async def health(request: Request):
         nonce = request.headers.get('x-studio-engine-nonce', '')
@@ -160,10 +285,13 @@ def build_app(settings, port):
         if (request.method, request.url.path) == ('GET', '/studio/health'):
             return await call_next(request)
         supplied = request.headers.get('x-studio-engine-key', '')
-        allowed = (request.method, request.url.path) in {('GET', '/openapi.json'), ('POST', '/tts')}
+        allowed = (request.method, request.url.path) in {
+            ('GET', '/openapi.json'), ('POST', '/tts'),
+            ('POST', '/studio/asr-reserve'), ('POST', '/studio/asr-release')}
         if not allowed or not re.fullmatch(r'[A-Za-z0-9_-]{32,128}', supplied) or not secrets.compare_digest(supplied, settings['engineKey']):
             return JSONResponse({'error': 'Private PC voice engine'}, status_code=403)
         return await call_next(request)
+    app.add_middleware(EngineJobMiddleware, jobs=jobs, engine_key=settings['engineKey'])
     return app
 
 

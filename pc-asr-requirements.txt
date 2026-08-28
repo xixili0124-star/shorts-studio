@@ -1,0 +1,12 @@
+# 자동 자막 전용 환경. 기존 VoxCPM2/GPT-SoVITS 환경에는 설치하지 않는다.
+# CUDA DLL은 GPU 설치를 선택한 경우에만 설치기에서 별도로 고정 설치한다.
+faster-whisper==1.2.1
+ctranslate2==4.8.1
+av==18.1.0
+onnxruntime==1.29.0
+numpy==1.26.4
+tokenizers==0.21.4
+huggingface-hub==0.34.4
+tqdm==4.67.1
+PyYAML==6.0.2
+setuptools==80.9.0

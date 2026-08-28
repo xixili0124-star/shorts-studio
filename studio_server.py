@@ -9,6 +9,7 @@ from collections import deque
 import argparse, json, os, time, uuid, math
 from pc_voice import VoiceCloneService, VoiceError, MAX_REFERENCE_BODY
 from pc_voice_config import PROVIDERS, service_identity
+from pc_asr import PcAsrService, AsrError, MAX_AUDIO_BYTES
 
 ROOT = Path(__file__).resolve().parent / 'public'
 VOICES = ('alloy','ash','ballad','coral','echo','fable','onyx','nova','sage','shimmer','verse','marin','cedar')
@@ -21,6 +22,7 @@ def configured_pc_voice(port=9880, provider='auto'):
     return VoiceCloneService(LOCAL_VOICE_DIR / 'voices', port=port, engine_key=key, provider=selected)
 
 PC_VOICE = configured_pc_voice()
+PC_ASR = PcAsrService(LOCAL_VOICE_DIR, voice=PC_VOICE)
 
 def validate_tts(data):
     """요청 모델·목소리·입력 길이를 제한합니다. 임의 URL 프록시는 제공하지 않습니다."""
@@ -91,6 +93,21 @@ class StudioHandler(SimpleHTTPRequestHandler):
         if not self.local_host():
             self.error_response(403, 'LOCAL_ONLY', '이 PC의 로컬 주소에서만 접근할 수 있습니다.')
             return
+        route = urlsplit(self.path).path
+        if route.startswith('/api/pc-asr/'):
+            if not self.asr_request_allowed():
+                return
+            try:
+                service = self.pc_asr_service()
+                if route == '/api/pc-asr/status':
+                    self.json_response(200, service.status())
+                elif route.startswith('/api/pc-asr/jobs/'):
+                    self.json_response(200, service.get(route.removeprefix('/api/pc-asr/jobs/')))
+                else:
+                    self.error_response(404, 'NOT_FOUND', '지원하지 않는 PC 자막 기능입니다.')
+            except AsrError as error:
+                self.error_response(error.status, error.code, error.message)
+            return
         if urlsplit(self.path).path == '/api/voice-clone/status':
             if not self.pc_request_allowed():
                 return
@@ -110,6 +127,66 @@ class StudioHandler(SimpleHTTPRequestHandler):
 
     def pc_voice_service(self):
         return getattr(self.server, 'pc_voice', PC_VOICE)
+
+    def pc_asr_service(self):
+        return getattr(self.server, 'pc_asr', PC_ASR)
+
+    def asr_request_allowed(self):
+        port = self.server.server_port
+        allowed = (f'http://127.0.0.1:{port}', f'http://localhost:{port}')
+        origin = self.headers.get('Origin')
+        if (not self.local_host() or self.headers.get('X-Studio-PC-ASR') != '1'
+                or (origin is not None and origin not in allowed)
+                or (self.command != 'GET' and origin not in allowed)
+                or self.headers.get('Sec-Fetch-Site') == 'cross-site'):
+            self.error_response(403, 'CROSS_ORIGIN_BLOCKED', '이 PC의 편집기 화면에서 자막을 생성해 주세요.')
+            return False
+        return True
+
+    def handle_pc_asr(self, route):
+        if not self.asr_request_allowed():
+            return
+        if self.headers.get('X-Studio-Consent') != 'audio-to-local-asr':
+            self.error_response(403, 'ASR_CONSENT_REQUIRED', '오디오를 이 PC에서만 처리하는 안내를 확인해 주세요.')
+            return
+        if route not in ('/api/pc-asr/transcribe', '/api/pc-asr/cancel'):
+            self.error_response(404, 'NOT_FOUND', '지원하지 않는 PC 자막 기능입니다.')
+            return
+        maximum = MAX_AUDIO_BYTES if route.endswith('/transcribe') else 1024
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+        except ValueError:
+            length = 0
+        if self.headers.get('Transfer-Encoding') or not 0 < length <= maximum:
+            self.error_response(413, 'PAYLOAD_LIMIT', '음성이 비어 있거나 3분 입력 제한을 초과했습니다.')
+            return
+        expected = 'audio/wav' if route.endswith('/transcribe') else 'application/json'
+        if self.headers.get('Content-Type', '').split(';')[0].strip() != expected:
+            self.error_response(415, 'CONTENT_TYPE', 'PC 자막 입력 형식을 확인해 주세요.')
+            return
+        try:
+            self.connection.settimeout(30)
+            body = self.rfile.read(length)
+            if len(body) != length:
+                raise AsrError('INCOMPLETE_BODY', '음성 요청을 끝까지 받지 못했습니다.')
+            service = self.pc_asr_service()
+            if route.endswith('/transcribe'):
+                self.json_response(202, {'jobId': service.start(body)})
+            else:
+                data = json.loads(body)
+                if not isinstance(data, dict) or set(data) != {'jobId'}:
+                    raise ValueError()
+                self.json_response(200, {'cancelled': service.cancel(data.get('jobId'))})
+        except AsrError as error:
+            self.error_response(error.status, error.code, error.message)
+        except (ValueError, UnicodeError, TypeError):
+            self.error_response(400, 'INVALID_INPUT', 'PC 자막 요청을 확인해 주세요.')
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        except TimeoutError:
+            self.error_response(408, 'REQUEST_TIMEOUT', '음성 요청을 끝까지 받지 못했습니다.')
+        except OSError:
+            self.error_response(500, 'ASR_LOCAL_ERROR', 'PC 자막 실행 환경에 접근하지 못했습니다.')
 
     def pc_request_allowed(self):
         port = self.server.server_port
@@ -183,6 +260,9 @@ class StudioHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = urlsplit(self.path).path
+        if route.startswith('/api/pc-asr/'):
+            self.handle_pc_asr(route)
+            return
         if route.startswith('/api/voice-clone/'):
             self.handle_pc_voice(route)
             return
@@ -281,4 +361,11 @@ if __name__ == '__main__':
     print(f'Local: http://127.0.0.1:{args.port}', flush=True)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), StudioHandler)
     server.pc_voice = configured_pc_voice(args.voice_port, args.voice_provider)
-    server.serve_forever()
+    server.pc_asr = PcAsrService(LOCAL_VOICE_DIR, voice=server.pc_voice)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        pass
+    finally:
+        server.pc_asr.close()
+        server.server_close()

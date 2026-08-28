@@ -509,6 +509,7 @@ class InstallationTests(unittest.TestCase):
             self.assertNotIn('ExecutionPolicy', command)
             self.assertNotIn('Invoke-Expression', command)
             self.assertNotIn('EncodedCommand', command)
+            self.assertNotIn('Get-FileHash', command)
         python = self.root / 'python.exe'; python.write_bytes(b'fixture')
         (self.root / 'pythonw.exe').write_bytes(b'fixture')
         def save_shortcut(command, **kwargs):
@@ -534,6 +535,63 @@ if($errors.Count -gt 0){throw ($errors|Out-String)}
 '''
         result = subprocess.run(['powershell.exe', '-NoProfile', '-Command', script], env={**os.environ, 'STUDIO_PARSE_FIXTURE': str(self.root)}, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8')
         self.assertEqual(result.returncode, 0, result.stderr)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell 해시 계산 전용입니다.')
+    def test_bootstrap_dotnet_hash_matches_bytes_and_releases_streams(self):
+        fixtures = {'empty.bin': b'', 'binary.bin': bytes(range(256)),
+                    'large.bin': bytes(range(256)) * 1024 + b'fixture tail'}
+        expected = []
+        for name, content in fixtures.items():
+            (self.root / name).write_bytes(content)
+            expected.extend([hashlib.sha256(content).hexdigest()] * 2)
+        script = "$ErrorActionPreference='Stop';" + package.BOOTSTRAP_FILE_FUNCTIONS + r'''
+foreach($name in @('empty.bin','binary.bin','large.bin')) {
+  $p=[IO.Path]::Combine($env:STUDIO_HASH_FIXTURE,$name)
+  [Console]::WriteLine((FileSha256 $p))
+  $s=[IO.File]::OpenRead($p)
+  try {[Console]::WriteLine((StreamSha256 $s))} finally {$s.Dispose()}
+  $exclusive=[IO.File]::Open($p,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
+  $exclusive.Dispose()
+}
+'''
+        result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script],
+                                env={**os.environ, 'STUDIO_HASH_FIXTURE': str(self.root)},
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), expected)
+
+    @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell 캐시 검증 전용입니다.')
+    def test_bootstrap_cached_download_accepts_pin_and_rejects_corruption(self):
+        original = bytes(range(256)) * 512
+        fixtures = {'valid.bin': original, 'changed.bin': bytes([1]) + original[1:],
+                    'short.bin': original[:-1]}
+        for name, content in fixtures.items():
+            (self.root / name).write_bytes(content)
+        script = "$ErrorActionPreference='Stop';" + package.BOOTSTRAP_FILE_FUNCTIONS + r'''
+$valid=[IO.Path]::Combine($env:STUDIO_HASH_FIXTURE,'valid.bin')
+Fetch 'not-a-url' $valid $env:STUDIO_HASH_EXPECTED ([int]$env:STUDIO_HASH_SIZE)
+foreach($name in @('changed.bin','short.bin')) {
+  $p=[IO.Path]::Combine($env:STUDIO_HASH_FIXTURE,$name)
+  $rejected=$false
+  try {Fetch 'not-a-url' $p $env:STUDIO_HASH_EXPECTED ([int]$env:STUDIO_HASH_SIZE)}
+  catch {
+    if($_.Exception.Message -ne 'An existing download does not match the pinned release.'){throw}
+    $rejected=$true
+  }
+  if(-not $rejected){throw 'A corrupted cache was accepted.'}
+}
+[Console]::WriteLine('verified')
+'''
+        result = subprocess.run(['powershell.exe', '-NoProfile', '-NonInteractive', '-Command', script],
+                                env={**os.environ, 'STUDIO_HASH_FIXTURE': str(self.root),
+                                     'STUDIO_HASH_EXPECTED': hashlib.sha256(original).hexdigest(),
+                                     'STUDIO_HASH_SIZE': str(len(original))},
+                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', timeout=30)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.strip(), 'verified')
+        for name, content in fixtures.items():
+            self.assertEqual((self.root / name).read_bytes(), content)
+        self.assertEqual(list(self.root.glob('*.part')), [])
 
     def test_setup_writes_to_shared_directory_without_touching_reference_data(self):
         import setup_vox_voice

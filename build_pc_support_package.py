@@ -38,6 +38,14 @@ UV_URL = 'https://files.pythonhosted.org/packages/e7/97/40a91354862028e8f8e547ac
 UV_SHA256 = '277d326d7e63b912f3425c6e6d7d5d49f21b43d080d21859ff3c6819353f1847'
 UV_SIZE = 18085016
 
+# PowerShell 모듈 자동 로딩 없이 파일과 ZIP 항목에 같은 SHA-256 계산을 적용합니다.
+BOOTSTRAP_FILE_FUNCTIONS = r"""
+function SafeFile($p){if(Test-Path -LiteralPath $p){$a=(Get-Item -Force -LiteralPath $p).Attributes;if($a -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)){throw 'A linked or non-file download is not allowed.'}}};
+function StreamSha256($s){$h=[Security.Cryptography.SHA256]::Create();try{return ([BitConverter]::ToString($h.ComputeHash($s))).Replace('-','').ToLowerInvariant()}finally{$h.Dispose()}};
+function FileSha256($p){SafeFile $p;$s=[IO.File]::OpenRead($p);try{return StreamSha256 $s}finally{$s.Dispose()}};
+function Fetch($url,$target,$hash,$size){SafeFile $target;if(Test-Path -LiteralPath $target){if((Get-Item -LiteralPath $target).Length -eq $size -and (FileSha256 $target) -eq $hash){return};throw 'An existing download does not match the pinned release.'};$part=$target+'.'+[Guid]::NewGuid().ToString('N')+'.part';$r=[Net.HttpWebRequest]::Create($url);$r.AllowAutoRedirect=$false;$r.Timeout=60000;$r.ReadWriteTimeout=120000;$s=$r.GetResponse();try{if([int]$s.StatusCode -ne 200){throw 'Download was redirected or rejected.'};$a=$s.GetResponseStream();$b=[IO.File]::Open($part,[IO.FileMode]::CreateNew);try{$buf=New-Object byte[] 65536;$n=0;while(($c=$a.Read($buf,0,$buf.Length)) -gt 0){$n+=$c;if($n -gt $size){throw 'Download exceeded its expected size.'};$b.Write($buf,0,$c)}}finally{$b.Dispose();$a.Dispose()}}finally{$s.Dispose()};if((Get-Item -LiteralPath $part).Length -ne $size -or (FileSha256 $part) -ne $hash){throw 'Download integrity verification failed.'};[IO.File]::Move($part,$target)};
+"""
+
 
 def file_digest(path):
     digest = hashlib.sha256()
@@ -182,12 +190,11 @@ if(-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -e
 [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12;
 Add-Type -AssemblyName System.IO.Compression.FileSystem;
 function SafeDir($p){$p=[IO.Path]::GetFullPath($p);if($p.StartsWith('\\')){throw 'A local directory is required.'};$q=$p;while($q){if((Test-Path -LiteralPath $q) -and ((Get-Item -Force -LiteralPath $q).Attributes -band [IO.FileAttributes]::ReparsePoint)){throw 'Linked setup directories are not allowed.'};$q=[IO.Path]::GetDirectoryName($q)};[IO.Directory]::CreateDirectory($p)|Out-Null;return $p};
-function SafeFile($p){if(Test-Path -LiteralPath $p){$a=(Get-Item -Force -LiteralPath $p).Attributes;if($a -band ([IO.FileAttributes]::ReparsePoint -bor [IO.FileAttributes]::Directory)){throw 'A linked or non-file download is not allowed.'}}};
-function Fetch($url,$target,$hash,$size){SafeFile $target;if(Test-Path -LiteralPath $target){if((Get-Item -LiteralPath $target).Length -eq $size -and (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash.ToLowerInvariant() -eq $hash){return};throw 'An existing download does not match the pinned release.'};$part=$target+'.'+[Guid]::NewGuid().ToString('N')+'.part';$r=[Net.HttpWebRequest]::Create($url);$r.AllowAutoRedirect=$false;$r.Timeout=60000;$r.ReadWriteTimeout=120000;$s=$r.GetResponse();try{if([int]$s.StatusCode -ne 200){throw 'Download was redirected or rejected.'};$a=$s.GetResponseStream();$b=[IO.File]::Open($part,[IO.FileMode]::CreateNew);try{$buf=New-Object byte[] 65536;$n=0;while(($c=$a.Read($buf,0,$buf.Length)) -gt 0){$n+=$c;if($n -gt $size){throw 'Download exceeded its expected size.'};$b.Write($buf,0,$c)}}finally{$b.Dispose();$a.Dispose()}}finally{$s.Dispose()};if((Get-Item -LiteralPath $part).Length -ne $size -or (Get-FileHash -LiteralPath $part -Algorithm SHA256).Hash.ToLowerInvariant() -ne $hash){throw 'Download integrity verification failed.'};[IO.File]::Move($part,$target)};
+__FILE_FUNCTIONS__
 $base=SafeDir (Join-Path $env:LOCALAPPDATA 'ShortsStudio');
 $runtime=SafeDir (Join-Path $base 'runtime');$cache=SafeDir (Join-Path $runtime 'downloads');
 $wheel=Join-Path $cache 'uv-__UV_VERSION__-win64.whl';Fetch '__UV_URL__' $wheel '__UV_SHA__' __UV_SIZE__;
-$uv=Join-Path $runtime 'uv.exe';SafeFile $uv;$z=[IO.Compression.ZipFile]::OpenRead($wheel);try{$e=@($z.Entries|Where-Object {$_.FullName.EndsWith('/uv.exe')});if($e.Count -ne 1 -or $e[0].Length -gt 134217728){throw 'Unexpected uv archive.'};if(-not(Test-Path -LiteralPath $uv)){[IO.Compression.ZipFileExtensions]::ExtractToFile($e[0],$uv,$false)}else{$a=$e[0].Open();try{$h=[Security.Cryptography.SHA256]::Create();$expected=([BitConverter]::ToString($h.ComputeHash($a))).Replace('-','').ToLowerInvariant()}finally{$a.Dispose();$h.Dispose()};if((Get-FileHash -LiteralPath $uv -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected){throw 'The existing uv executable does not match.'}}}finally{$z.Dispose()};
+$uv=Join-Path $runtime 'uv.exe';SafeFile $uv;$z=[IO.Compression.ZipFile]::OpenRead($wheel);try{$e=@($z.Entries|Where-Object {$_.FullName.EndsWith('/uv.exe')});if($e.Count -ne 1 -or $e[0].Length -gt 134217728){throw 'Unexpected uv archive.'};if(-not(Test-Path -LiteralPath $uv)){[IO.Compression.ZipFileExtensions]::ExtractToFile($e[0],$uv,$false)}else{$a=$e[0].Open();try{$expected=StreamSha256 $a}finally{$a.Dispose()};if((FileSha256 $uv) -ne $expected){throw 'The existing uv executable does not match.'}}}finally{$z.Dispose()};
 $env:UV_CACHE_DIR=Join-Path $runtime 'cache';$env:UV_PYTHON_INSTALL_DIR=Join-Path $runtime 'python';
 & $uv python install '__PYTHON_VERSION__' --no-bin --no-registry;if($LASTEXITCODE -ne 0){throw 'Python preparation failed.'};
 $python=(& $uv python find '__PYTHON_VERSION__' --managed-python|Out-String).Trim();if($LASTEXITCODE -ne 0 -or -not(Test-Path -LiteralPath $python -PathType Leaf)){throw 'Python was not found.'};
@@ -203,7 +210,7 @@ $source=SafeDir (Join-Path $stage 'source');$z=[IO.Compression.ZipFile]::OpenRea
         fetch = fetch.replace('__ZIP_URL__', DOWNLOAD_ORIGIN + '/downloads/' + ZIP_NAME).replace('__ZIP_SHA__', package_sha256).replace('__ZIP_SIZE__', str(package_size))
     else:
         fetch = "$source=$env:STUDIO_SETUP_SOURCE;if(-not(Test-Path -LiteralPath (Join-Path $source 'install_pc_support.py'))){throw 'Run this file beside install_pc_support.py.'};"
-    script = script.replace('__PACKAGE_FETCH__', fetch).replace('__UV_VERSION__', UV_VERSION).replace('__UV_URL__', UV_URL).replace('__UV_SHA__', UV_SHA256).replace('__UV_SIZE__', str(UV_SIZE)).replace('__PYTHON_VERSION__', PYTHON_VERSION)
+    script = script.replace('__FILE_FUNCTIONS__', BOOTSTRAP_FILE_FUNCTIONS).replace('__PACKAGE_FETCH__', fetch).replace('__UV_VERSION__', UV_VERSION).replace('__UV_URL__', UV_URL).replace('__UV_SHA__', UV_SHA256).replace('__UV_SIZE__', str(UV_SIZE)).replace('__PYTHON_VERSION__', PYTHON_VERSION)
     script = ' '.join(line.strip() for line in script.splitlines() if line.strip())
     command = 'powershell.exe -NoProfile -Command "& { ' + script + ' }"'
     if len(command) > 8000 or '"' in script:

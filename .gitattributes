@@ -1,0 +1,4 @@
+# 고정 버전 엔진과 라이선스의 원문 바이트·SHA-256을 운영체제마다 동일하게 보존합니다.
+public/vendor/transformers/** -text
+public/vendor/onnxruntime-web/** -text
+public/vendor/supertonic/** -text

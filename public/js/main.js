@@ -1,7 +1,7 @@
 // UI 연결 — 상태를 바꾸고, 다시 그리라고 시키는 층
 import {
   project, sel, FONTS, clipDuration, totalDuration, clipStartTime,
-  getOverlay, selectedClip, newOverlay, sortCaptions,
+  getOverlay, selectedClip, newOverlay, sortCaptions, setLegacyEditorMode,
 } from './state.js';
 import { $, $$, uid, fmtTime, clamp, pct, download, wireDropzone, on } from './util.js';
 import { createClip, disposeClip } from './media.js';
@@ -25,8 +25,11 @@ let lastExport = null;   // { blob, seconds } — 유튜브 업로드가 이걸 
 let ytCtrl = null;
 let capGaps = [];          // 소리는 있는데 자막이 없는 구간
 let lastSttAudio = null;   // 방금 인식에 쓴 오디오 (구간 다시 계산용)
+let fontPreviewRequest = 0;
+let fontPreviewFailure = '';
 
 // ── 시작 ───────────────────────────────────────────────
+setLegacyEditorMode(true);
 init();
 
 async function init() {
@@ -52,8 +55,6 @@ async function init() {
   // 페이지 전체가 드롭 영역
   ['dragover', 'drop'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
 
-  loadFonts().then(() => player.invalidate());
-
   engine = await detectEngine();
   el.engineBadge.textContent = engine.ok ? engine.label : '내보내기 미지원';
   el.engineBadge.className = `badge ${engine.ok ? (engine.mode === 'webcodecs' ? 'ok' : 'warn') : 'warn'}`;
@@ -63,6 +64,20 @@ async function init() {
   el.autoCap.disabled = !sttAvailable();
 
   renderAll();
+}
+
+// 글꼴을 바꾸거나 새 글자를 입력하면 실제 폰트를 준비한 뒤 현재 화면만 다시 그립니다.
+async function preparePreviewFonts() {
+  const request = ++fontPreviewRequest;
+  try {
+    await loadFonts();
+    if (request === fontPreviewRequest) { fontPreviewFailure = '';player.invalidate(); }
+  } catch (error) {
+    if (request === fontPreviewRequest && fontPreviewFailure !== error.message) {
+      fontPreviewFailure = error.message;
+      alert(error.message + '\n미리보기에는 임시 대체 글꼴이 보일 수 있습니다.');
+    }
+  }
 }
 
 // ── 소재 추가 ──────────────────────────────────────────
@@ -148,6 +163,7 @@ function renderAll() {
     b.disabled = !has || (b === el.btnExport || b === el.btnExportTop ? !engine?.ok : false);
   }
   player.draw();
+  preparePreviewFonts();
 }
 
 /** 값만 바뀐 경우 — 입력 포커스를 잃지 않도록 최소한만 갱신 */
@@ -157,6 +173,7 @@ function softRefresh() {
   el.totalDur.textContent = `${totalDuration().toFixed(1)}초`;
   el.tAll.textContent = fmtTime(totalDuration());
   player.invalidate();
+  preparePreviewFonts();
 }
 
 function onTick(t) {
@@ -817,8 +834,10 @@ const AUTO_CAP_LABEL = '\u{1F399} 자동 자막 만들기';
 async function doAutoCaption() {
   if (autoCapCtrl) { autoCapCtrl.abort(); return; }   // 두 번째 클릭은 취소
   if (!project.clips.length) return alert('먼저 영상이나 이미지를 추가하세요.');
-  if (!hasClipAudio()) {
-    return alert('말소리가 담긴 영상이 있어야 합니다.\n\n'
+  const narration = project.audio.narration;
+  const hasNarration = narration?.buffer && !narration.muted && (narration.volume ?? 1) > 0;
+  if (!hasClipAudio() && !hasNarration) {
+    return alert('말소리가 담긴 영상이나 내레이션이 있어야 합니다.\n\n'
       + '배경음악만으로는 자막을 만들 수 없고, 음소거된 클립도 인식 대상에서 빠집니다.');
   }
   if (project.captions.length
@@ -835,6 +854,7 @@ async function doAutoCaption() {
     // 배경음악은 빼고 보낸다. 노래가 섞이면 알아듣는 정확도가 떨어진다.
     const mixed = await mixTimeline({
       includeBgm: false,
+      includeVoice: true,
       signal: autoCapCtrl.signal,
       onProgress: (_, msg) => setCapStatus(msg || '소리 모으는 중…'),
     });
@@ -1056,7 +1076,7 @@ function renderTemplatePanel() {
 
 function wireTemplatePanel() {
   const t = project.template;
-  const upd = fn => () => { fn(); player.invalidate(); };
+  const upd = fn => () => { fn(); player.invalidate();preparePreviewFonts(); };
 
   el.tplMode.addEventListener('change', () => {
     t.mode = el.tplMode.value;
@@ -1067,6 +1087,7 @@ function wireTemplatePanel() {
       renderClipPanel();
     }
     player.invalidate();
+    preparePreviewFonts();
   });
 
   el.tplBg.addEventListener('input', upd(() => { t.bg = el.tplBg.value; }));

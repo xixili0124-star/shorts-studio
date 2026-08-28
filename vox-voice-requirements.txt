@@ -1,0 +1,16 @@
+# Inference only: no Gradio, cloud ASR, English text normalizer, or denoiser.
+# Torch/torchaudio 2.5.1 are installed separately from the official CUDA index.
+numpy==1.26.4
+scipy==1.15.3
+librosa==0.10.2
+numba==0.61.2
+soundfile==0.13.1
+einops==0.8.1
+transformers==4.51.3
+tokenizers==0.21.4
+huggingface-hub==0.34.4
+safetensors==0.8.0
+pydantic==2.10.6
+tqdm==4.67.1
+fastapi==0.115.12
+uvicorn==0.34.2

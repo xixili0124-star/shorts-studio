@@ -2,3 +2,10 @@ node_modules/
 .wrangler/
 .DS_Store
 _test/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.env
+.env.*
+*.shorts
+.studio-local/

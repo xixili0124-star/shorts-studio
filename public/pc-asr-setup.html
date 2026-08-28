@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="color-scheme" content="dark">
+  <title>Turbo 자동자막 · PC 사용 안내 — Shorts Studio</title>
+  <style>
+    :root{color-scheme:dark;font-family:system-ui,-apple-system,"Segoe UI",sans-serif;color:#e9eee5;background:#11140f;line-height:1.75}*{box-sizing:border-box}body{margin:0}main{max-width:900px;margin:auto;padding:28px clamp(20px,5vw,50px) 70px}a{color:#c5ed8e;text-underline-offset:4px}a:focus-visible{outline:2px solid #c5ed8e;outline-offset:4px}header{display:flex;justify-content:space-between;gap:20px;padding-bottom:20px;border-bottom:1px solid #32392d}.brand{font-size:13px;font-weight:750;letter-spacing:.08em}.tag{color:#c5ed8e;font-size:13px}h1{font-size:clamp(30px,5vw,44px);line-height:1.3;letter-spacing:-.04em;margin:32px 0 15px}h2{font-size:21px;margin:0 0 12px}p,li{color:#c4cbbb}section{margin-top:22px;padding:24px;border:1px solid #32392d;border-radius:14px;background:#191e15}li{margin:12px 0}code{font-family:ui-monospace,Consolas,monospace;background:#10150c;padding:3px 6px;border-radius:4px;overflow-wrap:anywhere}.note{font-size:14px}.warning{border-left:3px solid #d8bd74;padding-left:14px;color:#ded1ad}table{border-collapse:collapse;width:100%;font-size:14px}th,td{text-align:left;border-bottom:1px solid #32392d;padding:12px 8px}th{color:#c5ed8e}.table-wrap{overflow:auto}@media(max-width:540px){section{padding:18px}header{align-items:flex-start}}
+  </style>
+</head>
+<body><main>
+  <header><span class="brand">SHORTS STUDIO <span class="tag">LAB</span></span><a href="studio.html">편집기로 돌아가기</a></header>
+  <h1>한국어 자동자막,<br>PC에서는 Turbo로.</h1>
+  <p>Whisper large-v3-turbo를 이 PC에 한 번 준비하고, 같은 편집기의 자막 패널에서 사용하세요. 기존 모바일용 Whisper Tiny와 내 목소리 TTS는 그대로 유지합니다.</p>
+  <section aria-labelledby="install-title">
+    <h2 id="install-title">처음 한 번 · Windows PC 준비</h2>
+    <ol>
+      <li><strong>최신 실험판 폴더에서 <code>setup-pc-asr.cmd</code>를 실행하세요.</strong><br>설치 도구를 실행할 Python 3.10 이상과 Windows 64비트가 필요합니다. 전용 Python 3.11 환경은 자동으로 준비합니다.</li>
+      <li><strong>모델·실행 환경 다운로드에 동의하세요.</strong><br>모델 약 1.62GB와 별도 실행 환경을 받습니다. CUDA 라이브러리 다운로드만 약 570MB가 추가되며, 설치·캐시를 위해 디스크 여유 공간 8GB 이상을 확보해 주세요. Vox·GPT-SoVITS 환경에는 설치하지 않습니다.</li>
+      <li><strong>편집기를 실행하세요.</strong><br>기본 편집기는 <code>start-studio.cmd</code>, 내 목소리 TTS도 함께 쓸 때는 <code>start-pc-voice.cmd</code>를 실행합니다. 이전 실행기가 켜져 있다면 프로젝트를 저장한 뒤 종료하고 최신 실행기로 다시 시작하세요.</li>
+      <li><strong>자막 → 자동자막 엔진에서 PC Turbo 연결을 확인하세요.</strong><br>영상·오디오 클립을 선택하거나 전체 타임라인을 고르고 실행합니다. 결과를 검수한 뒤 새 자막 트랙에 추가하며, 기존 자막은 지우지 않습니다.</li>
+    </ol>
+    <p class="note">기본 설치는 NVIDIA CUDA GPU용입니다. GPU 없는 PC는 <code>setup-pc-asr.cmd --device cpu</code>로 별도 선택할 수 있지만 처리 시간이 길어질 수 있습니다. GPU 오류가 나도 CPU나 외부 유료 API로 몰래 전환하지 않습니다.</p>
+  </section>
+  <section aria-labelledby="mode-title">
+    <h2 id="mode-title">어디서 실행되나요?</h2>
+    <div class="table-wrap"><table>
+      <thead><tr><th scope="col">항목</th><th scope="col">브라우저 Tiny</th><th scope="col">PC Turbo</th></tr></thead>
+      <tbody><tr><th scope="row">실행 위치</th><td>현재 브라우저</td><td>현재 PC의 전용 실행 환경</td></tr>
+      <tr><th scope="row">이용 가능한 화면</th><td>모바일·PC·공유 웹사이트</td><td>시작 도구에 표시된 localhost 편집기</td></tr>
+      <tr><th scope="row">한 번에 처리하는 길이</th><td>최대 3분</td><td>최대 3분</td></tr>
+      <tr><th scope="row">오디오 외부 전송</th><td>없음</td><td>없음 — 같은 PC의 루프백 연결만 사용</td></tr></tbody>
+    </table></div>
+    <p class="note">공유 웹사이트에서 다른 PC의 엔진을 원격으로 호출하지 않습니다. 완성한 자막과 음성은 .shorts 프로젝트로 다른 기기에 옮겨 편집할 수 있습니다.</p>
+  </section>
+  <section aria-labelledby="gpu-title">
+    <h2 id="gpu-title">TTS와 GPU 메모리는 어떻게 쓰나요?</h2>
+    <p>같은 PC 음성 엔진의 TTS와 자동자막은 순서대로 처리합니다. GPU 여유가 있으면 Vox 모델을 유지하고, 부족할 때만 GPU에서 내려 공간을 확보합니다. 다음 TTS 요청에서 다시 불러오므로 재다운로드는 필요하지 않습니다.</p>
+    <p>Turbo는 자막 작업이 끝나면 실행 프로세스가 종료되어 GPU 메모리가 반환됩니다. 취소 버튼도 실제 자막 작업을 중단합니다. 매번 로컬 모델을 불러오는 준비 시간이 포함됩니다.</p>
+    <p class="warning">다른 편집기·게임·AI가 GPU 메모리를 사용하면 실행에 실패할 수 있습니다. 작업 종료 여부가 불확실하다는 안내가 나오면 프로젝트를 저장하고 PC 실행기를 다시 시작해 주세요. 앱은 다른 프로그램을 강제로 종료하지 않습니다.</p>
+  </section>
+  <section aria-labelledby="review-title">
+    <h2 id="review-title">결과는 꼭 한 번 확인하세요</h2>
+    <p>숫자·사람 이름·빠른 말·배경음이 섞인 음성은 틀릴 수 있습니다. 단어별 시각이 없지만 실제 발화 구간 시각이 있는 경우에는 문장 전체를 한 자막으로 보존하고 경고합니다. 단어 시간을 임의로 나누어 만들지 않습니다.</p>
+    <p>전체 인식은 영상 소리와 보이스 트랙을 대상으로 하며 배경음악은 제외합니다. 일반 오디오 트랙의 말소리를 인식하려면 해당 클립을 선택해서 실행해 주세요.</p>
+    <p class="note">추가 학습·화자 분리·TTS 원고 강제 정렬은 이번 Turbo 연결에 포함하지 않습니다. 한국어 받아쓰기와 기존 자막 검수·편집 흐름을 사용합니다.</p>
+  </section>
+  <section aria-labelledby="privacy-title">
+    <h2 id="privacy-title">개인 오디오와 설치 파일</h2>
+    <p>모델·실행환경은 PC에만 설치하며 Git과 배포 ZIP에 포함하지 않습니다. 인식용 PCM은 브라우저에서 같은 PC 서버로 전달하고 파일로 따로 저장하지 않습니다. 결과는 작업 검수용으로 서버 메모리에 임시 보관합니다.</p>
+    <p>추론 중 모델 자동 다운로드와 Python 네트워크 요청을 차단합니다. 설치 단계에서만 공개 모델·패키지를 내려받으며 API 키가 필요하지 않습니다.</p>
+    <p class="note"><a href="https://github.com/SYSTRAN/faster-whisper" target="_blank" rel="noopener noreferrer">faster-whisper</a> · <a href="https://huggingface.co/dropbox-dash/faster-whisper-large-v3-turbo" target="_blank" rel="noopener noreferrer">고정 모델 출처</a> · <a href="pc-voice-setup.html">내 목소리 TTS 안내</a></p>
+  </section>
+</main></body>
+</html>

@@ -174,6 +174,18 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 @media(max-height:740px) and (min-width:651px){.workbench{grid-template-rows:minmax(155px,1fr) 310px}.inspector{bottom:310px}.timeline-toolbar{min-height:42px}#trackHeaders>.track-head,#timelineRows>.track{height:47px;min-height:47px}}
 
 /* 선택 묶음과 용도별 확장 트랙 */
+.pc-voice-card{padding:14px;border:1px solid #475b39;border-radius:7px;background:#1b251a;margin-bottom:16px;font-size:11px;line-height:1.8;color:#b9c9b3}
+.pc-voice-card h3{color:#e3efdb;font-size:15px;margin:9px 0}.pc-voice-card ol{padding-left:18px;margin:10px 0}
+.pc-voice-avatar{font:700 12px/1 sans-serif;flex-shrink:0}
+.pc-engine-status{display:flex;align-items:flex-start;gap:8px;padding:10px 11px;border:1px solid var(--line);border-radius:5px;background:#191d1a;font-size:10px;line-height:1.8;color:#bbc7b5}
+.pc-engine-status .status-dot{margin-top:6px;background:#a9a291}.pc-engine-status[data-state="ready"] .status-dot{background:var(--accent)}
+.pc-engine-status[data-state="offline"] .status-dot,.pc-engine-status[data-state="restart-required"] .status-dot{background:#dba96d}
+.pc-voice-actions{display:grid;grid-template-columns:1fr 1fr;align-items:center;gap:7px;margin:9px 0 14px}
+.pc-voice-actions .button{width:100%;margin:0;padding:7px 3px;font-size:10px;min-height:32px;text-align:center;white-space:normal}
+.reference-recorder{display:flex;align-items:center;gap:11px;padding:14px;border:1px solid var(--line);border-radius:6px;background:#171d18;margin:15px 0;font-size:12px;line-height:1.8}
+.record-indicator{width:10px;height:10px;border-radius:50%;background:#62705d;flex-shrink:0}.recording .record-indicator{background:#f28c83;box-shadow:0 0 0 5px #f28c831a}
+.reference-file-label{display:flex;flex-direction:column;gap:9px;font-size:11px;color:#b8c6b0;padding:13px 0}.reference-file-label input{width:100%;font-size:11px;min-height:35px}
+.reference-preview{padding:12px;border:1px solid #465b3a;border-radius:6px;background:#1d281b;margin:10px 0;font-size:12px}.reference-preview audio{width:100%;margin-top:10px}
 .track-heads{width:166px;flex-basis:166px}
 .track-selector{gap:5px}.track-selector strong{overflow:hidden;text-overflow:ellipsis}
 .add-track{width:24px;height:27px;display:grid;place-items:center;flex:0 0 24px;padding:0;border:1px solid #424b45;border-radius:4px;background:#252d27;color:#c9e9af;font:19px/1 Arial,sans-serif}

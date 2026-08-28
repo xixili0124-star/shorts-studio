@@ -87,6 +87,28 @@ Meta 자료는 표지에 Last Updated June 15th, 2023으로 표시된 구형 참
 
 모델 가중치는 Git이나 ZIP에 넣지 않습니다. 사용자가 실행한 뒤 해당 고정 revision의 공개 파일을 받습니다. 실행 엔진은 vendor 폴더에 포함하며, 출처·크기·SHA-256은 [browser-ai-vendors.json](public/vendor/browser-ai-vendors.json)에 기록했습니다. Supertonic helper는 npm import를 고정 로컬 ORT import로 바꾸었고 파일 상단에 변경을 표시했습니다. mediabunny 원본 vendor 파일은 변경하지 않았습니다.
 
-**Supertonic 모델과 예제 코드의 라이선스는 서로 다릅니다.** 모델의 이용 제한을 따르고, 생성 음성을 게시할 때 AI 생성물임을 명시해야 합니다. 앱은 다운로드 전 모델 조건 링크와 동의란, 결과 확인 화면의 고지를 제공합니다. 특정 인물의 음성 복제 기능은 포함하지 않습니다.
+**Supertonic 모델과 예제 코드의 라이선스는 서로 다릅니다.** 모델의 이용 제한을 따르고, 생성 음성을 게시할 때 AI 생성물임을 명시해야 합니다. 앱은 다운로드 전 모델 조건 링크와 동의란, 결과 확인 화면의 고지를 제공합니다. 브라우저 기본 모드에는 특정 인물의 음성 복제가 없으며, 아래의 PC 확장은 별도 모델을 사용합니다.
 
 설치된 기기 음성은 [Web Speech API](https://webaudio.github.io/web-speech-api/)의 `localService` 보이스만 사용합니다. 파일을 반환하지 않는 재생 전용 API이므로 WAV 생성과 구분했습니다. 운영체제에 설치된 보이스 자체의 사용 조건은 해당 제공자의 조건을 확인하세요.
+
+## 선택형 PC 음성 엔진
+
+모델·Python 런타임·참고 녹음은 이 저장소와 배포 ZIP에 포함하지 않습니다. 사용자가 Windows 설치 도구에서 동의하면 공식 저장소·PyPI·PyTorch 배포처에서 별도 다운로드합니다. 원문 라이선스는 내려받은 소스와 설치된 각 패키지에 유지합니다.
+
+| 구성 | 출처·버전 | 이용 조건 |
+| --- | --- | --- |
+| GPT-SoVITS 소스 | [공식 revision 48b1a016](https://github.com/RVC-Boss/GPT-SoVITS/tree/48b1a0169a28582a8984402f82cf438d3bfa6aca) | [MIT](https://github.com/RVC-Boss/GPT-SoVITS/blob/48b1a0169a28582a8984402f82cf438d3bfa6aca/LICENSE) |
+| v2ProPlus·s1v3·speaker embedding·BERT·HuBERT 자료 | [공식 배포 모델 revision 336b2ec4](https://huggingface.co/lj1995/GPT-SoVITS/tree/336b2ec4e8d4ac74740798dd40af44e74659ecaf) | 해당 저장소 [모델 카드의 MIT 표기](https://huggingface.co/lj1995/GPT-SoVITS/blob/336b2ec4e8d4ac74740798dd40af44e74659ecaf/README.md) |
+| 한국어 형태소 분석 | [python-mecab-ko 1.3.7](https://pypi.org/project/python-mecab-ko/1.3.7/), [사전 2.1.1.post2](https://pypi.org/project/python-mecab-ko-dic/2.1.1.post2/) | 분석기 BSD-3-Clause / 사전 Apache-2.0 |
+| 한국어 발음 변환 | [g2pk2 0.0.3](https://pypi.org/project/g2pk2/0.0.3/) | Apache-2.0 |
+| Jieba 호환 처리 | [jieba 0.42.1](https://pypi.org/project/jieba/0.42.1/) | MIT |
+| 언어 감지 모델 | Facebook fastText [lid.176.bin](https://fasttext.cc/docs/en/language-identification.html) | CC BY-SA 3.0. Joulin, Grave, Bojanowski, Mikolov의 [Bag of Tricks for Efficient Text Classification](https://arxiv.org/abs/1607.01759), Joulin 외 [FastText.zip](https://arxiv.org/abs/1612.03651) 기반 |
+| 영어 발음 자료 | [NLTK 공식 리소스 목록](https://raw.githubusercontent.com/nltk/nltk_data/gh-pages/index.xml)의 CMUdict, averaged_perceptron_tagger, averaged_perceptron_tagger_eng | CMUdict의 동봉 고지, 두 태거의 MIT 고지 각각 유지 |
+| PyTorch·torchaudio | [PyTorch 공식 배포](https://pytorch.org/), 2.5.1 | 패키지의 BSD 및 제3자 고지. CUDA 구성 요소는 별도 제공자 조건 |
+| FFmpeg 실행 파일 | [imageio-ffmpeg 0.6.0](https://pypi.org/project/imageio-ffmpeg/0.6.0/)의 Windows FFmpeg 7.1 | Python 래퍼 BSD-2-Clause. 검증한 Windows 바이너리의 `-L` 고지는 GPL-3.0-or-later이며 제3자 고지도 별도 유지 |
+
+모델 주요 파일 SHA-256은 `setup_pc_voice.py`, 발음 자료 SHA-256은 `prepare_pc_voice_resources.py`, Python 버전 고정은 `pc-voice-requirements.txt`와 `pc-voice-constraints.txt`에 기록합니다. 기존 PyTorch 채널과 별도로 코드·모델 버전을 고정하며, 전체 구성 요소를 하나의 MIT 라이선스로 간주하지 않습니다.
+
+Windows 호환을 위해 격리된 엔진 프로세스에서만 `jieba_fast`를 Jieba로 연결하고 g2pk2의 MeCab 접근을 python-mecab-ko로 연결합니다. 제3자 소스를 직접 수정하거나 eunjeon을 자동 설치하지 않습니다. 지원 범위는 한국어 및 한국어·영어 혼용이며, 중국어·일본어 처리와 개인 모델 학습은 제공하지 않습니다.
+
+소스·모델의 이용 조건이 녹음자의 동의나 타인 사칭 허락을 대신하지 않습니다. 본인 또는 허락받은 녹음만 등록하도록 안내합니다. PC 모드의 AI 생성 표시 안내는 제품의 사용 원칙이며, MIT 라이선스 자체의 의무라고 주장하지 않습니다.

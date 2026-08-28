@@ -24,6 +24,7 @@ import {cachedModel} from '../public/js/model-download.js';
 import {StudioTools} from '../public/js/studio-tools.js';
 import {selectionRefs,resolveSelection,combineSelection,marqueeHits,captureItemSettings,planPasteSettings,applySettingsPlan,applySharedProperty,deleteSelectedItems,planBatchMove,applyBatchMove,planBatchSplit,applyBatchSplit,duplicateSelectedItems} from '../public/js/batch-edits.js';
 import {MonitorEditor} from '../public/js/monitor-editor.js';
+import {isPcVoiceOrigin,pcVoiceStatus,saveVoiceReference,generatePcVoice,referenceFromPcm,decodeVoiceReference,recordVoiceReference} from '../public/js/pc-voice.js';
 
 const require=createRequire(import.meta.url);
 let canvasModule;
@@ -1379,4 +1380,176 @@ test('ruler scrub filters pointer IDs and removes every termination listener',()
       m.emit(window,'pointermove',{pointerId:7,clientX:300,clientY:10});assert.deepEqual(m.calls.seeks,[1,2],reason);
     }finally{m.restore();}
   }
+});
+
+const pcLocation={protocol:'http:',hostname:'127.0.0.1'};
+const referenceBuffer=(duration=4)=>{const data=Float32Array.from({length:Math.round(duration*16000)},(_,i)=>Math.sin(i*.1)*.2);return {sampleRate:16000,length:data.length,numberOfChannels:1,getChannelData:()=>data};};
+
+test('PC voice only uses the local editor origin and never probes a public/mobile page',async()=>{
+  for(const location of [undefined,{protocol:'https:',hostname:'example.com'},{protocol:'http:',hostname:'127.0.0.1.evil.test'},{protocol:'http:',hostname:'192.168.1.2'},{protocol:'file:',hostname:''}]){
+    assert.equal(isPcVoiceOrigin(location),false);
+    await assert.rejects(()=>pcVoiceStatus({location,fetchImpl:()=>{throw new Error('must never fetch');}}),/PC용 로컬/);
+  }
+  assert.ok(isPcVoiceOrigin(pcLocation));assert.ok(isPcVoiceOrigin({protocol:'http:',hostname:'localhost'}));
+  let call;
+  const result=await pcVoiceStatus({location:pcLocation,fetchImpl:async(url,options)=>{call={url,options};return new Response('{"localServer":true,"state":"ready","profiles":[]}',{headers:{'Content-Type':'application/json'}});}});
+  assert.equal(result.state,'ready');assert.equal(call.url,'/api/voice-clone/status');assert.equal(call.options.credentials,'omit');assert.equal(call.options.redirect,'error');assert.equal(call.options.headers['X-Studio-PC-Voice'],'1');
+});
+
+test('voice reference preparation yields bounded mono WAV without adding private audio to the project',async()=>{
+  reset();const before=captureDocument(),ref=referenceFromPcm(referenceBuffer());
+  assert.equal(ref.duration,4);assert.equal(ref.sampleRate,32000);assert.ok(ref.wav.size<1024*1024);
+  const view=new DataView(await ref.wav.arrayBuffer());assert.equal(view.getUint16(22,true),1);assert.equal(view.getUint32(24,true),32000);
+  for(const duration of [2.99,10.01])assert.throws(()=>referenceFromPcm(referenceBuffer(duration)),/3~10초/);
+  const silent=referenceBuffer();silent.getChannelData=()=>new Float32Array(silent.length);assert.throws(()=>referenceFromPcm(silent),/무음/);
+  assert.equal(assets.size,0);assert.deepEqual(captureDocument(),before);
+});
+
+test('voice reference request carries explicit consent only to the PC adapter',async()=>{
+  const reference=referenceFromPcm(referenceBuffer());let call;
+  const result=await saveVoiceReference({name:'내 목소리',promptText:'참고 문장',wav:reference.wav,consent:true},{location:pcLocation,fetchImpl:async(url,options)=>{call={url,options};return new Response('{"profile":{"id":"abc"}}',{status:201,headers:{'Content-Type':'application/json'}});}});
+  assert.equal(result.profile.id,'abc');assert.equal(call.url,'/api/voice-clone/references');const payload=JSON.parse(call.options.body);
+  assert.equal(payload.promptText,'참고 문장');assert.equal(payload.consent,true);assert.equal(call.options.headers['X-Studio-Consent'],'voice-clone-local');
+  assert.equal(Buffer.from(payload.audio,'base64').length,reference.wav.size);assert.equal(assets.size,0);
+});
+
+test('PC-generated WAV uses actual sample rate and rejects HTML, oversized and invalid responses',async()=>{
+  const wav=encodeWav({...referenceBuffer(),sampleRate:48000}),bytes=await wav.arrayBuffer();
+  const response=()=>new Response(bytes,{headers:{'Content-Type':'audio/wav','X-Studio-Audio-Rate':'48000','X-Studio-Audio-Duration':'1.333333'}});
+  const result=await generatePcVoice({text:'한국어',profileId:'ref',consent:true},{location:pcLocation,fetchImpl:async()=>response()});
+  assert.equal(result.sampleRate,48000);assert.equal(result.wav.size,wav.size);assert.ok(result.duration>1);
+  const invalid=[()=>new Response('<html>old server</html>',{headers:{'Content-Type':'text/html'}}),
+    ()=>new Response('bad',{headers:{'Content-Type':'audio/wav','X-Studio-Audio-Rate':'44100','X-Studio-Audio-Duration':'1'}}),
+    ()=>new Response(bytes,{headers:{'Content-Type':'audio/wav','Content-Length':String(33*1024*1024)}})];
+  for(const make of invalid)await assert.rejects(()=>generatePcVoice({text:'x'},{location:pcLocation,fetchImpl:async()=>make()}));
+});
+
+test('PC request cancellation discards late audio and timeout is not described as engine cancellation',async()=>{
+  let release;const controller=new AbortController(),before=captureDocument();
+  const pending=generatePcVoice({text:'x'},{location:pcLocation,signal:controller.signal,fetchImpl:()=>new Promise(resolve=>{release=resolve;})});
+  controller.abort();release(new Response('ignored',{headers:{'Content-Type':'audio/wav'}}));await assert.rejects(()=>pending,error=>error.name==='AbortError');
+  assert.deepEqual(captureDocument(),before);
+  await assert.rejects(()=>generatePcVoice({text:'x'},{location:pcLocation,timeout:1,fetchImpl:async(url,{signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))))}),/엔진 작업이 남아/);
+});
+
+test('decoding a reference closes its audio context on success, invalid duration and abort',async()=>{
+  const original=globalThis.AudioContext;let closes=0,pcm=referenceBuffer();
+  globalThis.AudioContext=class{async decodeAudioData(){return pcm;}async close(){closes++;}};
+  try{
+    await decodeVoiceReference(new Blob(['input']));assert.equal(closes,1);
+    pcm=referenceBuffer(2);await assert.rejects(()=>decodeVoiceReference(new Blob(['input'])),/3~10초/);assert.equal(closes,2);
+    const controller=new AbortController();controller.abort();await assert.rejects(()=>decodeVoiceReference(new Blob(['input']),{signal:controller.signal}),error=>error.name==='AbortError');assert.equal(closes,2);
+  }finally{globalThis.AudioContext=original;}
+});
+
+test('microphone recording closes tracks and late permission after cancel never starts recording',async()=>{
+  const oldNavigator=Object.getOwnPropertyDescriptor(globalThis,'navigator'),oldRecorder=globalThis.MediaRecorder;let stopped=0,started=0,permission;
+  const stream={getTracks:()=>[{stop(){stopped++;}}]};
+  Object.defineProperty(globalThis,'navigator',{configurable:true,value:{mediaDevices:{getUserMedia:()=>new Promise(resolve=>{permission=resolve;})}}});
+  globalThis.MediaRecorder=class{static isTypeSupported(){return true;}constructor(){this.state='inactive';this.mimeType='audio/webm';}start(){started++;this.state='recording';}stop(){this.state='inactive';this.ondataavailable?.({data:new Blob(['voice'])});this.onstop?.();}};
+  try{
+    const late=recordVoiceReference();late.cancel();await assert.rejects(()=>late.promise,error=>error.name==='AbortError');permission(stream);await new Promise(setImmediate);assert.equal(started,0);assert.equal(stopped,1);
+    const active=recordVoiceReference();permission(stream);await new Promise(setImmediate);active.stop();assert.ok((await active.promise).size>0);assert.equal(started,1);assert.equal(stopped,2);
+  }finally{globalThis.MediaRecorder=oldRecorder;if(oldNavigator)Object.defineProperty(globalThis,'navigator',oldNavigator);else delete globalThis.navigator;}
+});
+
+test('voice mode UI preserves browser voices and exposes PC setup without public-page requests',()=>{
+  const oldLocation=globalThis.location;globalThis.location={protocol:'https:',hostname:'example.com'};
+  const owner={voice:{engine:'local',text:'원고 유지',voice:'F1',speed:1,steps:5,systemVoice:'',accepted:false},pcVoice:{status:null,error:'',checking:false,profileId:'',accepted:false},pcVoiceMarkup:StudioTools.prototype.pcVoiceMarkup};const host={innerHTML:''};
+  try{
+    StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/Supertonic 2/);assert.match(host.innerHTML,/원고 유지/);assert.match(host.innerHTML,/value="device"/);assert.match(host.innerHTML,/value="pc"/);
+    owner.voice.engine='pc';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/PC 사용 안내/);assert.match(host.innerHTML,/data-smart-action="voice" disabled/);assert.match(host.innerHTML,/원고 유지/);assert.doesNotMatch(host.innerHTML,/http:\/\/127\.0\.0\.1/);
+  }finally{globalThis.location=oldLocation;}
+});
+
+test('private reference dialog captures file drops and paste before media import handlers',async()=>{
+  reset();const saved=globalThis.document,before=captureDocument(),loaded=[],errors=[];let imports=0;
+  const dialog=Object.assign(new EventTarget(),{open:true,setAttribute(){}}),library=new EventTarget(),inspector=new EventTarget(),overlay={hidden:false};
+  const doc=Object.assign(new EventTarget(),{createElement:()=>dialog,body:{append(){}},getElementById:id=>({libraryContent:library,inspectorContent:inspector,dropOverlay:overlay}[id])});
+  globalThis.document=doc;
+  try{
+    const owner=new StudioTools({});owner.state={kind:'voice-reference'};owner.loadVoiceReference=async file=>loaded.push(file);owner.showError=e=>errors.push(e);
+    doc.addEventListener('drop',()=>imports++);doc.addEventListener('paste',()=>imports++);
+    const file=new File(['private reference'],'private.wav',{type:'audio/wav'});
+    const emit=type=>{const e=Object.assign(new Event(type,{cancelable:true}),type==='drop'?{dataTransfer:{files:[file]}}:{clipboardData:{files:[file]}});doc.dispatchEvent(e);return e;};
+    assert.ok(emit('drop').defaultPrevented);assert.ok(emit('paste').defaultPrevented);await new Promise(setImmediate);
+    assert.deepEqual(loaded,[file,file]);assert.equal(imports,0);assert.equal(overlay.hidden,true);assert.equal(errors.length,0);
+    owner.state={kind:'mosaic'};emit('drop');assert.equal(loaded.length,2);assert.equal(imports,0);
+    owner.state={kind:'voice-reference'};owner.job=new AbortController();emit('drop');assert.equal(loaded.length,2);
+    dialog.open=false;emit('drop');assert.equal(imports,1);
+    assert.equal(assets.size,0);assert.deepEqual(captureDocument(),before);
+  }finally{globalThis.document=saved;}
+});
+
+test('closing the dialog cancels microphone acquisition before the asynchronous close event',()=>{
+  const order=[],owner=Object.assign(Object.create(StudioTools.prototype),{
+    referenceRecording:{cancel(){order.push('microphone');}},job:{abort(){order.push('request');}},
+    dialog:{open:true,close(){order.push('dialog');}},
+  });
+  owner.close();assert.deepEqual(order,['microphone','request','dialog']);assert.equal(owner.referenceRecording,null);
+});
+
+function referenceUiOwner(){
+  const progress={setAttribute(){}},cancel={textContent:''},body={querySelectorAll:()=>[],querySelector:selector=>selector.includes('cancel')?cancel:selector==='.smart-progress'?progress:null};
+  const owner=Object.create(StudioTools.prototype),messages=[];let refreshed=0;
+  owner.dialog={open:true,querySelector:()=>body,querySelectorAll:()=>[],close(){this.open=false;owner.cleanup();}};
+  owner.job=null;owner.pcVoice={profileId:''};owner.state={kind:'voice-reference',name:'private identity',promptText:'private reference words',consent:true,reference:referenceFromPcm(referenceBuffer())};
+  owner.progress=()=>{};owner.refreshPcVoice=async()=>{refreshed++;};owner.hooks={toast:m=>messages.push(m)};
+  return {owner,messages,get refreshed(){return refreshed;}};
+}
+
+test('closing reference registration does not cancel a committed write and still refreshes the list',async()=>{
+  const savedFetch=globalThis.fetch,savedLocation=globalThis.location;globalThis.location=pcLocation;let release,request;
+  globalThis.fetch=async(url,options)=>{request=options;return new Promise(resolve=>{release=resolve;});};
+  const ui=referenceUiOwner(),before=captureDocument();
+  try{
+    const pending=ui.owner.saveReference();await new Promise(setImmediate);ui.owner.close();
+    assert.equal(request.signal.aborted,false);release(new Response('{"profile":{"id":"saved"}}',{status:201,headers:{'Content-Type':'application/json'}}));
+    await pending;assert.equal(ui.owner.pcVoice.profileId,'saved');assert.equal(ui.refreshed,1);assert.match(ui.messages[0],/창은 닫혔지만/);assert.deepEqual(captureDocument(),before);
+  }finally{globalThis.fetch=savedFetch;globalThis.location=savedLocation;}
+});
+
+test('reference registration refreshes storage state even when the response is lost',async()=>{
+  const savedFetch=globalThis.fetch,savedLocation=globalThis.location;globalThis.location=pcLocation;
+  globalThis.fetch=async()=>{throw new TypeError('connection lost after commit');};const ui=referenceUiOwner();
+  try{await assert.rejects(()=>ui.owner.saveReference(),/연결이 끊겼/);assert.equal(ui.refreshed,1);assert.equal(ui.messages.length,0);}
+  finally{globalThis.fetch=savedFetch;globalThis.location=savedLocation;}
+});
+
+test('reference deletion completes and refreshes after its dialog closes',async()=>{
+  const savedFetch=globalThis.fetch,savedLocation=globalThis.location,savedConfirm=globalThis.confirm;globalThis.location=pcLocation;globalThis.confirm=()=>true;
+  let release,request;globalThis.fetch=async(url,options)=>{request=options;return new Promise(resolve=>{release=resolve;});};
+  const ui=referenceUiOwner();ui.owner.pcVoice.profileId='to-delete';ui.owner.open=()=>{ui.owner.dialog.open=true;};
+  try{const pending=ui.owner.deleteReference();await new Promise(setImmediate);ui.owner.close();assert.equal(request.signal.aborted,false);
+    release(new Response('{"deleted":true}',{headers:{'Content-Type':'application/json'}}));await pending;
+    assert.equal(ui.owner.pcVoice.profileId,'');assert.equal(ui.refreshed,1);assert.match(ui.messages[0],/삭제했/);
+  }finally{globalThis.fetch=savedFetch;globalThis.location=savedLocation;globalThis.confirm=savedConfirm;}
+});
+
+test('PC status refresh preserves the script textarea and cannot redraw a changed voice mode',async()=>{
+  const saved={document:globalThis.document,fetch:globalThis.fetch,location:globalThis.location};globalThis.location=pcLocation;
+  const textarea={value:'한글 입력 중',selectionStart:4},button={disabled:false};let renders=0,release;
+  const settings={contains:()=>false,set innerHTML(value){renders++;},querySelector:()=>null};
+  globalThis.document={activeElement:textarea,getElementById:id=>id==='pcVoiceSettings'?settings:id==='libraryContent'?{querySelector:()=>button}:null};
+  globalThis.fetch=async()=>new Promise(resolve=>{release=resolve;});
+  const owner=Object.assign(Object.create(StudioTools.prototype),{voice:{engine:'pc',text:'원고'},pcVoice:{checking:false,profileId:''},pcVoiceMarkup:()=>'<p>status</p>',hooks:{view:()=>'voice',renderLibrary(){throw new Error('must not replace the textarea');}}});
+  try{
+    const pending=owner.refreshPcVoice();assert.equal(renders,1);owner.voice.engine='local';textarea.value='한글 입력 계속';
+    release(new Response('{"state":"ready","profiles":[{"id":"ref","audioAvailable":true}]}',{headers:{'Content-Type':'application/json'}}));await pending;
+    assert.equal(renders,1);assert.equal(globalThis.document.activeElement,textarea);assert.equal(textarea.value,'한글 입력 계속');assert.equal(owner.voice.engine,'local');assert.equal(owner.pcVoice.profileId,'ref');
+  }finally{Object.assign(globalThis,saved);}
+});
+
+test('PC generated voice round-trips as ordinary project audio without private reference state',async()=>{
+  reset();const saved=globalThis.window,pcm=referenceBuffer(4),rate=pcm.sampleRate;
+  globalThis.window={AudioContext:class{async decodeAudioData(){return {...pcm,duration:pcm.length/rate};}close(){}}};
+  const calls=[],owner={state:{file:new File([encodeWav(pcm)],'AI 내 목소리.wav',{type:'audio/wav'}),before:captureDocument(),start:2,voice:{engine:'pc'}},
+    pcVoice:{profileId:'private-ref-id',promptText:'private reference words'},run:async(kind,work)=>work(new AbortController().signal),close(){},
+    hooks:{commit:(doc,label)=>calls.push(label),select(){},timeline:{reveal(){}},toast(){}}};
+  try{
+    await StudioTools.prototype.applyVoice.call(owner);assert.deepEqual(calls,['PC 내 목소리 음성 추가']);assert.equal(project.audio.tracks.length,1);assert.equal(project.audio.tracks[0].start,2);
+    const expected=captureDocument(),packed=packProject(),raw=new TextDecoder().decode(await packed.arrayBuffer());
+    assert.doesNotMatch(raw,/private-ref-id|private reference words|engineKey/);reset();await unpackProject(packed);
+    assert.deepEqual(captureDocument(),expected);assert.equal(assets.size,1);assert.equal([...assets.values()][0].buffer.sampleRate,rate);
+  }finally{globalThis.window=saved;reset();}
 });

@@ -7,12 +7,15 @@ from urllib.error import HTTPError, URLError
 from threading import BoundedSemaphore, Lock
 from collections import deque
 import argparse, json, os, time, uuid, math
+from pc_voice import VoiceCloneService, VoiceError, MAX_REFERENCE_BODY, local_engine_key
 
 ROOT = Path(__file__).resolve().parent / 'public'
 VOICES = ('alloy','ash','ballad','coral','echo','fable','onyx','nova','sage','shimmer','verse','marin','cedar')
 AI_LOCK = BoundedSemaphore(1)
 RATE_LOCK = Lock()
 REQUEST_TIMES = deque()
+LOCAL_VOICE_DIR = Path(__file__).resolve().parent / '.studio-local'
+PC_VOICE = VoiceCloneService(LOCAL_VOICE_DIR / 'voices', engine_key=local_engine_key(LOCAL_VOICE_DIR / 'pc-voice.json'))
 
 def validate_tts(data):
     """요청 모델·목소리·입력 길이를 제한합니다. 임의 URL 프록시는 제공하지 않습니다."""
@@ -83,6 +86,11 @@ class StudioHandler(SimpleHTTPRequestHandler):
         if not self.local_host():
             self.error_response(403, 'LOCAL_ONLY', '이 PC의 로컬 주소에서만 접근할 수 있습니다.')
             return
+        if urlsplit(self.path).path == '/api/voice-clone/status':
+            if not self.pc_request_allowed():
+                return
+            self.json_response(200, self.pc_voice_service().status())
+            return
         if urlsplit(self.path).path == '/api/ai/status':
             self.json_response(200, {'configured': bool(os.environ.get('OPENAI_API_KEY')),
                                     'verified': False, 'provider': 'openai', 'ttsModel': 'gpt-4o-mini-tts',
@@ -95,12 +103,88 @@ class StudioHandler(SimpleHTTPRequestHandler):
     def do_OPTIONS(self):
         self.error_response(403, 'CROSS_ORIGIN_BLOCKED', '외부 페이지의 API 요청은 허용하지 않습니다.')
 
+    def pc_voice_service(self):
+        return getattr(self.server, 'pc_voice', PC_VOICE)
+
+    def pc_request_allowed(self):
+        port = self.server.server_port
+        origin = self.headers.get('Origin')
+        allowed = (f'http://127.0.0.1:{port}', f'http://localhost:{port}')
+        if (not self.local_host() or self.headers.get('X-Studio-PC-Voice') != '1'
+                or (origin is not None and origin not in allowed)
+                or (self.command != 'GET' and origin not in allowed)
+                or self.headers.get('Sec-Fetch-Site') == 'cross-site'):
+            self.error_response(403, 'CROSS_ORIGIN_BLOCKED', '이 PC의 편집기 화면에서 요청해 주세요.')
+            return False
+        return True
+
+    def handle_pc_voice(self, route):
+        if not self.pc_request_allowed():
+            return
+        if self.headers.get('X-Studio-Consent') != 'voice-clone-local':
+            self.error_response(403, 'VOICE_CONSENT_REQUIRED', '참고 음성의 PC 저장·처리 안내를 확인해 주세요.')
+            return
+        if route not in ('/api/voice-clone/references', '/api/voice-clone/delete', '/api/voice-clone/synthesize'):
+            self.error_response(404, 'NOT_FOUND', '지원하지 않는 PC 음성 기능입니다.')
+            return
+        maximum = MAX_REFERENCE_BODY if route.endswith('/references') else 32 * 1024
+        try:
+            length = int(self.headers.get('Content-Length', '0'))
+        except ValueError:
+            length = 0
+        if self.headers.get('Transfer-Encoding') or not 0 < length <= maximum:
+            self.error_response(413, 'PAYLOAD_LIMIT', '음성 요청이 비어 있거나 허용 크기를 초과했습니다.')
+            return
+        if self.headers.get('Content-Type', '').split(';')[0] != 'application/json':
+            self.error_response(415, 'CONTENT_TYPE', '지원하지 않는 PC 음성 입력 형식입니다.')
+            return
+        try:
+            self.connection.settimeout(30)
+            body = self.rfile.read(length)
+            if len(body) != length:
+                raise VoiceError('INCOMPLETE_BODY', '음성 요청을 끝까지 받지 못했습니다.')
+            data = json.loads(body)
+            if not isinstance(data, dict):
+                raise ValueError()
+            service = self.pc_voice_service()
+            if route.endswith('/references'):
+                self.json_response(201, {'profile': service.register(data)})
+            elif route.endswith('/delete'):
+                if data.get('consent') is not True:
+                    raise VoiceError('VOICE_CONSENT_REQUIRED', '참고 음성 삭제를 확인해 주세요.', 403)
+                service.delete(data.get('profileId'))
+                self.json_response(200, {'deleted': True})
+            else:
+                result, info = service.synthesize(data)
+                self.send_response(200)
+                self.send_header('Content-Type', 'audio/wav')
+                self.send_header('Content-Length', str(len(result)))
+                self.send_header('X-Studio-Audio-Rate', str(info['sampleRate']))
+                self.send_header('X-Studio-Audio-Duration', str(info['duration']))
+                self.end_headers()
+                self.wfile.write(result)
+        except VoiceError as error:
+            self.error_response(error.status, error.code, error.message)
+        except (ValueError, UnicodeError, TypeError):
+            self.error_response(400, 'INVALID_INPUT', 'PC 음성 요청을 확인해 주세요.')
+        except (BrokenPipeError, ConnectionResetError):
+            # Browser cancellation discards the result; the engine request has
+            # already finished before its exclusive lock is released.
+            pass
+        except TimeoutError:
+            self.error_response(408, 'REQUEST_TIMEOUT', '음성 요청을 끝까지 받지 못했습니다.')
+        except OSError:
+            self.error_response(500, 'LOCAL_STORAGE', 'PC 음성 저장소에 접근하지 못했습니다.')
+
     def do_POST(self):
+        route = urlsplit(self.path).path
+        if route.startswith('/api/voice-clone/'):
+            self.handle_pc_voice(route)
+            return
         port = self.server.server_port
         if not self.local_host() or self.headers.get('Origin') not in (f'http://127.0.0.1:{port}', f'http://localhost:{port}'):
             self.error_response(403, 'CROSS_ORIGIN_BLOCKED', '편집기 화면에서 요청해 주세요.')
             return
-        route = urlsplit(self.path).path
         if route not in ('/api/tts', '/api/transcribe'):
             self.error_response(404, 'NOT_FOUND', '지원하지 않는 API 경로입니다.')
             return
@@ -186,6 +270,9 @@ class StudioHandler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=8787)
+    parser.add_argument('--voice-port', type=int, default=9880, help='GPT-SoVITS loopback port (default 9880)')
     args = parser.parse_args()
     print(f'Local: http://127.0.0.1:{args.port}', flush=True)
-    ThreadingHTTPServer(('127.0.0.1', args.port), StudioHandler).serve_forever()
+    server = ThreadingHTTPServer(('127.0.0.1', args.port), StudioHandler)
+    server.pc_voice = VoiceCloneService(LOCAL_VOICE_DIR / 'voices', port=args.voice_port, engine_key=local_engine_key(LOCAL_VOICE_DIR / 'pc-voice.json'))
+    server.serve_forever()

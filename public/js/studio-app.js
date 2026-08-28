@@ -161,7 +161,7 @@ function setView(next){
 }
 
 function renderLibrary(){
-  const titles={media:'소재 라이브러리',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'브라우저 AI 음성',sounds:'효과음 라이브러리',mosaic:'트래킹 모자이크',silence:'무음 구간 자동 컷'};
+  const titles={media:'소재 라이브러리',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'AI 음성 스튜디오',sounds:'효과음 라이브러리',mosaic:'트래킹 모자이크',silence:'무음 구간 자동 컷'};
   $('libraryTitle').textContent=titles[view];$('libraryCount').textContent=view==='media'?String(assets.size).padStart(2,'0'):view==='graphics'?String(GRAPHICS.length):view==='captions'?String(CAPTIONS.length):view==='transitions'?'04':view==='sounds'?String(SOUND_EFFECTS.length):'LOCAL';
   const host=$('libraryContent');
   if(['voice','mosaic','silence'].includes(view)){smartTools.render(view,host);return;}
@@ -646,7 +646,7 @@ function wire(){
     else if(e.key==='Escape'){$('workbench').classList.remove('show-library','show-inspector');}
   });
   let dragDepth=0;
-  document.addEventListener('dragenter',e=>{if(e.dataTransfer.types.includes('Files')){dragDepth++;$('dropOverlay').hidden=false;}});
+  document.addEventListener('dragenter',e=>{if(e.dataTransfer.types.includes('Files')&&!smartTools.dialog.open){dragDepth++;$('dropOverlay').hidden=false;}});
   document.addEventListener('dragover',e=>{if(e.dataTransfer.types.includes('Files'))e.preventDefault();});
   document.addEventListener('dragleave',e=>{if(e.dataTransfer.types.includes('Files')){dragDepth--;if(dragDepth<=0)$('dropOverlay').hidden=true;}});
   document.addEventListener('drop',e=>{dragDepth=0;$('dropOverlay').hidden=true;if(e.dataTransfer.files.length){e.preventDefault();importFiles([...e.dataTransfer.files]);}});

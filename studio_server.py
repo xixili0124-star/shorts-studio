@@ -7,7 +7,8 @@ from urllib.error import HTTPError, URLError
 from threading import BoundedSemaphore, Lock
 from collections import deque
 import argparse, json, os, time, uuid, math
-from pc_voice import VoiceCloneService, VoiceError, MAX_REFERENCE_BODY, local_engine_key
+from pc_voice import VoiceCloneService, VoiceError, MAX_REFERENCE_BODY
+from pc_voice_config import PROVIDERS, service_identity
 
 ROOT = Path(__file__).resolve().parent / 'public'
 VOICES = ('alloy','ash','ballad','coral','echo','fable','onyx','nova','sage','shimmer','verse','marin','cedar')
@@ -15,7 +16,11 @@ AI_LOCK = BoundedSemaphore(1)
 RATE_LOCK = Lock()
 REQUEST_TIMES = deque()
 LOCAL_VOICE_DIR = Path(__file__).resolve().parent / '.studio-local'
-PC_VOICE = VoiceCloneService(LOCAL_VOICE_DIR / 'voices', engine_key=local_engine_key(LOCAL_VOICE_DIR / 'pc-voice.json'))
+def configured_pc_voice(port=9880, provider='auto'):
+    selected, key = service_identity(LOCAL_VOICE_DIR, provider)
+    return VoiceCloneService(LOCAL_VOICE_DIR / 'voices', port=port, engine_key=key, provider=selected)
+
+PC_VOICE = configured_pc_voice()
 
 def validate_tts(data):
     """요청 모델·목소리·입력 길이를 제한합니다. 임의 URL 프록시는 제공하지 않습니다."""
@@ -270,9 +275,10 @@ class StudioHandler(SimpleHTTPRequestHandler):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--port', type=int, default=8787)
-    parser.add_argument('--voice-port', type=int, default=9880, help='GPT-SoVITS loopback port (default 9880)')
+    parser.add_argument('--voice-port', type=int, default=9880, help='Private voice engine loopback port (default 9880)')
+    parser.add_argument('--voice-provider', choices=('auto', *PROVIDERS), default='auto')
     args = parser.parse_args()
     print(f'Local: http://127.0.0.1:{args.port}', flush=True)
     server = ThreadingHTTPServer(('127.0.0.1', args.port), StudioHandler)
-    server.pc_voice = VoiceCloneService(LOCAL_VOICE_DIR / 'voices', port=args.voice_port, engine_key=local_engine_key(LOCAL_VOICE_DIR / 'pc-voice.json'))
+    server.pc_voice = configured_pc_voice(args.voice_port, args.voice_provider)
     server.serve_forever()

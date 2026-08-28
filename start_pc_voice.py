@@ -11,6 +11,7 @@ from urllib.request import build_opener, ProxyHandler
 
 from pc_voice import NoRedirect, verified_engine
 from pc_voice_engine import read_settings
+from pc_voice_config import PROVIDERS, provider_of, settings_path as provider_settings_path
 
 ROOT = Path(__file__).resolve().parent
 
@@ -68,8 +69,8 @@ def port_available(port):
         return False
 
 
-def engine_ready(port, key):
-    return verified_engine(build_opener(ProxyHandler({}), NoRedirect()), f'http://127.0.0.1:{port}', key, timeout=1)
+def engine_ready(port, key, provider='gpt-sovits'):
+    return verified_engine(build_opener(ProxyHandler({}), NoRedirect()), f'http://127.0.0.1:{port}', key, timeout=1, provider=provider)
 
 
 def launch(command):
@@ -91,10 +92,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--port', type=int, default=8787)
     parser.add_argument('--voice-port', type=int, default=9880)
+    parser.add_argument('--provider', choices=('auto', *PROVIDERS), default='auto')
     args = parser.parse_args()
     if any(not 1024 <= port <= 65535 for port in (args.port, args.voice_port)) or args.port == args.voice_port:
         raise RuntimeError('Choose two different local ports between 1024 and 65535.')
-    settings_path = ROOT / '.studio-local' / 'pc-voice.json'
+    settings_path = provider_settings_path(ROOT / '.studio-local', args.provider)
     try:
         settings = read_settings(settings_path)
     except (OSError, ValueError):
@@ -103,7 +105,8 @@ def main():
         raise RuntimeError('The private Python environment is missing. Run setup-pc-voice.cmd again.')
     if not port_available(args.port):
         raise RuntimeError(f'Editor port {args.port} is already in use. Save your project before stopping the old server, or run start-pc-voice.cmd --port 8788.')
-    reuse_engine = engine_ready(args.voice_port, settings['engineKey'])
+    provider = provider_of(settings)
+    reuse_engine = engine_ready(args.voice_port, settings['engineKey'], provider)
     if not reuse_engine and not port_available(args.voice_port):
         raise RuntimeError('The voice port is occupied by a different engine. Stop that engine or choose --voice-port 9881.')
     owned_job = own_windows_process_tree()
@@ -112,7 +115,7 @@ def main():
         if not reuse_engine:
             print('Loading the PC voice engine. The first start may take a few minutes...', flush=True)
             engine = launch([settings['python'], str(ROOT / 'pc_voice_engine.py'), '--settings', str(settings_path), '--port', str(args.voice_port)])
-        editor = launch([sys.executable, str(ROOT / 'studio_server.py'), '--port', str(args.port), '--voice-port', str(args.voice_port)])
+        editor = launch([sys.executable, str(ROOT / 'studio_server.py'), '--port', str(args.port), '--voice-port', str(args.voice_port), '--voice-provider', provider])
         print(f'Local editor: http://127.0.0.1:{args.port}/studio.html', flush=True)
         print('Keep this launcher open. Ctrl+C stops only the processes started here.', flush=True)
         ready = reuse_engine
@@ -128,9 +131,9 @@ def main():
                     except (OSError, ValueError):
                         pass
                     print('PC voice did not start' + (f' ({error_type})' if error_type else '') + '. Run setup again. Browser TTS and editing remain available.', flush=True)
-                elif engine_ready(args.voice_port, settings['engineKey']):
+                elif engine_ready(args.voice_port, settings['engineKey'], provider):
                     ready = True
-                    print('PC voice is ready. In the editor: AI voice > PC extension > Register my voice.', flush=True)
+                    print(PROVIDERS[provider][0] + ' is ready. In the editor: AI voice > PC extension > My voice.', flush=True)
             elif ready and engine is not None and engine.poll() is not None and not reported_failure:
                 reported_failure = True
                 print('PC voice stopped. Save your project and restart this launcher when ready. The editor remains open.', flush=True)

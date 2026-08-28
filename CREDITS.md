@@ -97,6 +97,8 @@ Meta 자료는 표지에 Last Updated June 15th, 2023으로 표시된 구형 참
 
 | 구성 | 출처·버전 | 이용 조건 |
 | --- | --- | --- |
+| VoxCPM 추론 코드 | [공식 2.0.3 / revision 19b6bf75](https://github.com/OpenBMB/VoxCPM/tree/19b6bf7590025418821a86dcb817504e0ad7e5df), [PyPI wheel](https://pypi.org/project/voxcpm/2.0.3/) | Apache-2.0, 설치 패키지의 라이선스 유지 |
+| VoxCPM2 2B 모델·AudioVAE·tokenizer | [공식 모델 revision 32279eff](https://huggingface.co/openbmb/VoxCPM2/tree/32279effe8c19989596f05d353d1447f51d9e915) | [모델 카드 Apache-2.0](https://huggingface.co/openbmb/VoxCPM2/blob/32279effe8c19989596f05d353d1447f51d9e915/README.md) |
 | GPT-SoVITS 소스 | [공식 revision 48b1a016](https://github.com/RVC-Boss/GPT-SoVITS/tree/48b1a0169a28582a8984402f82cf438d3bfa6aca) | [MIT](https://github.com/RVC-Boss/GPT-SoVITS/blob/48b1a0169a28582a8984402f82cf438d3bfa6aca/LICENSE) |
 | v2ProPlus·s1v3·speaker embedding·BERT·HuBERT 자료 | [공식 배포 모델 revision 336b2ec4](https://huggingface.co/lj1995/GPT-SoVITS/tree/336b2ec4e8d4ac74740798dd40af44e74659ecaf) | 해당 저장소 [모델 카드의 MIT 표기](https://huggingface.co/lj1995/GPT-SoVITS/blob/336b2ec4e8d4ac74740798dd40af44e74659ecaf/README.md) |
 | 한국어 형태소 분석 | [python-mecab-ko 1.3.7](https://pypi.org/project/python-mecab-ko/1.3.7/), [사전 2.1.1.post2](https://pypi.org/project/python-mecab-ko-dic/2.1.1.post2/) | 분석기 BSD-3-Clause / 사전 Apache-2.0 |
@@ -107,8 +109,10 @@ Meta 자료는 표지에 Last Updated June 15th, 2023으로 표시된 구형 참
 | PyTorch·torchaudio | [PyTorch 공식 배포](https://pytorch.org/), 2.5.1 | 패키지의 BSD 및 제3자 고지. CUDA 구성 요소는 별도 제공자 조건 |
 | FFmpeg 실행 파일 | [imageio-ffmpeg 0.6.0](https://pypi.org/project/imageio-ffmpeg/0.6.0/)의 Windows FFmpeg 7.1 | Python 래퍼 BSD-2-Clause. 검증한 Windows 바이너리의 `-L` 고지는 GPL-3.0-or-later이며 제3자 고지도 별도 유지 |
 
-모델 주요 파일 SHA-256은 `setup_pc_voice.py`, 발음 자료 SHA-256은 `prepare_pc_voice_resources.py`, Python 버전 고정은 `pc-voice-requirements.txt`와 `pc-voice-constraints.txt`에 기록합니다. 기존 PyTorch 채널과 별도로 코드·모델 버전을 고정하며, 전체 구성 요소를 하나의 MIT 라이선스로 간주하지 않습니다.
+Vox 모델·wheel의 고정 SHA-256은 `setup_vox_voice.py`, 추론 의존성은 `vox-voice-requirements.txt`에 기록합니다. 공식 wheel을 의존성 자동 설치 없이 넣고 필요한 추론 패키지만 설치합니다. Gradio·외부 ASR·denoiser·중국어/영어 전용 텍스트 정규화기는 사용하지 않습니다. 모델은 고정 revision에서 먼저 받고 런타임은 로컬 경로만 사용하며 원격 tokenizer 코드를 실행하지 않습니다.
 
-Windows 호환을 위해 격리된 엔진 프로세스에서만 `jieba_fast`를 Jieba로 연결하고 g2pk2의 MeCab 접근을 python-mecab-ko로 연결합니다. 제3자 소스를 직접 수정하거나 eunjeon을 자동 설치하지 않습니다. 지원 범위는 한국어 및 한국어·영어 혼용이며, 중국어·일본어 처리와 개인 모델 학습은 제공하지 않습니다.
+GPT 모델 주요 파일 SHA-256은 `setup_pc_voice.py`, 발음 자료 SHA-256은 `prepare_pc_voice_resources.py`, Python 버전 고정은 `pc-voice-requirements.txt`와 `pc-voice-constraints.txt`에 기록합니다. 기존 PyTorch 채널과 별도로 코드·모델 버전을 고정하며, 전체 구성 요소를 하나의 MIT 라이선스로 간주하지 않습니다.
+
+GPT의 Windows 호환을 위해 해당 엔진 프로세스에서만 `jieba_fast`를 Jieba로 연결하고 g2pk2의 MeCab 접근을 python-mecab-ko로 연결합니다. Vox는 이 발음 변환을 거치지 않습니다. 제3자 소스를 직접 수정하거나 eunjeon을 자동 설치하지 않습니다. 편집기의 검증 범위는 한국어 및 한국어·영어 혼용이며 개인 모델 학습은 제공하지 않습니다.
 
 소스·모델의 이용 조건이 녹음자의 동의나 타인 사칭 허락을 대신하지 않습니다. 본인 또는 허락받은 녹음만 등록하도록 안내합니다. PC 모드의 AI 생성 표시 안내는 제품의 사용 원칙이며, MIT 라이선스 자체의 의무라고 주장하지 않습니다.

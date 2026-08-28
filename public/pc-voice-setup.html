@@ -39,11 +39,11 @@
   </section>
   <section aria-labelledby="setup-title">
     <h2 id="setup-title">처음 한 번 · Windows PC 준비</h2>
-    <p>현재 자동 설치 도구는 Windows 64비트용입니다. 시작 도구를 실행할 Python 3.10 이상과 10GB 이상의 여유 공간이 필요합니다. 전용 Python 3.11과 모델은 편집기와 분리된 폴더에 설치합니다.</p>
+    <p>현재 자동 설치 도구는 Windows 64비트용입니다. 시작 도구를 실행할 Python 3.10 이상과 15GB 이상의 여유 공간이 필요합니다. VoxCPM2용 Python 3.11과 모델은 기존 GPT-SoVITS와도 분리된 폴더에 설치합니다.</p>
     <ol class="steps">
       <li><h3>현재 작업부터 저장</h3><p>지금 편집 중이라면 <strong>.shorts 프로젝트 저장</strong>으로 소재와 편집 내용을 보관하세요. 브라우저 주소가 바뀌면 자동 저장 공간도 달라집니다.</p></li>
       <li><h3>실험 브랜치 내려받기</h3><p>압축을 완전히 풀어 주세요. 원본 운영 버전과 별도 폴더에 두면 됩니다. GitHub 로그인이 필요할 수 있습니다.</p><a class="button" href="https://github.com/xixili0124-star/shorts-studio/archive/refs/heads/codex/studio-lab.zip" target="_blank" rel="noopener noreferrer">PC용 실험판 ZIP 받기</a></li>
-      <li><h3>음성 엔진 설치</h3><p>폴더의 <code>setup-pc-voice.cmd</code>를 실행하고 다운로드 안내에 동의하세요. 모델·발음 자료 약 <strong>1.5GB</strong>, 실행 환경은 별도로 수 GB를 받습니다. 전역 Python을 바꾸지 않습니다.</p><p class="muted">기본은 NVIDIA GPU용 CUDA 설치입니다. NVIDIA GPU가 없으면 터미널에서 <code>setup-pc-voice.cmd --device cpu</code>로 설치할 수 있지만 생성이 오래 걸릴 수 있습니다. 설치 중에 참고 녹음은 업로드하지 않습니다.</p></li>
+      <li><h3>VoxCPM2 설치</h3><p>폴더의 <code>setup-pc-voice.cmd</code>를 실행하고 다운로드 안내에 동의하세요. 모델 약 <strong>5GB</strong>, 실행 환경은 별도로 수 GB를 받습니다. 전역 Python과 기존 GPT-SoVITS 환경을 바꾸지 않습니다.</p><p class="muted">기본은 NVIDIA GPU용 CUDA 설치입니다. GPU 메모리와 다른 프로그램의 사용량에 따라 실행 가능 여부가 달라집니다. <code>--device cpu</code> 옵션도 있지만 CPU 생성 속도는 검증하지 않았습니다. 설치 중에 참고 녹음은 업로드하지 않습니다.</p></li>
       <li><h3>PC용 편집기 시작</h3><p><code>start-pc-voice.cmd</code>를 실행하고 창에 표시되는 로컬 편집기 주소를 여세요. 엔진이 준비되면 <strong>AI 음성 → 실행 방식 → PC 확장 · 내 목소리</strong>에서 연결을 확인합니다.</p><p class="muted">편집하는 동안 시작 창을 열어 두세요. 기존 8787 포트가 사용 중이면 기존 작업을 저장한 뒤 서버를 종료하거나, <code>start-pc-voice.cmd --port 8788</code>로 따로 실행하세요. 실행기는 다른 프로그램을 강제로 종료하지 않습니다.</p></li>
     </ol>
   </section>
@@ -54,7 +54,9 @@
       <li><h3>녹음에서 읽은 문장 입력</h3><p>참고 녹음의 내용과 문장을 정확히 맞춘 뒤 보관에 동의하고 등록하세요. 이 문장은 나중에 읽힐 새 원고와 별개입니다.</p></li>
       <li><h3>새 원고 생성·확인·추가</h3><p>등록한 목소리를 선택하고 새 원고를 입력해 <strong>내 목소리로 만들기</strong>를 누르세요. 들어보고 괜찮으면 보이스 트랙에 추가합니다. WAV 파일로도 저장할 수 있습니다.</p></li>
     </ol>
-    <p class="warning">GPT-SoVITS v2ProPlus가 짧은 녹음을 참고하는 방식입니다. 개인 모델을 학습하는 기능은 아직 포함하지 않습니다. 닮은 정도·한국어 발음·억양은 녹음과 문장에 따라 달라지며, 유료 서비스와 같은 품질을 보장하지 않습니다.</p>
+    <p class="warning">VoxCPM2가 짧은 녹음을 참고해 48kHz 음성을 만듭니다. 잡음 없는 5~10초 녹음과 정확한 참고 문장을 권장합니다. 개인 모델 학습은 포함하지 않습니다. 닮은 정도·한국어 발음·억양은 녹음과 문장에 따라 달라지며, 유료 서비스와 같은 품질을 보장하지 않습니다.</p>
+    <p class="muted">한국어를 영어로 바꾸는 모델 기본 정규화는 사용하지 않습니다. <code>4대 2</code> 같은 점수는 <code>사 대 이</code>로 처리하며, <code>차량 4대</code> 같은 일반 개수는 바꾸지 않습니다. 날짜·단위·이름은 별도로 들어보고 확인하세요. 속도 변경은 음성 생성 후 음높이를 유지하는 처리로 적용합니다.</p>
+    <details><summary>기존 GPT-SoVITS와 등록한 목소리는 어떻게 되나요?</summary><p>기존 참고 녹음과 문장은 그대로 두고 두 엔진에서 같은 등록 목록을 사용합니다. 설치가 끝난 뒤 새 기본 엔진이 VoxCPM2로 바뀝니다. 작업을 저장하고 이전 실행기를 종료한 후 새 실행기를 켜 주세요.</p><p>기존 엔진으로 비교하려면 <code>start-pc-voice.cmd --provider gpt-sovits</code>, Vox로 돌아오려면 <code>start-pc-voice.cmd --provider voxcpm2</code>를 실행하세요. 두 엔진을 동시에 띄우면 GPU 메모리가 부족할 수 있습니다. GPT를 처음 설치할 때만 <code>setup-gpt-voice.cmd</code>가 필요합니다.</p></details>
   </section>
   <section aria-labelledby="privacy-title">
     <h2 id="privacy-title">저장과 기기 이동</h2>
@@ -64,7 +66,7 @@
     <details><summary>공유 웹주소에서 PC 엔진을 바로 켤 수 없나요?</summary><p>공개 사이트나 휴대폰에서 이 PC의 엔진을 자동 호출하지 않습니다. PC의 로컬 편집기로 접속해 주세요. 외부 공개 주소·공유기 포트 개방·유료 API 키는 필요 없습니다.</p></details>
     <p class="muted">본인 또는 사용 허락을 받은 목소리만 등록하세요. 다른 사람을 사칭하지 말고, 공유할 때 AI 생성 음성임을 알려 주세요.</p>
   </section>
-  <footer>기본 브라우저 TTS: Supertonic 2 · PC 확장: <a href="https://github.com/RVC-Boss/GPT-SoVITS" target="_blank" rel="noopener noreferrer">GPT-SoVITS</a> · 운영 main과 분리된 실험판</footer>
+  <footer>기본 브라우저 TTS: Supertonic 2 · PC 기본: <a href="https://github.com/OpenBMB/VoxCPM/tree/2.0.3" target="_blank" rel="noopener noreferrer">VoxCPM2</a> · 기존 <a href="https://github.com/RVC-Boss/GPT-SoVITS" target="_blank" rel="noopener noreferrer">GPT-SoVITS</a> 유지 · 운영 main과 분리된 실험판</footer>
 </main>
 </body>
 </html>

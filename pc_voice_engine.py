@@ -1,4 +1,4 @@
-"""Isolated GPT-SoVITS runtime: Korean compatibility, offline imports, private API."""
+"""Isolated PC voice runtime: offline imports and an authenticated private API."""
 import argparse
 from contextlib import redirect_stdout, redirect_stderr
 import ipaddress
@@ -11,7 +11,8 @@ import secrets
 import socket
 import sys
 
-from pc_voice import local_engine_key, engine_proof
+from pc_voice import engine_proof
+from pc_voice_config import PROVIDERS, provider_of, read_config
 
 
 def loopback_host(host):
@@ -61,19 +62,40 @@ def restrict_engine_network():
 
 def read_settings(path):
     path = Path(path).resolve()
-    if path.stat().st_size > 16384:
-        raise RuntimeError('Invalid PC voice settings')
-    settings = json.loads(path.read_text(encoding='utf-8'))
-    if not local_engine_key(path):
-        raise RuntimeError('PC voice setup is incomplete. Run setup-pc-voice.cmd first.')
-    for name in ('engine', 'config', 'data', 'bin', 'python'):
+    settings = read_config(path)
+    provider = provider_of(settings)
+    fields = ('engine', 'data', 'python', 'model', 'references') if provider == 'voxcpm2' else ('engine', 'config', 'data', 'bin', 'python')
+    for name in fields:
         if not isinstance(settings.get(name), str) or not Path(settings[name]).is_absolute():
             raise RuntimeError('Invalid PC voice settings')
+    if settings.get('device') not in ('cuda', 'cpu'):
+        raise RuntimeError('Invalid PC voice device')
+    if provider == 'voxcpm2' and Path(settings['references']).resolve() != Path(__file__).resolve().parent / '.studio-local' / 'voices':
+        raise RuntimeError('Invalid private reference directory')
     return settings
 
 
 def configure_environment(settings):
     source, data = Path(settings['engine']), Path(settings['data'])
+    private_dirs = {'HF_HOME': data / 'huggingface', 'TORCH_HOME': data / 'torch',
+                    'MPLCONFIGDIR': data / 'matplotlib', 'NUMBA_CACHE_DIR': data / 'numba',
+                    'TEMP': data / 'temp', 'TMP': data / 'temp'}
+    for name, directory in private_dirs.items():
+        directory.mkdir(parents=True, exist_ok=True)
+        os.environ[name] = str(directory)
+    os.environ.update({'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1',
+        'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1', 'TOKENIZERS_PARALLELISM': 'false'})
+    if provider_of(settings) == 'voxcpm2':
+        from setup_vox_voice import MODEL_FILES, MODEL_REV, PACKAGE_VERSION
+        model = Path(settings['model']).resolve()
+        if not model.is_relative_to(source.resolve()) or settings.get('modelRevision') != MODEL_REV or settings.get('packageVersion') != PACKAGE_VERSION:
+            raise RuntimeError('Invalid VoxCPM2 model installation')
+        marker = model / 'studio-model-ready.json'
+        if not marker.is_file() or marker.stat().st_size > 16384 or json.loads(marker.read_text(encoding='utf-8')).get('modelRevision') != MODEL_REV:
+            raise RuntimeError('VoxCPM2 installation has not finished')
+        if any(not (model / name).is_file() or (model / name).stat().st_size != size for name, (size, _) in MODEL_FILES.items()):
+            raise RuntimeError('A VoxCPM2 model file is missing or incomplete')
+        return
     if not (data / 'resources-ready.json').is_file():
         raise RuntimeError('Offline pronunciation resources are not installed.')
     required = [source / 'api_v2.py', Path(settings['config']),
@@ -83,15 +105,7 @@ def configure_environment(settings):
         data / 'nltk_data/taggers/averaged_perceptron_tagger_eng/averaged_perceptron_tagger_eng.weights.json']
     if any(not path.is_file() for path in required):
         raise RuntimeError('A PC voice resource is missing. Run setup again.')
-    private_dirs = {'HF_HOME': data / 'huggingface', 'TORCH_HOME': data / 'torch',
-                    'MPLCONFIGDIR': data / 'matplotlib', 'NUMBA_CACHE_DIR': data / 'numba',
-                    'TEMP': data / 'temp', 'TMP': data / 'temp'}
-    for name, directory in private_dirs.items():
-        directory.mkdir(parents=True, exist_ok=True)
-        os.environ[name] = str(directory)
-    os.environ.update({'HF_HUB_OFFLINE': '1', 'TRANSFORMERS_OFFLINE': '1',
-        'HF_HUB_DISABLE_TELEMETRY': '1', 'DO_NOT_TRACK': '1', 'TOKENIZERS_PARALLELISM': 'false',
-        'NLTK_DATA': str(data / 'nltk_data'), 'PATH': settings['bin'] + os.pathsep + os.environ.get('PATH', '')})
+    os.environ.update({'NLTK_DATA': str(data / 'nltk_data'), 'PATH': settings['bin'] + os.pathsep + os.environ.get('PATH', '')})
     os.chdir(source)
     sys.path[:0] = [str(source), str(source / 'GPT_SoVITS')]
 
@@ -115,10 +129,15 @@ def install_korean_compatibility():
 def build_app(settings, port):
     configure_environment(settings)
     restrict_engine_network()
-    install_korean_compatibility()
-    sys.argv = ['api_v2.py', '-a', '127.0.0.1', '-p', str(port), '-c', settings['config']]
-    namespace = runpy.run_path(str(Path(settings['engine']) / 'api_v2.py'), run_name='studio_private_sovits')
-    app = namespace['APP']
+    provider = provider_of(settings)
+    if provider == 'voxcpm2':
+        from vox_voice_engine import build_vox_app
+        app = build_vox_app(settings)
+    else:
+        install_korean_compatibility()
+        sys.argv = ['api_v2.py', '-a', '127.0.0.1', '-p', str(port), '-c', settings['config']]
+        namespace = runpy.run_path(str(Path(settings['engine']) / 'api_v2.py'), run_name='studio_private_sovits')
+        app = namespace['APP']
     # Even loopback must reject websites trying to call /control or weight setters.
     app.router.routes = [route for route in app.router.routes
         if (route.path == '/openapi.json' and 'GET' in route.methods)
@@ -131,8 +150,9 @@ def build_app(settings, port):
         nonce = request.headers.get('x-studio-engine-nonce', '')
         if not re.fullmatch(r'[a-f0-9]{32}', nonce):
             return JSONResponse({'error': 'Invalid engine challenge'}, status_code=400)
-        return {'service': 'shorts-studio-pc-voice', 'protocol': 1, 'model': 'v2ProPlus',
-            'proof': engine_proof(settings['engineKey'], nonce)}
+        model = PROVIDERS[provider][1]
+        return {'service': 'shorts-studio-pc-voice', 'protocol': 2, 'provider': provider, 'model': model,
+            'proof': engine_proof(settings['engineKey'], nonce, provider, model)}
     @app.middleware('http')
     async def private_engine(request, call_next):
         # Only a bounded nonce is signed here; no key, voice or path is exposed.
@@ -156,6 +176,7 @@ def main():
         raise RuntimeError('Invalid voice engine port')
     settings = read_settings(args.settings)
     status_file = Path(settings['data']) / 'runtime-status.json'
+    status_file.parent.mkdir(parents=True, exist_ok=True)
     def status(state, error=None):
         status_file.write_text(json.dumps({'state': state, 'errorType': error}), encoding='utf-8')
     status('loading')

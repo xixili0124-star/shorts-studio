@@ -1,6 +1,7 @@
 """실제 AI 호출 없이 동의·입력 제한·로컬 서버를 검사합니다."""
 import importlib.util
 import base64
+from contextlib import nullcontext
 import io
 import json
 import os
@@ -10,11 +11,14 @@ import tempfile
 import subprocess
 import sys
 import unittest
+from types import SimpleNamespace
 import wave
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
-from unittest.mock import patch
+from unittest.mock import patch, Mock
 from pc_voice import VoiceCloneService, VoiceError, wav_info, MAX_REFERENCE_BODY, local_engine_key, engine_proof
+from pc_voice_config import activate_config, provider_of, read_config, settings_path, service_identity
+from vox_voice_engine import VoxEngine, korean_score_text, speech_chunks, validate_request, validate_generation_length
 
 spec=importlib.util.spec_from_file_location('studio_server',Path(__file__).resolve().parents[1]/'studio_server.py')
 studio=importlib.util.module_from_spec(spec)
@@ -299,6 +303,177 @@ class ServerTests(unittest.TestCase):
         self.assertTrue(request.full_url.endswith('/studio/health'))
         self.assertIsNone(request.get_header('X-studio-engine-key'))
         self.assertIsNone(request.data)
+
+    def test_vox_authentication_binds_provider_model_and_protocol_before_any_private_post(self):
+        self.engine_auth.stop()
+        profile=self.new_reference()
+        key=self.private_engine_health()
+        self.pc.provider='voxcpm2'
+        # A valid legacy proof is not proof that a Vox engine is running.
+        self.assertEqual(self.pc.status()['state'],'offline')
+        for provider,model,proof_provider,protocol in (
+            ('gpt-sovits','v2ProPlus','gpt-sovits',2),
+            ('voxcpm2','different-model','voxcpm2',2),
+            ('voxcpm2','VoxCPM2-2B','gpt-sovits',2),
+            ('voxcpm2','VoxCPM2-2B','voxcpm2',99),
+        ):
+            with self.subTest(provider=provider,model=model,protocol=protocol):
+                def health(maximum):
+                    request=self.pc_call.call_args.args[0]
+                    return json.dumps({'service':'shorts-studio-pc-voice','protocol':protocol,
+                        'provider':provider,'model':model,
+                        'proof':engine_proof(key,request.get_header('X-studio-engine-nonce'),proof_provider,model)}).encode()
+                self.pc_call.return_value.__enter__.return_value.read.side_effect=health
+                self.pc_call.reset_mock()
+                with self.assertRaises(VoiceError):self.pc.synthesize({'profileId':profile['id'],'text':'PRIVATE SCRIPT','consent':True})
+                self.assertEqual(self.pc_call.call_count,1)
+                request=self.pc_call.call_args.args[0]
+                self.assertEqual(request.get_method(),'GET')
+                self.assertIsNone(request.get_header('X-studio-engine-key'))
+                self.assertIsNone(request.data)
+
+    def test_vox_uses_same_reference_and_only_sends_owned_id_after_valid_proof(self):
+        self.engine_auth.stop()
+        profile=self.new_reference()
+        original={path.name:path.read_bytes() for path in self.pc.directory.iterdir()}
+        key=self.private_engine_health()
+        self.pc.provider='voxcpm2'
+        def read(maximum):
+            request=self.pc_call.call_args.args[0]
+            if request.get_method()=='POST':return self.pcm_wave(1.2,48000)
+            return json.dumps({'service':'shorts-studio-pc-voice','protocol':2,'provider':'voxcpm2','model':'VoxCPM2-2B',
+                'proof':engine_proof(key,request.get_header('X-studio-engine-nonce'),'voxcpm2','VoxCPM2-2B')}).encode()
+        self.pc_call.return_value.__enter__.return_value.read.side_effect=read
+        status=self.pc.status()
+        self.assertEqual((status['state'],status['provider'],status['modelName']),('ready','voxcpm2','VoxCPM2'))
+        self.assertNotIn(key,json.dumps(status))
+        audio,info=self.pc.synthesize({'profileId':profile['id'],'text':'새 원고','speed':1.1,'consent':True,
+                                      'ref_audio_path':'C:/private.txt','prompt_text':'not allowed'})
+        payload=json.loads(self.pc_call.call_args.args[0].data)
+        self.assertEqual(payload,{'text':'새 원고','profileId':profile['id'],'speed':1.1})
+        self.assertEqual(info['sampleRate'],48000)
+        self.assertEqual(audio,self.pcm_wave(1.2,48000))
+        self.assertEqual(original,{path.name:path.read_bytes() for path in self.pc.directory.iterdir()})
+
+    def test_provider_migration_preserves_legacy_config_key_and_reference_bytes(self):
+        profile=self.new_reference()
+        local=self.pc.directory.parent/'settings'
+        local.mkdir()
+        previous={'engineKey':'legacy_key_'+'a'*32,'engine':'C:/old-engine','custom':'keep this'}
+        original=json.dumps(previous,ensure_ascii=False,indent=3).encode()
+        (local/'pc-voice.json').write_bytes(original)
+        refs={path.name:path.read_bytes() for path in self.pc.directory.iterdir()}
+        self.assertEqual(provider_of(read_config(local/'pc-voice.json')),'gpt-sovits')
+        self.assertEqual(settings_path(local,'gpt-sovits'),local/'pc-voice.json')
+        new={'provider':'voxcpm2','engineKey':'new_vox_key_'+'b'*32,'engine':'C:/new-engine'}
+        activate_config(local,new)
+        self.assertEqual((local/'pc-voice-gpt-sovits.json').read_bytes(),original)
+        self.assertEqual(read_config(local/'pc-voice.json'),new)
+        self.assertEqual(service_identity(local),('voxcpm2',new['engineKey']))
+        self.assertEqual(service_identity(local,'gpt-sovits'),('gpt-sovits',previous['engineKey']))
+        self.assertEqual(refs,{path.name:path.read_bytes() for path in self.pc.directory.iterdir()})
+        with self.assertRaises(ValueError):activate_config(local,{'provider':'unknown','engineKey':'x'*40})
+        self.assertEqual(read_config(local/'pc-voice.json'),new)
+
+    def test_failed_vox_install_does_not_activate_or_modify_existing_installation(self):
+        import setup_vox_voice as setup
+        root=self.pc.directory.parent/'install-root'
+        local=root/'.studio-local'
+        local.mkdir(parents=True)
+        previous=b'{"engineKey":"existing_private_key_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+        (local/'pc-voice.json').write_bytes(previous)
+        with patch.object(setup,'ROOT',root), \
+             patch.object(sys,'argv',['setup_vox_voice.py','--yes','--engine-dir',str(root/'vox')]), \
+             patch.object(setup,'prepare_models',return_value=root/'vox'/'model'), \
+             patch.object(setup,'prepare_runtime',side_effect=RuntimeError('failed import')), \
+             patch.object(setup,'write_config') as activate:
+            with self.assertRaises(RuntimeError):setup.main()
+            activate.assert_not_called()
+        self.assertEqual((local/'pc-voice.json').read_bytes(),previous)
+        self.assertFalse((local/'pc-voice-voxcpm2.json').exists())
+
+    def test_failed_final_config_replace_keeps_active_engine_and_legacy_backup(self):
+        local=self.pc.directory.parent/'settings'
+        local.mkdir()
+        previous=b'{"engineKey":"previous_key_aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}'
+        active=local/'pc-voice.json'
+        active.write_bytes(previous)
+        replace=Path.replace
+        def guarded_replace(path,target):
+            if path==local/'pc-voice.json.tmp':raise PermissionError('simulated file lock')
+            return replace(path,target)
+        with patch.object(Path,'replace',guarded_replace):
+            with self.assertRaises(PermissionError):activate_config(local,{'provider':'voxcpm2','engineKey':'v'*40})
+        self.assertEqual(active.read_bytes(),previous)
+        self.assertEqual((local/'pc-voice-gpt-sovits.json').read_bytes(),previous)
+        self.assertEqual(service_identity(local)[0],'gpt-sovits')
+
+    def test_explicit_provider_rejects_a_mislabeled_saved_config(self):
+        local=self.pc.directory.parent/'settings'
+        local.mkdir()
+        (local/'pc-voice-gpt-sovits.json').write_text(json.dumps({'provider':'voxcpm2','engineKey':'x'*40}),encoding='utf-8')
+        with self.assertRaises(ValueError):settings_path(local,'gpt-sovits')
+        self.assertEqual(service_identity(local,'gpt-sovits'),('gpt-sovits',None))
+
+    def test_uncertain_inference_cannot_delete_a_reference_still_in_use(self):
+        profile=self.new_reference()
+        self.pc.uncertain=True
+        with self.assertRaises(VoiceError) as caught:self.pc.delete(profile['id'])
+        self.assertEqual(caught.exception.code,'ENGINE_RESTART_REQUIRED')
+        self.assertTrue(self.pc._path(profile['id'],'.wav').is_file())
+        self.assertTrue(self.pc._path(profile['id'],'.json').is_file())
+
+    def test_vox_scores_and_chunking_preserve_ordinary_counts_and_all_script_content(self):
+        self.assertEqual(korean_score_text('베트남이 태국을 4대 2로 꺾고'), '베트남이 태국을 사 대 이로 꺾고')
+        self.assertEqual(korean_score_text('14대12, 0대0, 21 대 9'), '십사 대 십이, 영 대 영, 이십일 대 구')
+        for text in ('차량 4대', '4:20에 출발', '144대2', '4대2.5', '사대 이로 꺾고'):
+            self.assertEqual(korean_score_text(text),text)
+        text=('이번 경기는 4대 2로 끝났습니다. 다음 문장도 빠짐없이 읽어 주세요!\n'*40).strip()
+        chunks=speech_chunks(text)
+        self.assertGreater(len(chunks),1)
+        self.assertTrue(all(0<len(chunk)<=120 for chunk in chunks))
+        self.assertEqual(''.join(''.join(chunks).split()),''.join(korean_score_text(text).split()))
+
+    def test_vox_worker_rejects_paths_urls_unbounded_text_and_invalid_rates(self):
+        good={'profileId':'a'*32,'text':'테스트','speed':1}
+        self.assertEqual(validate_request(good),('테스트','a'*32,1))
+        for update in ({'ref_audio_path':'C:/secret.wav'},{'endpoint':'https://example.test'},
+                       {'profileId':'../secret'},{'text':'x'*2001},{'speed':True},{'speed':float('nan')},{'speed':0}):
+            with self.subTest(update=update):
+                with self.assertRaises(VoiceError):validate_request({**good,**update})
+
+    def test_vox_rejects_final_failed_retries_at_dynamic_or_global_output_limits(self):
+        validate_generation_length(10,30)
+        validate_generation_length(100,383)
+        # Ten tokens have a 70-patch cap (11.2s), not a sixty-second cap.
+        for tokens,patches in ((10,70),(10,60),(100,384),(0,1),(1,0)):
+            with self.subTest(tokens=tokens,patches=patches):
+                with self.assertRaises(VoiceError):validate_generation_length(tokens,patches)
+
+    def test_vox_caches_reference_once_and_never_returns_partial_audio_after_chunk_failure(self):
+        profile=self.new_reference()
+        engine=VoxEngine.__new__(VoxEngine)
+        engine.references=self.pc
+        engine.sample_rate=48000
+        class Samples:
+            size=4800
+            def __len__(self):return 4800
+        generated=Mock()
+        generated.detach.return_value.float.return_value.cpu.return_value.numpy.return_value.reshape.return_value=Samples()
+        tts=Mock()
+        tts.generate_with_prompt_cache.side_effect=[(generated,SimpleNamespace(numel=lambda:5),SimpleNamespace(shape=(3,4,64))),RuntimeError('middle chunk failed')]
+        engine.model=SimpleNamespace(tts_model=tts)
+        fake_numpy=SimpleNamespace(isfinite=lambda pcm:SimpleNamespace(all=lambda:True))
+        fake_torch=SimpleNamespace(manual_seed=lambda seed:None,inference_mode=nullcontext)
+        before={p.name:p.read_bytes() for p in self.pc.directory.iterdir()}
+        with patch.dict(sys.modules,{'numpy':fake_numpy,'torch':fake_torch}):
+            with self.assertRaisesRegex(RuntimeError,'middle chunk failed'):
+                engine.synthesize({'profileId':profile['id'],'text':'오늘은 긴 문장을 나누어 읽는 기능을 확인합니다. '*10,'speed':1})
+        self.assertEqual(tts.build_prompt_cache.call_count,1)
+        self.assertEqual(tts.generate_with_prompt_cache.call_count,2)
+        self.assertEqual(tts.build_prompt_cache.call_args.kwargs['prompt_text'],profile['promptText']+' ')
+        self.assertFalse(self.pc.lock.locked())
+        self.assertEqual(before,{p.name:p.read_bytes() for p in self.pc.directory.iterdir()})
 
     def test_pc_installer_does_not_publish_settings_before_resources_succeed(self):
         import setup_pc_voice as setup

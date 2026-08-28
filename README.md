@@ -2,15 +2,15 @@
 
 > **이 브랜치는 공동 검토용 실험판입니다.** 운영 `main`은 유지하고 아직 병합하지 않습니다.
 >
-> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 기존 편집·Supertonic 2 기본 TTS·Whisper Tiny 자막을 유지하며 **GPT-SoVITS 내 목소리 TTS**를 PC 확장으로 추가했습니다.
+> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 기존 편집·Supertonic 2 기본 TTS·Whisper Tiny 자막을 유지하며 **VoxCPM2 내 목소리 TTS**를 PC 확장 기본 엔진으로 추가했습니다. 기존 GPT-SoVITS와 참고 녹음도 유지합니다.
 >
 > 모바일은 기존 브라우저 기능으로 편집하고, PC에서는 짧은 참고 녹음으로 음성을 생성해 같은 타임라인에 넣습니다. 생성 WAV는 .shorts로 이동할 수 있고 참고 녹음·읽은 문장·엔진 키는 PC에만 따로 보관합니다. 개인 모델 학습 기능은 포함하지 않습니다.
 >
 > [실험판 사용 안내](START-HERE.md) · [PC 설치·실행 안내](public/pc-voice-setup.html) · [변경 범위](CHANGELOG-LAB.md) · [검증 기록](VERIFICATION.md)
 >
-> Windows 기본 편집은 `start-studio.cmd`, PC 확장은 처음 `setup-pc-voice.cmd`로 준비한 뒤 `start-pc-voice.cmd`로 실행합니다. 최초 PC 모델·발음 자료 약 1.5GB와 별도 수 GB의 실행 환경을 받습니다. 생성 과정에 유료 API·외부 TTS 사이트는 필요하지 않습니다.
+> Windows 기본 편집은 `start-studio.cmd`, PC 확장은 처음 `setup-pc-voice.cmd`로 준비한 뒤 `start-pc-voice.cmd`로 실행합니다. Vox 모델 약 5GB와 별도 수 GB의 실행 환경을 받으며 15GB 이상 여유 공간을 확보하세요. 기존 설치가 있으면 작업 저장 후 이전 실행기를 종료하고 다시 실행합니다. 유료 API·외부 TTS 사이트는 필요하지 않습니다.
 >
-> Node 135개·Python 25개 검사와 RTX 3060의 실제 한국어 WAV 생성 두 경우를 확인했습니다. 사용자 녹음의 유사도·자연스러움, 모바일 실기, 브라우저 전체 조작·실제 MP4 출력 평가는 아직 남아 있습니다. 아래는 변경하지 않은 기준 버전의 원본 안내입니다.
+> Node 135개·Python 36개 검사와 RTX 3060의 실제 Vox 한국어 WAV 생성 5개 사례를 확인했습니다. 사용자 녹음의 유사도·자연스러움, 모바일 실기, 브라우저 전체 조작·실제 MP4 출력 평가는 아직 남아 있습니다. 아래는 변경하지 않은 기준 버전의 원본 안내입니다.
 
 **https://shorts-studio-75p.pages.dev**
 

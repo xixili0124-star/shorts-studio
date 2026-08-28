@@ -1459,6 +1459,11 @@ test('voice mode UI preserves browser voices and exposes PC setup without public
   try{
     StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/Supertonic 2/);assert.match(host.innerHTML,/원고 유지/);assert.match(host.innerHTML,/value="device"/);assert.match(host.innerHTML,/value="pc"/);
     owner.voice.engine='pc';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/PC 사용 안내/);assert.match(host.innerHTML,/data-smart-action="voice" disabled/);assert.match(host.innerHTML,/원고 유지/);assert.doesNotMatch(host.innerHTML,/http:\/\/127\.0\.0\.1/);
+    assert.match(host.innerHTML,/내 목소리 · VoxCPM2/);
+    globalThis.location={protocol:'http:',hostname:'127.0.0.1'};
+    owner.pcVoice.status={state:'ready',provider:'voxcpm2',localServer:true,profiles:[{id:'ref',name:'saved voice',duration:6,audioAvailable:true}]};owner.pcVoice.profileId='ref';
+    StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/내 목소리 · VoxCPM2/);assert.match(host.innerHTML,/48kHz/);assert.doesNotMatch(host.innerHTML,/data-smart-action="voice" disabled/);
+    owner.pcVoice.status.provider='gpt-sovits';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/내 목소리 · GPT-SoVITS/);assert.doesNotMatch(host.innerHTML,/48kHz/);assert.match(host.innerHTML,/saved voice/);
   }finally{globalThis.location=oldLocation;}
 });
 

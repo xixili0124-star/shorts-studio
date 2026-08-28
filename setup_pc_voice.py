@@ -11,6 +11,7 @@ import subprocess
 import sys
 import urllib.request
 import zipfile
+from pc_voice_config import activate_config, read_config, settings_path
 
 SOURCE_REV = '48b1a0169a28582a8984402f82cf438d3bfa6aca'
 MODEL_REV = '336b2ec4e8d4ac74740798dd40af44e74659ecaf'
@@ -134,18 +135,16 @@ def write_config(engine, source, python, device):
     local.mkdir(exist_ok=True)
     previous = {}
     try:
-        previous = json.loads((local / 'pc-voice.json').read_text(encoding='utf-8'))
+        previous = read_config(settings_path(local, 'gpt-sovits'))
     except (OSError, ValueError):
         pass
     key = previous.get('engineKey', '')
     if not isinstance(key, str) or len(key) < 32:
         key = secrets.token_urlsafe(32)
-    settings = {'python': str(python), 'engine': str(source), 'config': str(config),
+    settings = {'provider': 'gpt-sovits', 'python': str(python), 'engine': str(source), 'config': str(config),
                 'data': str(engine / 'data'), 'bin': str(engine / 'bin'),
                 'sourceRevision': SOURCE_REV, 'modelRevision': MODEL_REV, 'device': device, 'engineKey': key}
-    settings_temp = local / 'pc-voice.json.tmp'
-    settings_temp.write_text(json.dumps(settings, ensure_ascii=False, indent=2), encoding='utf-8')
-    settings_temp.replace(local / 'pc-voice.json')
+    activate_config(local, settings)
     return settings
 
 

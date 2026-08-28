@@ -1,4 +1,4 @@
-"""Private, loopback-only GPT-SoVITS adapter. No cloud fallback or user-supplied paths."""
+"""Private, loopback-only voice adapters. No cloud fallback or user-supplied paths."""
 import base64
 import binascii
 from contextlib import contextmanager
@@ -14,6 +14,7 @@ import uuid
 import wave
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
+from pc_voice_config import PROVIDERS
 
 
 MAX_REFERENCE_BODY = 2 * 1024 * 1024
@@ -46,13 +47,14 @@ class NoRedirect(HTTPRedirectHandler):
         return None
 
 
-def engine_proof(key, nonce):
-    return hmac.new(key.encode('ascii'), ('studio-pc-voice-v1:' + nonce).encode('ascii'), hashlib.sha256).hexdigest()
+def engine_proof(key, nonce, provider=None, model=None):
+    message = 'studio-pc-voice-v1:' + nonce if provider is None else ':'.join(('studio-pc-voice-v2', nonce, provider, model))
+    return hmac.new(key.encode('ascii'), message.encode('ascii'), hashlib.sha256).hexdigest()
 
 
-def verified_engine(opener, endpoint, key, timeout=3):
-    """A raw GPT-SoVITS API ignores our key; require the private wrapper's proof."""
-    if not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{32,128}', key):
+def verified_engine(opener, endpoint, key, timeout=3, provider='gpt-sovits'):
+    """Authenticate the expected provider before sending a key, text, or voice."""
+    if provider not in PROVIDERS or not isinstance(key, str) or not re.fullmatch(r'[A-Za-z0-9_-]{32,128}', key):
         return False
     nonce = uuid.uuid4().hex
     request = Request(endpoint + '/studio/health', headers={'Accept': 'application/json',
@@ -63,8 +65,16 @@ def verified_engine(opener, endpoint, key, timeout=3):
         if len(raw) > 4096:
             return False
         data = json.loads(raw)
-        return (data.get('service') == 'shorts-studio-pc-voice' and data.get('protocol') == 1
-            and isinstance(data.get('proof'), str) and hmac.compare_digest(data['proof'], engine_proof(key, nonce)))
+        if data.get('service') != 'shorts-studio-pc-voice' or not isinstance(data.get('proof'), str):
+            return False
+        if data.get('protocol') == 1:
+            # Only the original GPT wrapper used v1; it can never impersonate Vox.
+            return (provider == 'gpt-sovits' and data.get('provider', 'gpt-sovits') == provider
+                and data.get('model', 'v2ProPlus') == 'v2ProPlus'
+                and hmac.compare_digest(data['proof'], engine_proof(key, nonce)))
+        model = PROVIDERS[provider][1]
+        return (data.get('protocol') == 2 and data.get('provider') == provider and data.get('model') == model
+            and hmac.compare_digest(data['proof'], engine_proof(key, nonce, provider, model)))
     except (HTTPError, URLError, TimeoutError, OSError, ValueError, AttributeError, TypeError):
         return False
 
@@ -106,10 +116,13 @@ def wav_info(content, reference=False):
 
 
 class VoiceCloneService:
-    def __init__(self, directory, port=9880, timeout=300, engine_key=None):
+    def __init__(self, directory, port=9880, timeout=300, engine_key=None, provider='gpt-sovits'):
         if isinstance(port, bool) or not isinstance(port, int) or not 1024 <= port <= 65535:
             raise ValueError('Invalid local voice port')
         self.directory = Path(directory).resolve()
+        if provider not in PROVIDERS:
+            raise ValueError('Unknown PC voice provider')
+        self.provider = provider
         self.endpoint = f'http://127.0.0.1:{port}'
         self.timeout = timeout
         self.engine_headers = {'X-Studio-Engine-Key': engine_key} if engine_key else {}
@@ -164,16 +177,16 @@ class VoiceCloneService:
         return profiles
 
     def status(self):
-        base = {'provider': 'gpt-sovits', 'localServer': True, 'inferenceVerified': False,
+        base = {'provider': self.provider, 'modelName': PROVIDERS[self.provider][0], 'localServer': True, 'inferenceVerified': False,
                 'profiles': self.profiles(), 'maxProfiles': MAX_PROFILES}
         if self.uncertain:
             return {**base, 'state': 'restart-required', 'message': '이전 요청의 완료를 확인하지 못했습니다. PC 음성 엔진과 편집기 서버를 다시 실행해 주세요.'}
         if not self.lock.acquire(blocking=False):
             return {**base, 'state': 'busy', 'message': 'PC 엔진이 처리 중입니다. 잠시 뒤 연결을 다시 확인해 주세요.'}
         try:
-            if not verified_engine(self.opener, self.endpoint, self.engine_headers.get('X-Studio-Engine-Key')):
+            if not verified_engine(self.opener, self.endpoint, self.engine_headers.get('X-Studio-Engine-Key'), provider=self.provider):
                 raise ValueError()
-            return {**base, 'state': 'ready', 'message': 'PC 엔진 연결됨 · 등록한 목소리로 생성할 수 있어요.'}
+            return {**base, 'state': 'ready', 'message': PROVIDERS[self.provider][0] + ' 연결됨 · 등록한 목소리로 생성할 수 있어요.'}
         except (HTTPError, URLError, TimeoutError, OSError, ValueError, AttributeError):
             return {**base, 'state': 'offline', 'message': 'PC 음성 엔진이 꺼져 있거나 준비 중입니다. PC 음성 시작 후 연결을 다시 확인해 주세요.'}
         finally:
@@ -217,6 +230,8 @@ class VoiceCloneService:
 
     def delete(self, profile_id):
         with self.exclusive():
+            if self.uncertain:
+                raise VoiceError('ENGINE_RESTART_REQUIRED', '진행 중인 생성의 완료가 불확실합니다. PC 엔진과 편집기 서버를 다시 실행한 뒤 참고 음성을 삭제해 주세요.', 503)
             self._load(profile_id, require_audio=False)
             try:
                 # Retain metadata until the recording is gone, so a Windows file
@@ -248,6 +263,10 @@ class VoiceCloneService:
                        'prompt_text': profile['promptText'], 'prompt_lang': 'ko', 'speed_factor': speed,
                        'media_type': 'wav', 'streaming_mode': False, 'text_split_method': 'cut5',
                        'batch_size': 1, 'parallel_infer': True, 'seed': 42}
+            if self.provider == 'voxcpm2':
+                # The worker resolves this ID in the same private store. A caller
+                # cannot override the reference path, transcript, or model URL.
+                payload = {'text': text.strip(), 'profileId': profile['id'], 'speed': speed}
             request = Request(self.endpoint + '/tts', data=json.dumps(payload).encode('utf-8'),
                               headers={'Content-Type': 'application/json', 'Accept': 'audio/wav', **self.engine_headers}, method='POST')
             try:
@@ -264,5 +283,5 @@ class VoiceCloneService:
                 raise VoiceError('ENGINE_RESTART_REQUIRED', 'PC 엔진의 응답을 끝까지 받지 못했습니다. 엔진과 편집기 서버를 다시 실행한 뒤 짧은 원고로 시도해 주세요.', 503) from None
 
     def require_engine(self):
-        if not verified_engine(self.opener, self.endpoint, self.engine_headers.get('X-Studio-Engine-Key')):
+        if not verified_engine(self.opener, self.endpoint, self.engine_headers.get('X-Studio-Engine-Key'), provider=self.provider):
             raise VoiceError('ENGINE_NOT_READY', '안전한 PC 음성 엔진 연결을 확인하지 못했습니다. PC 음성 시작 후 연결을 다시 확인해 주세요.', 503)

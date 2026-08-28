@@ -34,6 +34,8 @@ export default {
     const cors = corsHeaders(origin);
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
+
+    if (new URL(request.url).pathname === '/tts') return handleTts(request, env, cors);
     if (request.method !== 'POST') return json({ error: 'POST 로만 받습니다.' }, 405, cors);
     if (origin && !isAllowed(origin)) return json({ error: '허용되지 않은 출처입니다.' }, 403, cors);
 
@@ -275,4 +277,73 @@ function json(body, status, cors) {
     status,
     headers: { 'Content-Type': 'application/json; charset=utf-8', ...cors },
   });
+}
+
+// ── 내레이션 (TTS) ─────────────────────────────────────
+//
+// 아직 목소리를 안 꽂았다. 어느 서비스를 쓸지 정하면 아래 provider 함수 하나만 채우면 된다.
+// 편집기(public/js/tts.js)는 이 워커의 응답 모양만 알고 있어서, 서비스가 바뀌어도 그대로다.
+//
+// 꽂는 법:
+//   1) 아래 PROVIDERS 에 함수를 하나 추가한다
+//   2) wrangler secret put 으로 키를 넣는다 (코드에 키를 쓰지 않는다)
+//   3) ACTIVE 를 그 이름으로 바꾼다
+//
+// 예) Azure 를 쓴다면
+//   npx wrangler secret put AZURE_SPEECH_KEY
+//   npx wrangler secret put AZURE_SPEECH_REGION
+
+const ACTIVE = '';   // '' 이면 미연결. 'azure' | 'openai' 등으로 바꾼다
+
+const PROVIDERS = {
+  // azure: async (env, { text, voice, speed }) => {
+  //   // 여기서 Azure Speech 를 부르고 아래 모양으로 돌려준다.
+  //   // WordBoundary 이벤트를 marks 로 옮기면 자막이 오차 없이 정확해진다.
+  //   return { audio: base64문자열, mime: 'audio/mpeg', marks: [{ text, start, end }] };
+  // },
+};
+
+async function handleTts(request, env, cors) {
+  const active = ACTIVE && PROVIDERS[ACTIVE] ? ACTIVE : '';
+
+  // GET 은 상태 확인용. 편집기가 UI 를 켤지 정하는 데 쓴다.
+  if (request.method === 'GET') {
+    return json({
+      configured: Boolean(active),
+      provider: active,
+      voices: [],
+      error: active ? '' : '내레이션 목소리가 아직 연결되지 않았습니다. stt-worker/src/index.js 의 PROVIDERS 를 채우세요.',
+    }, 200, cors);
+  }
+
+  if (request.method !== 'POST') return json({ error: 'POST 로만 받습니다.' }, 405, cors);
+
+  if (!active) {
+    return json({
+      error: '내레이션 목소리가 아직 연결되지 않았습니다.',
+      configured: false,
+    }, 501, cors);
+  }
+
+  let body;
+  try {
+    body = await request.json();
+  } catch {
+    return json({ error: '요청을 읽지 못했습니다. JSON 으로 보내세요.' }, 400, cors);
+  }
+
+  const text = String(body?.text || '').trim();
+  if (!text) return json({ error: '읽을 내용이 없습니다.' }, 400, cors);
+  if (text.length > 2000) return json({ error: '한 번에 2000자까지 됩니다.' }, 413, cors);
+
+  try {
+    const out = await PROVIDERS[active](env, {
+      text,
+      voice: String(body.voice || ''),
+      speed: Number(body.speed) || 1,
+    });
+    return json({ ...out, provider: active }, 200, cors);
+  } catch (e) {
+    return json({ error: `내레이션 생성 실패: ${e?.message || e}` }, 502, cors);
+  }
 }

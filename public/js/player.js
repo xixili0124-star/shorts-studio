@@ -16,6 +16,7 @@ export class Player {
     this._startWall = 0;
     this._startTime = 0;
     this.bgmEl = null;
+    this.narrationEl = null;
     this.previewMuted = false;
     this.trackElements = new Map();
     // undo는 클립 데이터를 교체하므로 비동기 디코더 상태는 sink에 연결합니다.
@@ -126,6 +127,8 @@ export class Player {
   invalidate() {
     if (!this.playing) {
       this._syncVideos(true);
+      this._syncBgm();
+      this._syncNarration();
       this._syncTracks();
       this.draw();
       this.onTick(this.time);
@@ -141,6 +144,7 @@ export class Player {
     }
     this._syncVideos(!this.playing);
     this._syncBgm();
+    this._syncNarration();
     this._syncTracks();
     if (redraw) this.draw();
     this.onTick(this.time);
@@ -159,6 +163,8 @@ export class Player {
     this._startWall = performance.now() / 1000;
     this._startTime = this.time;
     this._syncBgm();
+    this._syncNarration();
+    this._syncTracks();
     this.bgmEl?.play().catch(() => {});
     const tick = () => {
       if (!this.playing) return;
@@ -180,6 +186,7 @@ export class Player {
       this.time = t;
       this._syncVideos(false);
       this._syncBgm();
+      this._syncNarration();
       this._syncTracks();
       this.draw();
       this.onTick(this.time);
@@ -194,6 +201,7 @@ export class Player {
     this._raf = null;
     for (const c of project.clips) { try { c.el?.pause(); } catch { /* noop */ } }
     try { this.bgmEl?.pause(); } catch { /* noop */ }
+    try { this.narrationEl?.pause(); } catch { /* 이미 해제된 요소 */ }
     for (const el of this.trackElements.values()) el.pause();
   }
 
@@ -225,6 +233,29 @@ export class Player {
         }
       }
     }
+  }
+
+  setNarrationElement(el) {
+    try { this.narrationEl?.pause(); } catch { /* 이미 해제된 요소 */ }
+    this.narrationEl = el;
+    this._syncNarration();
+  }
+
+  // 내레이션은 0초부터 재생하고, 끝난 뒤 마지막 부분을 반복하지 않는다.
+  _syncNarration() {
+    const n = project.audio.narration;
+    const el = this.narrationEl;
+    if (!el) return;
+    if (!n) { el.pause(); return; }
+    el.loop = false;
+    el.volume = clamp(n.volume ?? 1, 0, 1);
+    el.muted = this.previewMuted || !!n.muted;
+    const duration = Number.isFinite(n.buffer?.duration) ? n.buffer.duration : el.duration;
+    if (!Number.isFinite(duration) || duration <= 0) { el.pause(); return; }
+    const wanted = clamp(this.time, 0, duration);
+    if (Math.abs(el.currentTime - wanted) > (this.playing ? .2 : .02)) el.currentTime = wanted;
+    if (!this.playing || n.muted || this.time < 0 || this.time >= duration) { el.pause(); return; }
+    if (el.paused) el.play().catch(() => {});
   }
 
   // ── 내부: 배경음악 ───────────────────────────────────

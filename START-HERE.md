@@ -1,16 +1,16 @@
-# Shorts Studio · 공동 검토용 실험판
+# Shorts Studio · 사용 안내
 
-운영 main은 그대로 두고 codex/studio-lab 브랜치에서 작업합니다. [Draft PR #1](https://github.com/xixili0124-star/shorts-studio/pull/1)은 병합하지 않습니다.
+`codex/studio-lab`의 작업을 사용자 승인에 따라 [PR #1](https://github.com/xixili0124-star/shorts-studio/pull/1)로 `main`에 통합합니다. 기존 첫 화면과 새 멀티트랙 편집기를 모두 유지합니다. 이후 변경도 브랜치에서 검증한 뒤 PR로 반영합니다.
 
 ## 형에게 공유할 주소
 
-**[실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)**
+**[새 편집기 열기](https://shorts-studio-75p.pages.dev/studio.html)** · [기존 편집기](https://shorts-studio-75p.pages.dev/) · [브랜치 미리보기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)
 
-Git 연결을 통한 Cloudflare 실험 브랜치 미리보기입니다. 운영 사이트와 주소가 다릅니다. 개인 소재는 브라우저 안에 보관하며 자동으로 Git에 올리지 않습니다. 두 사람이 동시에 같은 프로젝트를 편집하는 기능은 없으므로, 소재를 포함한 .shorts 프로젝트 파일로 주고받으세요.
+정식 주소는 `main`의 Git 연결을 통한 Cloudflare Pages 자동 배포 완료 후 갱신됩니다. 개인 소재는 브라우저 안에 보관하며 자동으로 Git에 올리지 않습니다. 두 사람이 동시에 같은 프로젝트를 편집하는 기능은 없으므로, 소재를 포함한 .shorts 프로젝트 파일로 주고받으세요. PC AI를 쓰려면 공개 주소가 아니라 설치한 PC 실행기의 로컬 주소를 사용합니다.
 
 ## 2026-08-28 · PC Turbo 자동자막
 
-PC 자막 엔진으로 **Whisper large-v3-turbo**를 추가했습니다. 모바일·공유 웹주소의 Whisper Tiny, 기존 편집과 TTS는 유지합니다. **이번 변경은 로컬 실험판에서 검증했으며 위 공유 주소에는 아직 반영하지 않았습니다.** 별도 ASR 환경 설치, 실제 GPU 한국어 인식, 취소·재실행, 브라우저에서 새 자막 트랙 추가·실행 취소를 확인했습니다. 다른 PC에서는 아래 설치 과정이 필요합니다.
+PC 자막 엔진으로 **Whisper large-v3-turbo**를 추가했습니다. 모바일·공유 웹주소의 Whisper Tiny, 기존 편집과 TTS는 유지합니다. 별도 ASR 환경 설치, 실제 GPU 한국어 인식, 취소·재실행, 브라우저에서 새 자막 트랙 추가·실행 취소를 확인했습니다. 다른 PC에서는 아래 설치 과정이 필요합니다.
 
 1. 중요한 작업을 .shorts 파일로 저장하고, Windows 64비트 PC의 최신 실험판 폴더에서 **`setup-pc-asr.cmd`**를 실행합니다. 시작용 Python 3.10 이상이 필요하며 자막 전용 Python 3.11 환경을 준비합니다. Vox·GPT-SoVITS 환경에 패키지를 덧씌우지 않습니다.
 2. 공개 모델 약 1.62GB와 별도 실행 환경 다운로드에 동의합니다. GPU 설치에는 CUDA 라이브러리 다운로드 약 570MB가 추가되며 설치·캐시를 위해 디스크 여유 공간 8GB 이상을 확보하세요. 모델·환경은 Git과 배포 ZIP에 넣지 않습니다.

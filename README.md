@@ -1,18 +1,18 @@
 # 숏츠 스튜디오
 
-> **이 브랜치는 공동 검토용 실험판입니다.** 운영 `main`은 유지하고 아직 병합하지 않습니다.
+> **새 멀티트랙 편집기와 기존 편집기를 함께 제공합니다.** 기존 첫 화면은 유지하며 새 편집기는 `/studio.html`에서 엽니다.
 >
-> **[공유 실험판 열기](https://codex-studio-lab.shorts-studio-75p.pages.dev/studio.html)** · 기존 편집·Supertonic 2 기본 TTS·브라우저 Whisper Tiny 자막을 유지합니다. PC 확장에는 **VoxCPM2 내 목소리 TTS**와 **Whisper large-v3-turbo 자동자막**을 연결했습니다. 기존 GPT-SoVITS와 참고 녹음도 유지합니다. 이번 Turbo 변경은 로컬에서 검증했으며 아직 공유 주소에 반영하지 않았습니다.
+> **[새 편집기 열기](https://shorts-studio-75p.pages.dev/studio.html)** · 기존 편집·Supertonic 2 기본 TTS·브라우저 Whisper Tiny 자막을 유지합니다. PC 확장에는 **VoxCPM2 내 목소리 TTS**와 **Whisper large-v3-turbo 자동자막**을 연결했습니다. 기존 GPT-SoVITS와 참고 녹음도 유지합니다. 정식 주소는 `main`의 Cloudflare Pages 자동 배포 완료 후 최신 버전을 제공합니다.
 >
 > 모바일은 기존 브라우저 기능으로 편집하고, PC에서는 짧은 참고 녹음으로 음성을 생성해 같은 타임라인에 넣습니다. 생성 WAV는 .shorts로 이동할 수 있고 참고 녹음·읽은 문장·엔진 키는 PC에만 따로 보관합니다. 개인 모델 학습 기능은 포함하지 않습니다.
 >
-> [실험판 사용 안내](START-HERE.md) · [PC 내 목소리 안내](public/pc-voice-setup.html) · [PC Turbo 자막 안내](public/pc-asr-setup.html) · [변경 범위](CHANGELOG-LAB.md) · [검증 기록](VERIFICATION.md)
+> [사용 안내](START-HERE.md) · [PC 내 목소리 안내](public/pc-voice-setup.html) · [PC Turbo 자막 안내](public/pc-asr-setup.html) · [변경 범위](CHANGELOG-LAB.md) · [검증 기록](VERIFICATION.md)
 >
 > Windows 기본 편집은 `start-studio.cmd`, PC 내 목소리는 처음 `setup-pc-voice.cmd`로 준비한 뒤 `start-pc-voice.cmd`로 실행합니다. Vox 모델 약 5GB와 별도 수 GB의 실행 환경을 받으며 15GB 이상 여유 공간을 확보하세요. PC Turbo 자막은 별도로 `setup-pc-asr.cmd`를 실행합니다. 기존 설치가 있으면 작업 저장 후 이전 실행기를 종료하고 다시 실행합니다. 유료 API·외부 TTS 사이트는 필요하지 않습니다.
 >
-> Turbo는 RTX 3060에서 한국어 합성 음성 두 개의 실제 인식, 취소·GPU 메모리 반환·재실행, 자막 검수·새 트랙 추가·undo/redo를 확인했습니다. 자막 작업 이후 Vox 음성 생성도 성공했습니다. Node 146개·Python 53개 회귀 검사가 통과했습니다. [검증 기록](VERIFICATION.md)의 범위에 한정되며 실제 사용자 녹음의 인식률, 모바일 실기·이번 변경 후 MP4 출력 평가는 별도입니다.
+> Turbo는 RTX 3060에서 한국어 합성 음성 인식, 취소·재실행, 자막 검수와 Vox 후속 생성을 확인했습니다. main 통합 후 Node 152개·Python 53개 회귀 검사와 기존·새 편집기의 샘플 MP4 생성을 확인했습니다. 실제 사용자 녹음의 인식률과 모바일 실기는 별도입니다. 자세한 범위는 [검증 기록](VERIFICATION.md)을 보세요.
 
-## 실험판 자동자막 · 브라우저 Tiny / PC Turbo
+## 새 편집기 자동자막 · 브라우저 Tiny / PC Turbo
 
 새 편집기 `public/studio.html`의 **자막 → 인식 엔진**에서 선택합니다. 모바일·공유 웹주소는 브라우저 Tiny를 기본으로 유지합니다. PC 로컬 편집기는 설치·연결이 확인되면 Turbo를 기본 선택하며, 사용자가 선택한 Tiny는 그대로 둡니다. PC 인식 실패를 Tiny·CPU·외부 API로 자동 대체하지 않습니다.
 
@@ -32,9 +32,9 @@ PC 자막 환경은 Vox·GPT-SoVITS 환경과 분리합니다. 설치 후 `start
 
 **GPU 메모리:** 같은 PC 실행기의 TTS와 자막 요청은 순서대로 처리합니다. 자막 작업이 끝나면 ASR 자식 프로세스를 종료해 해당 GPU 메모리를 반환하도록 구현했습니다. Vox는 GPU 여유가 부족할 때만 모델을 내리며, 다음 TTS 요청에서 로컬 파일을 다시 읽습니다. 재다운로드하거나 참고 녹음을 바꾸지 않습니다. 다른 프로그램은 강제로 종료하지 않습니다.
 
-## 원본 운영 버전 안내
+## 기존 편집기 안내
 
-아래는 기준 버전의 안내입니다. Cloudflare Worker 자막 설명은 새 실험판의 PC Turbo 경로와 별개이며, 실험판은 해당 Worker로 자동 전환하지 않습니다.
+아래는 기존 첫 화면의 안내입니다. Cloudflare Worker 자막·내레이션 설명은 새 편집기의 브라우저/PC 엔진과 별개이며, 새 편집기는 해당 Worker로 자동 전환하지 않습니다. 기존 내레이션 UI와 Worker 코드는 보존하며, 이번 Pages 병합으로 Worker를 별도 배포하거나 유료 음성 제공자를 연결하지 않습니다.
 
 **https://shorts-studio-75p.pages.dev**
 
@@ -148,9 +148,7 @@ MPEG-TS 처럼 브라우저가 컨테이너를 모르는 파일, 인덱스(moov)
 댓글 카드는 **특정 플랫폼 UI 를 그대로 베끼지 않는다.** 아바타(이름 첫 글자) + 이름 + 내용 +
 좋아요 정도만 있는 일반적인 모양으로 그린다.
 
-## 자동 자막 · 원본 운영 버전
-
-실험판 `studio.html`의 Tiny·PC Turbo 설치와 인식 범위는 위의 **실험판 자동자막** 안내를 따르세요. 아래 처리 시간·비용·표시 방식은 기준 버전 당시의 설명이며 이번 PC Turbo 검증 결과가 아닙니다.
+## 자동 자막
 
 [자막] 탭의 **자동 자막 만들기** 를 누르면 영상 속 말소리를 알아듣고 자막을 채운다.
 14초 영상 기준 4초쯤 걸린다.
@@ -195,6 +193,48 @@ CORS 는 배포 주소와 localhost 만 허용한다 (`stt-worker/src/index.js` 
 
 **모델 응답을 그대로 쓰지 않는다.** Whisper 가 주는 문장은 자막으로 쓰기엔 길 때가 많아서,
 단어 단위 시각을 이용해 20자 / 4초 / 문장부호 기준으로 다시 끊는다 (`chunkSegments`).
+
+## 내레이션 (TTS)
+
+[오디오] 탭에서 대본을 넣으면 읽어 주고, **자막까지 같이 만든다.**
+
+TTS 로 읽으면 대본을 이미 알고 있으므로 음성 인식이 필요 없다.
+받아쓰기 오류가 없고(자동 자막의 "숏츠 -> Shots" 같은), STT 비용도 안 든다.
+서비스가 단어별 타임스탬프를 주면 그대로 쓰고, 안 주면 글자 수에 비례해 나눈다.
+
+### 아직 목소리가 안 꽂혀 있다
+
+구조만 만들어 둔 상태다. [오디오] 탭 배지가 `미연결` 로 뜨고 버튼이 잠겨 있다.
+
+꽂는 자리는 **한 곳뿐**이다 — `stt-worker/src/index.js` 의 `PROVIDERS`.
+
+```js
+const ACTIVE = 'azure';           // 여기를 바꾸고
+const PROVIDERS = {
+  azure: async (env, { text, voice, speed }) => {
+    // 서비스를 부르고 이 모양으로 돌려준다
+    return { audio: base64, mime: 'audio/mpeg', marks: [{ text, start, end }] };
+  },
+};
+```
+
+```bash
+npx wrangler secret put AZURE_SPEECH_KEY   # 키는 코드에 넣지 않는다
+cd stt-worker && npx wrangler deploy
+```
+
+편집기(`public/js/tts.js`)는 워커의 응답 모양만 알고 있어서 **서비스가 바뀌어도 그대로다.**
+나중에 로컬 음성 복제(VoiceBox 등)로 갈아탈 때도 이 함수 하나만 바꾸면 된다.
+
+### 어느 서비스를 쓸지
+
+| | 무료 | 이후 | 타임스탬프 |
+|---|---|---|---|
+| Azure Speech | 월 50만 자 (1분 내레이션 ≈ 300자) | $16~22/100만 자 | 준다 (WordBoundary) |
+| ElevenLabs | 월 1만 자 | $5/월~ | 준다 |
+| OpenAI TTS | 없음 | $15/100만 자 | 안 준다 |
+
+Workers AI 의 MeloTTS 는 **쓸 수 없다** (영어도 3043 에러로 죽는다). 직접 확인했다.
 
 ## 유튜브 숏츠 업로드
 

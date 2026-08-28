@@ -5,6 +5,10 @@ export { FONTS } from './font-catalog.js';
 
 export const ACCENT = '#ff3b5c';
 
+// 구형 화면만 명시적으로 켭니다. 프로젝트 저장값과 새 스튜디오의 기본 동작에는 섞지 않습니다.
+export let legacyEditorMode = false;
+export function setLegacyEditorMode(enabled) { legacyEditorMode = enabled === true; }
+
 export const project = {
   // 출력 설정
   width: 1080,
@@ -32,6 +36,8 @@ export const project = {
     originalVolume: 1,
     bgm: null, // { name, file, buffer(AudioBuffer), volume, offset, fadeIn, fadeOut, loop }
     tracks: [], // 소재함과 연결되는 독립 오디오 클립
+    // 내레이션은 배경음악과 별개 트랙이다. 항상 0초부터 깔리고 반복하지 않는다.
+    narration: null, // { name, blob, buffer(AudioBuffer), volume }
   },
 
   // 템플릿 — 영상을 화면 가운데 밴드에 넣고 위아래를 단색으로 채우는 구성.
@@ -278,7 +284,7 @@ export function buildLayout(doc = project) {
     }
   }
   const videoEnd = Math.max(0, ...entries.map(e => e.end));
-  const total = Math.max(0, ...items.map(e => e.end));
+  const total = legacyEditorMode && doc === project ? videoEnd : Math.max(0, ...items.map(e => e.end));
   return { entries, items, tracks: registry, videoEnd, total };
 }
 export function trackItems(trackId, doc = project, layout = buildLayout(doc)) {

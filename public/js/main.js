@@ -1,7 +1,7 @@
 // UI 연결 — 상태를 바꾸고, 다시 그리라고 시키는 층
 import {
   project, sel, FONTS, clipDuration, totalDuration, clipStartTime,
-  getOverlay, selectedClip, newOverlay, sortCaptions,
+  getOverlay, selectedClip, newOverlay, sortCaptions, setLegacyEditorMode,
 } from './state.js';
 import { $, $$, uid, fmtTime, clamp, pct, download, wireDropzone, on } from './util.js';
 import { createClip, disposeClip } from './media.js';
@@ -13,6 +13,7 @@ import { detectEngine, exportVideo } from './exporter.js';
 import { isAvailable as sttAvailable, transcribe } from './transcribe.js';
 import * as yt from './youtube.js';
 import { planScenes, buildOverlays, buildCaption } from './shopping.js';
+import * as tts from './tts.js';
 
 const el = new Proxy({}, { get: (_, id) => document.getElementById(id) });
 
@@ -24,8 +25,11 @@ let lastExport = null;   // { blob, seconds } — 유튜브 업로드가 이걸 
 let ytCtrl = null;
 let capGaps = [];          // 소리는 있는데 자막이 없는 구간
 let lastSttAudio = null;   // 방금 인식에 쓴 오디오 (구간 다시 계산용)
+let fontPreviewRequest = 0;
+let fontPreviewFailure = '';
 
 // ── 시작 ───────────────────────────────────────────────
+setLegacyEditorMode(true);
 init();
 
 async function init() {
@@ -43,14 +47,13 @@ async function init() {
   wireExportPanel();
   wireTemplatePanel();
   wireShoppingPanel();
+  wireNarrationPanel();
   wireYouTubePanel();
   wireKeyboard();
   wirePaste();
 
   // 페이지 전체가 드롭 영역
   ['dragover', 'drop'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
-
-  loadFonts().then(() => player.invalidate());
 
   engine = await detectEngine();
   el.engineBadge.textContent = engine.ok ? engine.label : '내보내기 미지원';
@@ -61,6 +64,20 @@ async function init() {
   el.autoCap.disabled = !sttAvailable();
 
   renderAll();
+}
+
+// 글꼴을 바꾸거나 새 글자를 입력하면 실제 폰트를 준비한 뒤 현재 화면만 다시 그립니다.
+async function preparePreviewFonts() {
+  const request = ++fontPreviewRequest;
+  try {
+    await loadFonts();
+    if (request === fontPreviewRequest) { fontPreviewFailure = '';player.invalidate(); }
+  } catch (error) {
+    if (request === fontPreviewRequest && fontPreviewFailure !== error.message) {
+      fontPreviewFailure = error.message;
+      alert(error.message + '\n미리보기에는 임시 대체 글꼴이 보일 수 있습니다.');
+    }
+  }
 }
 
 // ── 소재 추가 ──────────────────────────────────────────
@@ -146,6 +163,7 @@ function renderAll() {
     b.disabled = !has || (b === el.btnExport || b === el.btnExportTop ? !engine?.ok : false);
   }
   player.draw();
+  preparePreviewFonts();
 }
 
 /** 값만 바뀐 경우 — 입력 포커스를 잃지 않도록 최소한만 갱신 */
@@ -155,6 +173,7 @@ function softRefresh() {
   el.totalDur.textContent = `${totalDuration().toFixed(1)}초`;
   el.tAll.textContent = fmtTime(totalDuration());
   player.invalidate();
+  preparePreviewFonts();
 }
 
 function onTick(t) {
@@ -815,8 +834,10 @@ const AUTO_CAP_LABEL = '\u{1F399} 자동 자막 만들기';
 async function doAutoCaption() {
   if (autoCapCtrl) { autoCapCtrl.abort(); return; }   // 두 번째 클릭은 취소
   if (!project.clips.length) return alert('먼저 영상이나 이미지를 추가하세요.');
-  if (!hasClipAudio()) {
-    return alert('말소리가 담긴 영상이 있어야 합니다.\n\n'
+  const narration = project.audio.narration;
+  const hasNarration = narration?.buffer && !narration.muted && (narration.volume ?? 1) > 0;
+  if (!hasClipAudio() && !hasNarration) {
+    return alert('말소리가 담긴 영상이나 내레이션이 있어야 합니다.\n\n'
       + '배경음악만으로는 자막을 만들 수 없고, 음소거된 클립도 인식 대상에서 빠집니다.');
   }
   if (project.captions.length
@@ -833,6 +854,7 @@ async function doAutoCaption() {
     // 배경음악은 빼고 보낸다. 노래가 섞이면 알아듣는 정확도가 떨어진다.
     const mixed = await mixTimeline({
       includeBgm: false,
+      includeVoice: true,
       signal: autoCapCtrl.signal,
       onProgress: (_, msg) => setCapStatus(msg || '소리 모으는 중…'),
     });
@@ -1054,7 +1076,7 @@ function renderTemplatePanel() {
 
 function wireTemplatePanel() {
   const t = project.template;
-  const upd = fn => () => { fn(); player.invalidate(); };
+  const upd = fn => () => { fn(); player.invalidate();preparePreviewFonts(); };
 
   el.tplMode.addEventListener('change', () => {
     t.mode = el.tplMode.value;
@@ -1065,6 +1087,7 @@ function wireTemplatePanel() {
       renderClipPanel();
     }
     player.invalidate();
+    preparePreviewFonts();
   });
 
   el.tplBg.addEventListener('input', upd(() => { t.bg = el.tplBg.value; }));
@@ -1223,6 +1246,117 @@ async function buildShoppingShort() {
     el.shopStatus.textContent = `실패: ${e.message}`;
   } finally {
     el.shopBuild.disabled = false;
+  }
+}
+
+
+// ── 내레이션 (TTS) ─────────────────────────────────────
+let ttsCtrl = null;
+let narrationEl = null;   // 미리보기 재생용
+
+async function wireNarrationPanel() {
+  el.ttsSpeed.addEventListener('input', () => {
+    el.ttsSpeedOut.textContent = `${Number(el.ttsSpeed.value).toFixed(1)}배`;
+  });
+  el.ttsVol.addEventListener('input', () => {
+    const n = project.audio.narration;
+    if (!n) return;
+    n.volume = Number(el.ttsVol.value);
+    el.ttsVolOut.textContent = pct(n.volume);
+    if (narrationEl) narrationEl.volume = clamp(n.volume, 0, 1);
+  });
+  el.ttsRun.addEventListener('click', runNarration);
+  el.ttsDel.addEventListener('click', () => {
+    project.audio.narration = null;
+    if (narrationEl) { narrationEl.pause(); URL.revokeObjectURL(narrationEl.src); narrationEl = null; }
+    player.setNarrationElement(null);
+    el.ttsResult.hidden = true;
+    el.ttsStatus.textContent = '';
+    player.invalidate();
+  });
+
+  // 목소리가 꽂혀 있는지 물어본다
+  const st = await tts.checkAvailable();
+  if (st.ok) {
+    el.ttsBadge.textContent = st.provider || '연결됨';
+    el.ttsBadge.className = 'badge ok';
+    for (const v of st.voices) {
+      const o = document.createElement('option');
+      o.value = v.id ?? v; o.textContent = v.label ?? v;
+      el.ttsVoice.appendChild(o);
+    }
+  } else {
+    el.ttsBadge.textContent = '미연결';
+    el.ttsBadge.className = 'badge warn';
+    el.ttsRun.disabled = true;
+    el.ttsStatus.textContent = st.reason
+      || '내레이션 목소리가 아직 연결되지 않았습니다.';
+  }
+}
+
+async function runNarration() {
+  if (ttsCtrl) { ttsCtrl.abort(); return; }
+  const text = el.ttsText.value.trim();
+  if (!text) return alert('읽을 내용을 입력해 주세요.');
+
+  ttsCtrl = new AbortController();
+  el.ttsRun.textContent = '취소';
+  el.ttsProg.hidden = false;
+  el.ttsProgBar.style.width = '30%';
+  el.ttsStatus.textContent = '읽는 중…';
+
+  try {
+    const { blob, marks, provider } = await tts.speak(text, {
+      voice: el.ttsVoice.value,
+      speed: Number(el.ttsSpeed.value),
+      signal: ttsCtrl.signal,
+    });
+    el.ttsProgBar.style.width = '70%';
+
+    const buffer = await decodeAudioFile(new File([blob], 'narration'));
+    project.audio.narration = {
+      name: `내레이션 (${provider || 'TTS'})`,
+      blob, buffer, volume: 1,
+    };
+
+    if (narrationEl) URL.revokeObjectURL(narrationEl.src);
+    narrationEl = document.createElement('audio');
+    narrationEl.src = URL.createObjectURL(blob);
+    narrationEl.preload = 'auto';
+    player.setNarrationElement(narrationEl);
+
+    // 대본을 아니까 자막은 받아쓸 필요가 없다
+    let capCount = 0;
+    if (el.ttsMakeCaps.checked) {
+      const caps = tts.marksToCaptions(marks, { text, duration: buffer.duration });
+      if (caps.length) {
+        project.captions = caps;
+        sel.capId = null;
+        capCount = caps.length;
+        renderCaptionList();
+      }
+    }
+
+    el.ttsProgBar.style.width = '100%';
+    el.ttsName.textContent = `${project.audio.narration.name} · ${buffer.duration.toFixed(1)}초`;
+    el.ttsVol.value = 1;
+    el.ttsVolOut.textContent = '100%';
+    el.ttsResult.hidden = false;
+    el.ttsStatus.textContent = capCount
+      ? `${buffer.duration.toFixed(1)}초 내레이션과 자막 ${capCount}개를 만들었습니다.`
+      : `${buffer.duration.toFixed(1)}초 내레이션을 만들었습니다.`;
+    softRefresh();
+  } catch (e) {
+    if (e?.name === 'AbortError') el.ttsStatus.textContent = '취소했습니다.';
+    else if (e?.name === 'NotConfiguredError') el.ttsStatus.textContent = e.message;
+    else {
+      console.error(e);
+      el.ttsStatus.textContent = `실패: ${e.message}`;
+    }
+  } finally {
+    ttsCtrl = null;
+    el.ttsRun.textContent = '내레이션 만들기';
+    setTimeout(() => { if (!ttsCtrl) el.ttsProg.hidden = true; }, 1200);
   }
 }
 

@@ -337,6 +337,23 @@
     <!-- 오디오 -->
     <div class="tabpane" data-pane="audio">
       <div class="fieldset">
+        <h4>내레이션 <span id="ttsBadge" class="badge">확인 중…</span></h4>
+        <textarea id="ttsText" rows="5" placeholder="읽을 내용을 붙여넣으세요.&#10;블로그 원고를 그대로 넣어도 됩니다."></textarea>
+        <label class="row">속도 <input type="range" id="ttsSpeed" min="0.7" max="1.4" step="0.05" value="1"><output id="ttsSpeedOut">1.0배</output></label>
+        <label class="row">목소리 <select id="ttsVoice"><option value="">기본</option></select></label>
+        <label class="row"><input type="checkbox" id="ttsMakeCaps" checked> 자막도 같이 만들기</label>
+        <button class="btn primary block" id="ttsRun">내레이션 만들기</button>
+        <div class="prog" id="ttsProg" hidden><div id="ttsProgBar"></div></div>
+        <p class="hint" id="ttsStatus"></p>
+        <div id="ttsResult" hidden>
+          <p class="pname" id="ttsName"></p>
+          <label class="row">볼륨 <input type="range" id="ttsVol" min="0" max="1.5" step="0.01" value="1"><output id="ttsVolOut">100%</output></label>
+          <button class="btn ghost small block danger" id="ttsDel">내레이션 제거</button>
+        </div>
+        <p class="hint">TTS 로 읽으면 대본을 이미 아니까 <strong>자막이 오차 없이 정확</strong>합니다.
+          음성 인식을 다시 돌릴 필요가 없습니다.</p>
+      </div>
+      <div class="fieldset">
         <h4>원본 소리</h4>
         <label class="row">전체 볼륨 <input type="range" id="origVol" min="0" max="1.5" step="0.01" value="1"><output id="origVolOut">100%</output></label>
         <p class="hint">클립별 볼륨은 [클립] 탭에서 따로 조절합니다.</p>

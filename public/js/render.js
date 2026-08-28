@@ -3,7 +3,7 @@
 //   미리보기 → <video> 엘리먼트 / 내보내기 → 디코딩된 VideoSample
 import {
   project, layersAt, buildLayout, trackIdFor, timelineTracks, clipFadeGain, FONTS, ACCENT,
-  videoBand, splitAccent,
+  videoBand, splitAccent, legacyEditorMode, activeCaption,
 } from './state.js';
 import { withVisualTransform, visualCorners } from './visual-transform.js';
 import { safeAreaConfig, safeAreaRect } from './safe-areas.js';
@@ -33,6 +33,7 @@ export function renderFrame(ctx, t, opts = {}) {
   ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.filter='none';
   ctx.fillStyle=band?tpl.bg:'#000';ctx.fillRect(0,0,W,H);
   const atTime=t===layout.total?Math.max(0,t-1e-7):t;
+  const legacyCaption=legacyEditorMode?activeCaption(atTime):null;
   const paintMedia=(target,at)=>{
     let source=opts.source?.(at.clip,at.local);
     if(!source?.img||source.w<=0||source.h<=0)return;
@@ -83,6 +84,8 @@ export function renderFrame(ctx, t, opts = {}) {
     if(index===0&&band)drawTemplate(ctx,W,H,tpl,k);
     for(const entry of layout.items.filter(e=>e.trackId===track.id&&e.type!=='clip'&&atTime>=e.start&&atTime<e.end)){
       const item=entry.item;
+      // 구형 화면은 겹친 자막 중 최신 하나만 표시하고, 새 스튜디오의 레이어는 그대로 둡니다.
+      if(legacyEditorMode&&entry.type==='caption'&&item!==legacyCaption)continue;
       paintTransformed(ctx,entry.type,item,dest=>{
         if(entry.type==='graphic')drawOverlay(dest,W,H,item,atTime,k);
         if(entry.type==='caption'&&item.text.trim())drawCaption(dest,W,H,item,{...project.captionStyle,...item.style},k,atTime);

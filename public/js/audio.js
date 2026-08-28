@@ -20,7 +20,10 @@ export function hasClipAudio() {
 }
 
 export function hasAnyAudio() {
-  return Boolean(project.audio.bgm?.buffer) || hasClipAudio() || (project.audio.tracks || []).some(t => t.buffer && !t.muted);
+  return Boolean(project.audio.bgm?.buffer)
+    || Boolean(project.audio.narration?.buffer && !project.audio.narration.muted)
+    || hasClipAudio()
+    || (project.audio.tracks || []).some(t => t.buffer && !t.muted);
 }
 
 /** 영상 클립에서 트림 구간만큼의 오디오를 뽑아 AudioBuffer 로 만든다 */
@@ -92,8 +95,16 @@ export async function extractClipAudio(clip, signal, { ignoreMute = false, stric
  * @returns {Promise<AudioBuffer|null>}
  */
 export async function mixTimeline({ onProgress, signal, includeBgm = true, includeVoice = false, strictSources = false } = {}) {
+  if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
   const total = totalDuration();
-  const wanted = includeBgm ? hasAnyAudio() : hasClipAudio() || (includeVoice && project.audio.tracks?.some(t => (t.role || t.lane) === 'voice' && !t.muted));
+  const tracks = (project.audio.tracks || []).filter(track => !track.muted
+    && (includeBgm || (includeVoice && (track.role || track.lane) === 'voice')));
+  const narration = (includeBgm || includeVoice) && !project.audio.narration?.muted
+    ? project.audio.narration : null;
+  // 내레이션도 보이스 선택을 따른다. 선택한 원본이 없으면 엄격 모드에서 알려준다.
+  const wanted = hasClipAudio() || (includeBgm && Boolean(project.audio.bgm?.buffer))
+    || Boolean(narration && (narration.buffer || strictSources))
+    || tracks.some(track => track.buffer || strictSources);
   if (total <= 0 || !wanted) return null;
 
   const length = Math.ceil(total * RATE);
@@ -108,6 +119,7 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
     const clip = videoClips[i];
     onProgress?.(i / Math.max(1, videoClips.length), `소리 추출 중… (${i + 1}/${videoClips.length})`);
     let buf;
+    if (strictSources && !clip.file) throw new Error((clip.name || '영상') + ': 원본 파일을 찾지 못해 자막 인식을 중단했습니다.');
     try { buf = await extractClipAudio(clip, signal, { strict: strictSources, allowBoundaryGaps: strictSources, allowMissingTrack: true }); }
     catch (error) { if (error.name === 'AbortError') throw error;throw new Error((clip.name || '영상') + ': ' + error.message); }
     if (!buf) continue;
@@ -128,9 +140,8 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
   }
 
   // 통합 소재함의 독립 오디오. 자동자막에는 사용자 선택 시 보이스만 포함합니다.
-  for (const track of project.audio.tracks || []) {
+  for (const track of tracks) {
     if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
-    if (track.muted || (!includeBgm && !(includeVoice && (track.role || track.lane) === 'voice'))) continue;
     if (!track.buffer) { if (strictSources) throw new Error((track.name || '오디오') + ': 소리를 읽지 못해 자막 인식을 중단했습니다.');continue; }
     const duration = Math.min(track.trimEnd - track.trimStart, total - track.start);
     if (!(duration > 0)) continue;
@@ -142,7 +153,21 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
     node.start(track.start, track.trimStart, duration);
   }
 
-  // 2) 배경음악
+  // 내레이션은 독립 오디오 클립과 별도로 0초부터 한 번만 재생한다.
+  if (narration) {
+    if (!narration.buffer) {
+      if (strictSources) throw new Error((narration.name || '내레이션') + ': 소리를 읽지 못해 자막 인식을 중단했습니다.');
+    } else {
+      const node = ctx.createBufferSource();
+      node.buffer = narration.buffer;
+      const gain = ctx.createGain();
+      gain.gain.value = Math.min(1, Math.max(0, narration.volume ?? 1));
+      node.connect(gain).connect(master);
+      node.start(0, 0, Math.min(total, narration.buffer.duration));
+    }
+  }
+
+  // 배경음악
   // 음성 인식에 넘길 때는 빼고 부른다. 노래가 섞이면 알아듣는 정확도가 떨어진다.
   const bgm = includeBgm ? project.audio.bgm : null;
   if (bgm?.buffer) {

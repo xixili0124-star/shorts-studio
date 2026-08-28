@@ -2,6 +2,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+import {legacyEditorMode,setLegacyEditorMode} from '../public/js/state.js';
 import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES} from '../public/js/state.js';
 import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,packProject,unpackProject,validateDocument,clearAssets,waveformOf,demoSound} from '../public/js/project-store.js';
 import {encodeWav,transcriptionCaptions} from '../public/js/ai-client.js';
@@ -33,7 +36,7 @@ try {canvasModule=require(process.env.STUDIO_CANVAS_MODULE || '@napi-rs/canvas')
 const fakeMedia=()=>({src:'',currentTime:0,paused:true,readyState:2,addEventListener(){},pause(){this.paused=true;},play(){this.paused=false;return Promise.resolve();}});
 globalThis.document={addEventListener(){},createElement(tag){return tag==='canvas'&&canvasModule?canvasModule.createCanvas(1,1):fakeMedia();}};
 const defaults=structuredClone(project);
-const reset=()=>{clearAssets();Object.assign(project,structuredClone(defaults));};
+const reset=()=>{setLegacyEditorMode(false);clearAssets();Object.assign(project,structuredClone(defaults));};
 const clip=(id,duration,transition=0)=>({...newClipDefaults('image'),id,imgDuration:duration,transitionOut:{type:transition?'dissolve':'cut',duration:transition}});
 const buffer=channels=>({numberOfChannels:channels.length,length:channels[0].length,sampleRate:48000,getChannelData:c=>Float32Array.from(channels[c])});
 
@@ -157,6 +160,26 @@ test('independent audio starts at its offset, honors trim and fades, and stops a
   player.time=6;player._syncTracks();assert.equal(el.paused,true);
 });
 
+test('narration preview follows transport, mute and replacement without replaying past its end',()=>{
+  reset();project.clips=[clip('image',8)];project.audio.narration={buffer:{duration:4},volume:.35};
+  const saved={requestAnimationFrame:globalThis.requestAnimationFrame,cancelAnimationFrame:globalThis.cancelAnimationFrame,performance:globalThis.performance};
+  let clock=0,tick;globalThis.performance={now:()=>clock*1000};
+  globalThis.requestAnimationFrame=callback=>{tick=callback;return 1;};globalThis.cancelAnimationFrame=()=>{};
+  const player=new Player({getContext:()=>({})});player.draw=()=>{};const first=fakeMedia(),second=fakeMedia();
+  try{
+    player.setNarrationElement(first);player.seek(1.05);near(first.currentTime,1.05);assert.equal(first.paused,true);assert.equal(first.volume,.35);
+    player.play();assert.equal(first.paused,false);clock=1;tick();near(player.time,2.05);near(first.currentTime,2.05);
+    player.previewMuted=true;player._syncNarration();assert.equal(first.muted,true);
+    project.audio.narration.muted=true;player._syncNarration();assert.equal(first.paused,true);
+    project.audio.narration.muted=false;player.previewMuted=false;player.time=4;player._syncNarration();assert.equal(first.paused,true);
+    player.time=6;player._syncNarration();assert.equal(first.paused,true);near(first.currentTime,4);
+    player.time=0;player._syncNarration();assert.equal(first.paused,false);near(first.currentTime,0);
+    player.pause();assert.equal(first.paused,true);player.play();assert.equal(first.paused,false);
+    player.setNarrationElement(second);assert.equal(first.paused,true);assert.equal(second.paused,false);assert.equal(second.loop,false);
+    project.audio.narration=null;player._syncNarration();assert.equal(second.paused,true);
+  }finally{player.pause();Object.assign(globalThis,saved);reset();}
+});
+
 test('shared renderer produces an opaque red/blue midpoint and real fade/flash', {skip:!canvasModule},()=>{
   reset();project.clips=[clip('red',4,1),clip('blue',3)];
   const {createCanvas}=canvasModule,out=createCanvas(90,160),ctx=out.getContext('2d');
@@ -215,6 +238,24 @@ test('explicit video gaps remain black and sequence duration includes every trac
   assert.equal(clipStartTime(0),7);assert.equal(clipStartTime(1),1);assert.equal(layout.total,20);assert.equal(layout.videoEnd,9);
   for(const t of [0,4,5,6.9,10,19,20,21])assert.deepEqual(layersAt(t),[],String(t));
   assert.equal(layersAt(7.5)[0].clip.id,'later');
+});
+
+test('legacy entry limits playback and export to video without changing modern independent track timing',()=>{
+  reset();assert.equal(legacyEditorMode,false);
+  project.clips=[clip('image',10)];project.captions=[{id:'caption',text:'keep',start:0,end:10}];
+  project.overlays=[{id:'overlay',text:'tail',start:0,end:12}];project.audio.tracks=[{id:'sound',start:12,trimStart:0,trimEnd:2}];
+  const preserved=structuredClone([project.captions,project.overlays,project.audio.tracks]);
+  assert.equal(totalDuration(),14);
+  try{
+    setLegacyEditorMode(true);assert.equal(totalDuration(),10);
+    project.clips[0].imgDuration=2;
+    assert.equal(buildLayout().total,2);assert.equal(totalDuration(),2);
+    assert.equal(new Player({getContext:()=>({})}).duration,2);assert.equal(layersAt(2)[0].clip.id,'image');
+    assert.deepEqual([project.captions,project.overlays,project.audio.tracks],preserved);
+    project.clips=[];assert.equal(totalDuration(),0);
+    setLegacyEditorMode(false);assert.equal(totalDuration(),14);
+    project.overlays=[];project.audio.tracks=[];assert.equal(totalDuration(),10);
+  }finally{reset();}
 });
 
 test('manual caption and graphic movement detaches anchors without clipping at video boundaries',()=>{
@@ -399,12 +440,59 @@ test('offline mixer schedules audio after video end and allocates the full seque
   try{await mixTimeline();assert.equal(length,12*48000);assert.deepEqual(starts,[[7,0,5]]);}finally{globalThis.OfflineAudioContext=previous;}
 });
 
+test('offline narration preserves its own gain and coexists with explicitly selected voice tracks',async()=>{
+  reset();project.clips=[clip('image',2)];const narration={duration:5};project.audio.narration={buffer:narration,volume:.35};
+  const previous=globalThis.OfflineAudioContext,sources=[];let allocated=0;
+  globalThis.OfflineAudioContext=class{
+    constructor(_channels,length){allocated=length;this.destination={};}
+    createGain(){return {gain:{value:1,setValueAtTime(value){this.value=value;},linearRampToValueAtTime(value){this.value=value;}},connect(target){return target;}};}
+    createBufferSource(){return {connect(target){this.gain=target.gain;return target;},start(...args){sources.push({buffer:this.buffer,gain:this.gain.value,args});}};}
+    startRendering(){return Promise.resolve({length:allocated});}
+  };
+  const capture=async options=>{sources.length=0;return mixTimeline(options);};
+  try{
+    await capture();assert.equal(allocated,2*48000);assert.deepEqual(sources,[{buffer:narration,gain:.35,args:[0,0,2]}]);
+    assert.equal(await capture({includeBgm:false}),null);assert.equal(sources.length,0);
+    const voice=fixtureAudio('voice',2,{start:0,role:'voice',volume:.6,fadeIn:0,fadeOut:0}),music=fixtureAudio('music',2,{start:0,role:'music'});
+    project.audio.tracks=[voice,music];project.audio.bgm={buffer:{duration:3},volume:.2,offset:0,fadeIn:0,fadeOut:0,loop:false};
+    await capture({includeBgm:false,includeVoice:true});
+    assert.deepEqual(sources.map(source=>source.buffer),[voice.buffer,narration]);assert.deepEqual(sources.map(source=>source.gain),[.6,.35]);
+    await capture();assert.equal(sources.length,4);assert.ok(sources.some(source=>source.buffer===music.buffer));assert.ok(sources.some(source=>source.buffer===project.audio.bgm.buffer));
+    project.audio.tracks=[];project.audio.bgm=null;project.audio.narration.muted=true;assert.equal(await capture(),null);
+    project.audio.narration={name:'missing narration'};
+    await assert.rejects(()=>capture({includeBgm:false,includeVoice:true,strictSources:true}),/missing narration/);
+    assert.equal(await capture({includeBgm:false,strictSources:true}),null);
+    project.audio.narration=null;project.audio.tracks=[{...voice,name:'missing voice',buffer:null}];
+    await assert.rejects(()=>capture({includeBgm:false,includeVoice:true,strictSources:true}),/missing voice/);
+    project.audio.tracks[0].muted=true;assert.equal(await capture({includeBgm:false,includeVoice:true,strictSources:true}),null);
+    project.clips=[{...newClipDefaults('video'),id:'missing',name:'missing file',trimEnd:2}];
+    await assert.rejects(()=>capture({strictSources:true}),/missing file/);
+    const controller=new AbortController();controller.abort();await assert.rejects(()=>capture({signal:controller.signal}),error=>error.name==='AbortError');
+  }finally{globalThis.OfflineAudioContext=previous;reset();}
+});
+
 test('shared renderer leaves video gaps black and renders captions beyond the video', {skip:!canvasModule},()=>{
   reset();const {createCanvas}=canvasModule,out=createCanvas(180,320),ctx=out.getContext('2d'),source=createCanvas(180,320),g=source.getContext('2d');
   g.fillStyle='#ff0000';g.fillRect(0,0,180,320);project.clips=[{...clip('image',2),start:0}];
   project.captions=[{id:'caption',text:'AFTER VIDEO',start:4,end:7,style:CAPTIONS[0].style}];
   const opts={source:()=>({img:source,w:180,h:320})};renderFrame(ctx,3,opts);const black=Buffer.from(ctx.getImageData(0,0,180,320).data);
   assert.deepEqual([...ctx.getImageData(90,160,1,1).data],[0,0,0,255]);renderFrame(ctx,5,opts);assert.notDeepEqual(Buffer.from(ctx.getImageData(0,0,180,320).data),black);
+});
+
+test('legacy captions choose the latest one while modern preview and export retain overlapping layers',{skip:!canvasModule},()=>{
+  reset();project.clips=[clip('image',4)];
+  project.captions=[{id:'early',text:'FIRST',start:0,end:3},{id:'late',text:'SECOND',start:1,end:3}];
+  const canvas=canvasModule.createCanvas(180,320),ctx=canvas.getContext('2d'),painted=[],fillText=ctx.fillText.bind(ctx);
+  ctx.fillText=(text,...args)=>{painted.push(text);fillText(text,...args);};
+  try{
+    renderFrame(ctx,1.5);assert.deepEqual(painted,['FIRST','SECOND']);
+    painted.length=0;setLegacyEditorMode(true);renderFrame(ctx,1.5);assert.deepEqual(painted,['SECOND']);
+    const frame=Buffer.from(ctx.getImageData(0,0,180,320).data),player=new Player(canvas);player.time=1.5;
+    painted.length=0;player.draw();assert.deepEqual(painted,['SECOND']);assert.deepEqual(Buffer.from(ctx.getImageData(0,0,180,320).data),frame);
+    project.captions.reverse();painted.length=0;renderFrame(ctx,1.5);assert.deepEqual(painted,['SECOND']);
+    setLegacyEditorMode(false);project.captions[0].trackId='v2';project.captions[1].trackId='v3';
+    painted.length=0;renderFrame(ctx,1.5);assert.deepEqual(painted,['SECOND','FIRST']);
+  }finally{reset();}
 });
 
 test('project validation rejects unapproved overlaps and malformed timing metadata',async()=>{
@@ -642,6 +730,65 @@ test('platform guides form bounded editable rectangles and never affect default 
   renderFrame(ctx,0);const exported=Buffer.from(ctx.getImageData(0,0,90,160).data);
   renderFrame(ctx,0,{safeArea:cfg});assert.notDeepEqual(Buffer.from(ctx.getImageData(0,0,90,160).data),exported);
   renderFrame(ctx,0);assert.deepEqual(Buffer.from(ctx.getImageData(0,0,90,160).data),exported);
+});
+
+// 구형 화면의 실제 이벤트 함수를 가짜 입력에 연결합니다. 앱 시작·네트워크·미디어 재생은 실행하지 않습니다.
+function legacyUiFixture(overrides={}){
+  const nodes=new Map(),warnings=[],preview={time:0,invalidations:0,invalidate(){this.invalidations++;},pause(){},draw(){}};
+  const node=id=>{
+    if(!nodes.has(id)){
+      const listeners=new Map();
+      nodes.set(id,{value:'',textContent:'',addEventListener(type,fn){listeners.set(type,fn);},fire(type){return listeners.get(type)?.({target:this});}});
+    }
+    return nodes.get(id);
+  };
+  const document={getElementById:node,activeElement:null};
+  const context={
+    project,setLegacyEditorMode,totalDuration,sel:{ovId:'overlay'},getOverlay:id=>project.overlays.find(item=>item.id===id),
+    document,window:{addEventListener(){}},previewPlayer:preview,loadFonts:async()=>{},
+    on:(element,events,fn)=>events.split(' ').forEach(type=>element.addEventListener(type,fn)),
+    fmtTime:String,clamp:(value,min,max)=>Math.min(max,Math.max(min,value)),alert:message=>warnings.push(message),confirm:()=>true,
+    hasClipAudio:()=>false,AbortController,...overrides,
+  };
+  const source=readFileSync(new URL('../public/js/main.js',import.meta.url),'utf8')
+    .replace(/^import\b[\s\S]*?;\r?$/gm,'').replace(/^init\(\);\r?$/m,'');
+  runInNewContext(source+'\nplayer=previewPlayer;renderTimeline=()=>{};refreshGaps=()=>{};renderOverlayList=()=>{};renderCaptionList=()=>{};',context);
+  return {context,node,preview,warnings,document};
+}
+
+test('legacy font inputs prepare previews, discard stale completions and report loading failure',async()=>{
+  reset();project.clips=[clip('image',3)];project.overlays=[{id:'overlay',text:'문구',font:'"Noto Sans KR"',start:0,end:3}];
+  project.captions=[{id:'caption',text:'자막',start:0,end:3}];project.template.mode='band';
+  const requests=[],ui=legacyUiFixture({loadFonts:()=>new Promise((resolve,reject)=>requests.push({resolve,reject}))});
+  const flush=()=>new Promise(resolve=>setImmediate(resolve));
+  try{
+    assert.equal(legacyEditorMode,true);ui.context.wireTextPanel();ui.context.wireCaptionPanel();ui.context.wireTemplatePanel();
+    ui.document.activeElement=ui.node('ovFont');ui.node('ovFont').value='"Orbit"';ui.node('ovFont').fire('change');
+    ui.node('capFont').value='"Diphylleia"';ui.node('capFont').fire('change');
+    assert.equal(project.overlays[0].font,'"Orbit"');assert.equal(project.captionStyle.font,'"Diphylleia"');assert.equal(requests.length,2);
+    const drawn=ui.preview.invalidations;requests[0].resolve();await flush();assert.equal(ui.preview.invalidations,drawn);
+    requests[1].resolve();await flush();assert.equal(ui.preview.invalidations,drawn+1);assert.equal(ui.document.activeElement,ui.node('ovFont'));
+    ui.node('tplHookFont').value='"Hahmlet"';ui.node('tplHookFont').fire('change');
+    assert.equal(project.template.hook.font,'"Hahmlet"');assert.equal(requests.length,3);requests[2].resolve();await flush();
+    ui.node('ovText').value='새로운 한글';ui.node('ovText').fire('input');assert.equal(requests.length,4);
+    requests[3].reject(new Error('폰트 연결 실패'));await flush();assert.equal(ui.warnings.length,1);assert.match(ui.warnings[0],/대체 글꼴/);
+    const retry=ui.context.preparePreviewFonts();requests[4].reject(new Error('폰트 연결 실패'));await retry;
+    assert.equal(ui.warnings.length,1);assert.equal(project.overlays[0].text,'새로운 한글');
+  }finally{reset();}
+});
+
+test('legacy automatic captions explicitly include narration and reject a muted narration-only source',async()=>{
+  reset();project.clips=[clip('image',2)];project.audio.narration={buffer:{duration:2},volume:.5};
+  const calls=[],ui=legacyUiFixture({
+    mixTimeline:async options=>{calls.push(options);return {duration:2};},
+    transcribe:async()=>[{id:'caption',text:'내레이션 자막',start:0,end:1}],
+  });
+  try{
+    ui.context.wireCaptionPanel();await ui.node('autoCap').fire('click');
+    assert.equal(calls.length,1);assert.equal(calls[0].includeBgm,false);assert.equal(calls[0].includeVoice,true);
+    assert.equal(project.captions[0].text,'내레이션 자막');assert.equal(ui.warnings.length,0);
+    project.audio.narration.muted=true;await ui.node('autoCap').fire('click');assert.equal(calls.length,1);assert.match(ui.warnings[0],/내레이션/);
+  }finally{reset();}
 });
 
 test('font preparation loads actual generated text and weights without requesting the whole catalog',async()=>{

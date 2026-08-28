@@ -164,7 +164,7 @@ def read_settings(path):
             raise RuntimeError('Invalid PC voice settings')
     if settings.get('device') not in ('cuda', 'cpu'):
         raise RuntimeError('Invalid PC voice device')
-    if provider == 'voxcpm2' and Path(settings['references']).resolve() != Path(__file__).resolve().parent / '.studio-local' / 'voices':
+    if provider == 'voxcpm2' and Path(settings['references']).resolve() != path.parent / 'voices':
         raise RuntimeError('Invalid private reference directory')
     return settings
 
@@ -299,7 +299,12 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--settings', required=True, type=Path)
     parser.add_argument('--port', default=9880, type=int)
+    parser.add_argument('--job-name')
     args = parser.parse_args()
+    if args.job_name:
+        from pc_asr_process import WindowsJob
+        if not WindowsJob.join_current(args.job_name):
+            raise RuntimeError('PC voice process isolation failed')
     if not 1024 <= args.port <= 65535:
         raise RuntimeError('Invalid voice engine port')
     settings = read_settings(args.settings)

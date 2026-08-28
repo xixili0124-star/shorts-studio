@@ -223,8 +223,9 @@ export class Player {
         continue;
       }
       const want = c.trimStart + at.local;
-      c.el.muted = !!c.muted || this.previewMuted;
-      this.previewGain.set(c.el,volumeAt(c,at.local)*project.audio.originalVolume*at.weight*clipFadeGain(c,at.local,at.duration));
+      // 분리된 원음은 별도 오디오 클립만 재생합니다. 영상 음소거를 풀어도 중복되지 않습니다.
+      c.el.muted = !!c.audioSeparated || !!c.muted || this.previewMuted;
+      this.previewGain.set(c.el,c.audioSeparated ? 0 : volumeAt(c,at.local)*project.audio.originalVolume*at.weight*clipFadeGain(c,at.local,at.duration));
 
       if (this.playing) {
         if (Math.abs(c.el.currentTime - want) > 0.22) c.el.currentTime = want;

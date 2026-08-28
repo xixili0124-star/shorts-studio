@@ -10,19 +10,26 @@ import argparse, json, os, time, uuid, math
 from pc_voice import VoiceCloneService, VoiceError, MAX_REFERENCE_BODY
 from pc_voice_config import PROVIDERS, service_identity
 from pc_asr import PcAsrService, AsrError, MAX_AUDIO_BYTES
+from pc_installation import local_data_dir
+from pc_bridge import PcBridgeService
+from pc_http import PcHttpMixin
+from pc_runtime import PcVoiceRuntime
+from pc_tracking import PcTrackingService
 
 ROOT = Path(__file__).resolve().parent / 'public'
 VOICES = ('alloy','ash','ballad','coral','echo','fable','onyx','nova','sage','shimmer','verse','marin','cedar')
 AI_LOCK = BoundedSemaphore(1)
 RATE_LOCK = Lock()
 REQUEST_TIMES = deque()
-LOCAL_VOICE_DIR = Path(__file__).resolve().parent / '.studio-local'
+LOCAL_VOICE_DIR = local_data_dir(Path(__file__).resolve().parent)
 def configured_pc_voice(port=9880, provider='auto'):
     selected, key = service_identity(LOCAL_VOICE_DIR, provider)
     return VoiceCloneService(LOCAL_VOICE_DIR / 'voices', port=port, engine_key=key, provider=selected)
 
 PC_VOICE = configured_pc_voice()
 PC_ASR = PcAsrService(LOCAL_VOICE_DIR, voice=PC_VOICE)
+PC_BRIDGE = PcBridgeService(LOCAL_VOICE_DIR)
+PC_TRACKING = PcTrackingService(LOCAL_VOICE_DIR, voice=PC_VOICE)
 
 def validate_tts(data):
     """요청 모델·목소리·입력 길이를 제한합니다. 임의 URL 프록시는 제공하지 않습니다."""
@@ -55,7 +62,7 @@ def transcription_body(audio):
     parts.extend([audio, f'\r\n--{boundary}--\r\n'.encode()])
     return b''.join(parts), f'multipart/form-data; boundary={boundary}'
 
-class StudioHandler(SimpleHTTPRequestHandler):
+class StudioHandler(PcHttpMixin, SimpleHTTPRequestHandler):
     # Windows의 파일 연결 설정과 무관하게 브라우저 모듈과 WASM을 올바르게 제공합니다.
     extensions_map = {**SimpleHTTPRequestHandler.extensions_map,
                       '.js': 'text/javascript', '.mjs': 'text/javascript',
@@ -65,6 +72,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
         super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def end_headers(self):
+        self.pc_cors_headers()
         self.send_header('Cache-Control', 'no-store')
         self.send_header('X-Content-Type-Options', 'nosniff')
         self.send_header('Referrer-Policy', 'no-referrer')
@@ -94,6 +102,8 @@ class StudioHandler(SimpleHTTPRequestHandler):
             self.error_response(403, 'LOCAL_ONLY', '이 PC의 로컬 주소에서만 접근할 수 있습니다.')
             return
         route = urlsplit(self.path).path
+        if self.pc_extra_get(route):
+            return
         if route.startswith('/api/pc-asr/'):
             if not self.asr_request_allowed():
                 return
@@ -111,7 +121,8 @@ class StudioHandler(SimpleHTTPRequestHandler):
         if urlsplit(self.path).path == '/api/voice-clone/status':
             if not self.pc_request_allowed():
                 return
-            self.json_response(200, self.pc_voice_service().status())
+            runtime = getattr(self.server, 'pc_runtime', None)
+            self.json_response(200, runtime.status() if runtime else self.pc_voice_service().status())
             return
         if urlsplit(self.path).path == '/api/ai/status':
             self.json_response(200, {'configured': bool(os.environ.get('OPENAI_API_KEY')),
@@ -122,26 +133,20 @@ class StudioHandler(SimpleHTTPRequestHandler):
             self.path = '/studio.html'
         super().do_GET()
 
-    def do_OPTIONS(self):
-        self.error_response(403, 'CROSS_ORIGIN_BLOCKED', '외부 페이지의 API 요청은 허용하지 않습니다.')
-
     def pc_voice_service(self):
         return getattr(self.server, 'pc_voice', PC_VOICE)
 
     def pc_asr_service(self):
         return getattr(self.server, 'pc_asr', PC_ASR)
 
+    def pc_bridge_service(self):
+        return getattr(self.server, 'pc_bridge', PC_BRIDGE)
+
+    def pc_tracking_service(self):
+        return getattr(self.server, 'pc_tracking', PC_TRACKING)
+
     def asr_request_allowed(self):
-        port = self.server.server_port
-        allowed = (f'http://127.0.0.1:{port}', f'http://localhost:{port}')
-        origin = self.headers.get('Origin')
-        if (not self.local_host() or self.headers.get('X-Studio-PC-ASR') != '1'
-                or (origin is not None and origin not in allowed)
-                or (self.command != 'GET' and origin not in allowed)
-                or self.headers.get('Sec-Fetch-Site') == 'cross-site'):
-            self.error_response(403, 'CROSS_ORIGIN_BLOCKED', '이 PC의 편집기 화면에서 자막을 생성해 주세요.')
-            return False
-        return True
+        return self.pc_authorized('X-Studio-PC-ASR')
 
     def handle_pc_asr(self, route):
         if not self.asr_request_allowed():
@@ -189,16 +194,7 @@ class StudioHandler(SimpleHTTPRequestHandler):
             self.error_response(500, 'ASR_LOCAL_ERROR', 'PC 자막 실행 환경에 접근하지 못했습니다.')
 
     def pc_request_allowed(self):
-        port = self.server.server_port
-        origin = self.headers.get('Origin')
-        allowed = (f'http://127.0.0.1:{port}', f'http://localhost:{port}')
-        if (not self.local_host() or self.headers.get('X-Studio-PC-Voice') != '1'
-                or (origin is not None and origin not in allowed)
-                or (self.command != 'GET' and origin not in allowed)
-                or self.headers.get('Sec-Fetch-Site') == 'cross-site'):
-            self.error_response(403, 'CROSS_ORIGIN_BLOCKED', '이 PC의 편집기 화면에서 요청해 주세요.')
-            return False
-        return True
+        return self.pc_authorized('X-Studio-PC-Voice')
 
     def handle_pc_voice(self, route):
         if not self.pc_request_allowed():
@@ -260,6 +256,8 @@ class StudioHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         route = urlsplit(self.path).path
+        if self.pc_extra_post(route):
+            return
         if route.startswith('/api/pc-asr/'):
             self.handle_pc_asr(route)
             return
@@ -362,10 +360,17 @@ if __name__ == '__main__':
     server = ThreadingHTTPServer(('127.0.0.1', args.port), StudioHandler)
     server.pc_voice = configured_pc_voice(args.voice_port, args.voice_provider)
     server.pc_asr = PcAsrService(LOCAL_VOICE_DIR, voice=server.pc_voice)
+    server.pc_bridge = PcBridgeService(LOCAL_VOICE_DIR)
+    if server.pc_bridge.management_key(create=True) is None:
+        raise RuntimeError('PC bridge management storage is unavailable')
+    server.pc_tracking = PcTrackingService(LOCAL_VOICE_DIR, voice=server.pc_voice)
+    server.pc_runtime = PcVoiceRuntime(LOCAL_VOICE_DIR, server.pc_voice, args.voice_port, args.voice_provider)
     try:
         server.serve_forever()
     except KeyboardInterrupt:
         pass
     finally:
         server.pc_asr.close()
+        server.pc_tracking.close()
+        server.pc_runtime.close()
         server.server_close()

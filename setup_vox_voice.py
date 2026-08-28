@@ -10,6 +10,7 @@ import subprocess
 import sys
 
 from pc_voice_config import activate_config, read_config, settings_path
+from pc_installation import local_data_dir, register_installation
 from setup_pc_voice import download, prepare_uv, sha256, PYTHON_VERSION
 
 ROOT = Path(__file__).resolve().parent
@@ -75,8 +76,8 @@ def prepare_runtime(engine, device, python_path=None, uv_path=None):
     return python
 
 
-def write_config(engine, model, python, device):
-    local = ROOT / '.studio-local'
+def write_config(engine, model, python, device, local=None):
+    local = Path(local) if local is not None else local_data_dir(ROOT)
     key = secrets.token_urlsafe(32)
     try:
         key = read_config(settings_path(local, 'voxcpm2'))['engineKey']
@@ -87,13 +88,15 @@ def write_config(engine, model, python, device):
                 'data': str(engine / 'data'), 'references': str(local / 'voices'), 'device': device,
                 'packageVersion': PACKAGE_VERSION, 'sourceRevision': SOURCE_REV, 'modelRevision': MODEL_REV, 'engineKey': key}
     activate_config(local, settings)
+    register_installation(local, app=ROOT, python=sys.executable)
     return settings
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--yes', action='store_true')
-    parser.add_argument('--engine-dir', type=Path, default=ROOT / '.studio-local' / 'vox-engine')
+    parser.add_argument('--engine-dir', type=Path)
+    parser.add_argument('--local-dir', type=Path, help='Shared local settings and reference directory')
     parser.add_argument('--device', choices=('cuda', 'cpu'), default='cuda')
     parser.add_argument('--download-only', action='store_true')
     parser.add_argument('--prepare-only', action='store_true', help='Verify installation without activating it')
@@ -104,7 +107,8 @@ def main():
         raise RuntimeError('This installer supports Windows x64.')
     if not args.yes and input('Download VoxCPM2 weights (~5 GB) and a separate runtime (several GB)? [y/N] ').strip().lower() != 'y':
         return
-    engine = args.engine_dir.resolve()
+    local = args.local_dir.resolve() if args.local_dir else local_data_dir(ROOT)
+    engine = (args.engine_dir or local / 'vox-engine').resolve()
     engine.mkdir(parents=True, exist_ok=True)
     if shutil.disk_usage(engine).free < 15 * 1024**3:
         raise RuntimeError('Please make at least 15 GB of free disk space available.')
@@ -115,7 +119,7 @@ def main():
     if args.prepare_only:
         print('VoxCPM2 files and inference imports verified. Existing engine is still active.', flush=True)
         return
-    write_config(engine, model, python, args.device)
+    write_config(engine, model, python, args.device, local)
     print('VoxCPM2 is installed. Save your project, stop the old PC launcher, then run start-pc-voice.cmd.', flush=True)
 
 

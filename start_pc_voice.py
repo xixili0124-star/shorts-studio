@@ -12,6 +12,7 @@ from urllib.request import build_opener, ProxyHandler
 from pc_voice import NoRedirect, verified_engine
 from pc_voice_engine import read_settings
 from pc_voice_config import PROVIDERS, provider_of, settings_path as provider_settings_path
+from pc_installation import local_data_dir, register_installation, read_registration
 
 ROOT = Path(__file__).resolve().parent
 
@@ -96,7 +97,8 @@ def main():
     args = parser.parse_args()
     if any(not 1024 <= port <= 65535 for port in (args.port, args.voice_port)) or args.port == args.voice_port:
         raise RuntimeError('Choose two different local ports between 1024 and 65535.')
-    settings_path = provider_settings_path(ROOT / '.studio-local', args.provider)
+    local = local_data_dir(ROOT)
+    settings_path = provider_settings_path(local, args.provider)
     try:
         settings = read_settings(settings_path)
     except (OSError, ValueError):
@@ -106,6 +108,10 @@ def main():
     if not port_available(args.port):
         raise RuntimeError(f'Editor port {args.port} is already in use. Save your project before stopping the old server, or run start-pc-voice.cmd --port 8788.')
     provider = provider_of(settings)
+    registration = read_registration() or {}
+    register_installation(local, app=registration.get('appDir') or ROOT,
+                          python=registration.get('python') or sys.executable)
+    os.environ['STUDIO_LOCAL_DIR'] = str(local)
     reuse_engine = engine_ready(args.voice_port, settings['engineKey'], provider)
     if not reuse_engine and not port_available(args.voice_port):
         raise RuntimeError('The voice port is occupied by a different engine. Stop that engine or choose --voice-port 9881.')

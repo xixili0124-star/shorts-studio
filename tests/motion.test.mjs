@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
 import { KEYFRAME_CHANNELS, keyframeValue, evaluateItem, setKeyframe, removeKeyframe, moveKeyframe, setValueAt, sliceKeyframes, splitKeyframes, validateKeyframes } from '../public/js/keyframes.js';
 import { cropTrackingAt, cropTrackingGeometry, validCropTracking, cropTrackingWarnings, sliceCropTracking, splitCropTracking, smoothCropKeys, trackCrop } from '../public/js/crop-tracking.js';
-import { trackingTemplate, trackRectangle } from '../public/js/mosaic.js';
+import { createTargetTracker } from '../public/js/browser-tracking.js';
 import { transformOf, transformPoint, inverseTransformPoint, visualCorners, withVisualTransform, alignVisual } from '../public/js/visual-transform.js';
 import { MonitorEditor } from '../public/js/monitor-editor.js';
 import { StudioTools } from '../public/js/studio-tools.js';
@@ -135,48 +135,41 @@ test('crop path validation rejects nonfinite coordinates, duplicate times and in
   }
 });
 
-// 원본 무늬를 유지한 채 작은 사각형만 이동시키는 합성 프레임입니다.
-function movingFrame(left, top, visible = true) {
-  const W = 160, H = 100, width = 40, height = 32, pixels = new Float32Array(W * H).fill(.12);
-  if (visible) for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) {
-    const noise = ((x * 37 + y * 71 + x * y * 13) % 97) / 97;
-    pixels[(top + y) * W + left + x] = .2 + .75 * noise;
-  }
-  return { gray: pixels, width: W, height: H, rect: { x: left / W, y: top / H, w: width / W, h: height / H } };
-}
+// 검출 결과만 사용하는 합성 회귀입니다. 실제 모델 정확도를 측정하는 검사는 아닙니다.
+const detectionAt = (x, y = .28) => ({ x, y, w: .25, h: .32, confidence: .95, label: 'person' });
 
-test('real template tracker follows synthetic moving frames and drives the crop path', async () => {
-  const frames = Array.from({ length: 5 }, (_, index) => movingFrame(30 + index * 3, 28 + index));
-  const first = frames[0], template = trackingTemplate(first.gray, first.width, first.height, first.rect);
-  let previous = first.rect;
-  const keys = [{ ...first.rect, time: 12, duration: .1, confidence: 1, lost: false }];
-  for (let index = 1; index < frames.length; index++) {
-    const frame = frames[index], result = trackRectangle(frame.gray, frame.width, frame.height, template, previous);
-    assert.equal(result.lost, false, 'moving frame ' + index);
-    near(result.x, frame.rect.x, 3 / frame.width);near(result.y, frame.rect.y, 3 / frame.height);
-    keys.push({ ...result, time: 12 + index / 10, duration: .1 });previous = result;
+test('model target association drives crop keys without changing source timestamps', async () => {
+  const first = detectionAt(.2), tracker = createTargetTracker([first], first, 12, { task: 'crop' });
+  const keys = [{ ...tracker.initial, time: 12, duration: .1 }];
+  for (let index = 1; index < 5; index++) {
+    const detection = detectionAt(.2 + index * .015, .28 + index * .005);
+    const result = tracker.step([detection], 12 + index / 10);
+    assert.equal(result.lost, false);near(result.x, detection.x);near(result.y, detection.y);
+    keys.push({ ...result, time: 12 + index / 10, duration: .1 });
   }
   const clip = { type: 'video', trimStart: 12, trimEnd: 12.5 };
-  let sourceSeed;
-  const result = await trackCrop(clip, first.rect, .2, { smoothing: 0, analyze: async (item, effect, seed) => { sourceSeed = seed;return { keyframes: keys }; } });
+  let sourceSeed, forwarded;
+  const result = await trackCrop(clip, first, .2, { engine: 'pc', allowModelDownload: true, smoothing: 0,
+    analyze: async (item, effect, seed, options) => { sourceSeed = seed;forwarded = options;return { keyframes: keys }; } });
   near(sourceSeed, 12.2);assert.equal(result.warnings.length, 0);
+  assert.equal(forwarded.task, 'crop');assert.equal(forwarded.engine, 'pc');assert.equal(forwarded.allowModelDownload, true);
   assert.equal(validCropTracking(result.tracking, .5), true);assert.equal(result.tracking.keys[0].time, 0);
   near(result.tracking.keys.at(-1).time, .5);assert.ok(result.tracking.keys.at(-1).x > result.tracking.keys[0].x);
 });
 
-test('template tracking rejects blank targets and records occlusion without fabricating movement', async () => {
-  const seed = movingFrame(30, 28), blank = movingFrame(30, 28, false);
-  assert.throws(() => trackingTemplate(blank.gray, blank.width, blank.height, blank.rect));
-  const template = trackingTemplate(seed.gray, seed.width, seed.height, seed.rect);
-  const lost = trackRectangle(blank.gray, blank.width, blank.height, template, seed.rect);
-  assert.equal(lost.lost, true);near(lost.x, seed.rect.x);near(lost.y, seed.rect.y);
-  const result = await trackCrop({ type: 'video', trimStart: 4, trimEnd: 4.3 }, seed.rect, 0,
-    { analyze: async () => ({ keyframes: [{ ...seed.rect, time: 4, duration: .1, confidence: 1, lost: false }, { ...lost, time: 4.1, duration: .1 }, { ...lost, time: 4.3, duration: .1 }] }) });
-  assert.ok(result.warnings.length);near(cropTrackingAt({ cropTracking: result.tracking }, .2).x, seed.rect.x);
+test('missing model detections record occlusion without fabricating crop movement', async () => {
+  const seed = detectionAt(.2);
+  assert.throws(() => createTargetTracker([], seed, 4, { task: 'crop' }), { code: 'TARGET_NOT_FOUND' });
+  const tracker = createTargetTracker([seed], seed, 4, { task: 'crop' });
+  const lost = tracker.step([], 4.1);
+  assert.equal(lost.lost, true);near(lost.x, seed.x);near(lost.y, seed.y);
+  const result = await trackCrop({ type: 'video', trimStart: 4, trimEnd: 4.3 }, seed, 0,
+    { analyze: async () => ({ keyframes: [{ ...tracker.initial, time: 4, duration: .1 }, { ...lost, time: 4.1, duration: .1 }, { ...lost, time: 4.3, duration: .1 }] }) });
+  assert.ok(result.warnings.length);near(cropTrackingAt({ cropTracking: result.tracking }, .2).x, seed.x);
 });
 
 test('crop analysis supports cancellation before and after the asynchronous tracker', async () => {
-  const clip = { type: 'video', trimStart: 0, trimEnd: 1 }, rect = movingFrame(30, 28).rect;
+  const clip = { type: 'video', trimStart: 0, trimEnd: 1 }, rect = detectionAt(.2);
   const first = new AbortController();first.abort();let called = false;
   await assert.rejects(trackCrop(clip, rect, 0, { signal: first.signal, analyze: async () => { called = true; } }), { name: 'AbortError' });
   assert.equal(called, false);

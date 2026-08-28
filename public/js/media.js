@@ -26,12 +26,43 @@ export async function createClip(file, onStatus = () => {}) {
 
 async function videoClip(file, onStatus) {
   onStatus(`${file.name} 읽는 중…`);
+  let clip;
   try {
-    return await viaVideoElement(file);
+    clip = await viaVideoElement(file);
   } catch (err) {
     // <video> 가 실패했다고 끝이 아니다. 디코더로 직접 열어 본다.
     onStatus(`${file.name} 다시 시도하는 중…`);
-    return viaDecoder(file, err);
+    clip = await viaDecoder(file, err);
+  }
+  try {
+    const audio = await probeVideoAudio(file);
+    clip.hasAudio = audio.hasAudio;
+    clip.audioCodec = audio.codec;
+  } catch (error) {
+    // 재생 가능한 영상도 컨테이너 검사가 실패할 수 있습니다. 이를 무음으로 간주하지 않습니다.
+    clip.hasAudio = null;
+    clip.audioProbeError = error.message;
+  }
+  return clip;
+}
+
+/** 오디오 스트림의 존재만 확인합니다. 무음 파형과 트랙이 없는 파일은 구분합니다. */
+export async function probeVideoAudio(file, signal) {
+  if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+  let input;
+  const cancel = () => { try { input?.dispose(); } catch {} };
+  try {
+    input = new Input({ formats: ALL_FORMATS, source: new BlobSource(file) });
+    signal?.addEventListener('abort', cancel, { once: true });
+    const track = await input.getPrimaryAudioTrack();
+    if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+    return { hasAudio: !!track, codec: track?.codec || null };
+  } catch (error) {
+    if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
+    throw error;
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+    try { input?.dispose(); } catch {}
   }
 }
 
@@ -67,7 +98,7 @@ async function viaVideoElement(file) {
     trimStart: 0,
     trimEnd: dur,
     muted: false,
-    hasAudio: true,
+    hasAudio: null,
   };
   clip.thumb = await grabThumb(el, Math.min(0.1, dur / 2));
   return clip;
@@ -113,7 +144,7 @@ async function viaDecoder(file, prevError) {
     trimStart: 0,
     trimEnd: dur,
     muted: false,
-    hasAudio: true,
+    hasAudio: null,
   };
 
   try {

@@ -1,6 +1,7 @@
-// PC 자막은 현재 로컬 편집기의 주소만 사용합니다. 공개 페이지에서 localhost를 찾지 않습니다.
+// 설치·승인한 PC 연결만 사용하며 외부 음성 API로 전환하지 않습니다.
 import { encodeWav } from './ai-client.js';
 import { whisperCaptions } from './local-ai.js';
+import { canUsePcEngine, pcTransportContext } from './pc-connection.js';
 
 export const PC_ASR_MODEL = 'large-v3-turbo';
 export const PC_ASR_SETUP_URL = '/pc-asr-setup.html';
@@ -11,7 +12,7 @@ const check = signal => { if (signal?.aborted) throw abortError(); };
 const validDevice = value => value === 'cuda' || value === 'cpu';
 
 export function isPcAsrOrigin(location = globalThis.location) {
-  return !!location && location.protocol === 'http:' && ['localhost', '127.0.0.1'].includes(location.hostname);
+  return canUsePcEngine(location);
 }
 
 export function pcAsrDeviceLabel(status) {
@@ -44,7 +45,7 @@ async function readBounded(response, maximum, signal) {
 }
 
 async function request(path, { method = 'GET', body, signal, timeout = 15000, maximum = 65536, location = globalThis.location, fetchImpl = globalThis.fetch } = {}) {
-  if (!isPcAsrOrigin(location)) throw new Error('PC 고정밀 자막은 PC용 로컬 편집기에서 사용할 수 있어요. 현재 주소에서는 PC 서버에 연결하지 않습니다.');
+  const transport = pcTransportContext(location);
   if (!['/status', '/transcribe', '/cancel'].includes(path) && !/^\/jobs\/[a-f0-9]{32}$/.test(path)) throw new Error('지원하지 않는 PC 자막 요청입니다.');
   check(signal);const ctrl = new AbortController();let expired = false;
   const cancel = () => ctrl.abort();signal?.addEventListener('abort', cancel, { once:true });
@@ -55,12 +56,12 @@ async function request(path, { method = 'GET', body, signal, timeout = 15000, ma
     ctrl.signal.addEventListener('abort', stop, { once:true });
   });
   const work = async () => {
-    const headers = { 'X-Studio-PC-ASR':'1' };
+    const headers = { ...transport.headers, 'X-Studio-PC-ASR':'1' };
     if (method === 'POST') {
       headers['X-Studio-Consent'] = 'audio-to-local-asr';
       headers['Content-Type'] = path === '/transcribe' ? 'audio/wav' : 'application/json';
     }
-    const response = await fetchImpl(PREFIX + path, { method, headers, ...(body === undefined ? {} : { body }), signal:ctrl.signal, credentials:'omit', cache:'no-store', redirect:'error' });
+    const response = await fetchImpl(transport.base + PREFIX + path, { ...transport.options, method, headers, ...(body === undefined ? {} : { body }), signal:ctrl.signal, credentials:'omit', cache:'no-store', redirect:'error' });
     check(ctrl.signal);
     const json = /^application\/json(?:;|$)/i.test(response.headers.get('Content-Type') || '');
     if (!response.ok) {
@@ -165,7 +166,7 @@ export function pcAsrCaptions(result, duration, offset = 0) {
 
 // 생성 요청이 취소 뒤 작업 ID를 돌려줘도 해당 작업을 회수해 취소합니다.
 export async function transcribePcAudio(audio, { signal, onProgress = () => {}, location = globalThis.location, fetchImpl = globalThis.fetch, pollInterval = 500, timeout = 15 * 60 * 1000, requestTimeout = 15000, cancelTimeout = 5000 } = {}) {
-  if (!isPcAsrOrigin(location)) throw new Error('PC 고정밀 자막은 PC용 로컬 편집기에서 사용할 수 있어요. 현재 주소에서는 PC 서버에 연결하지 않습니다.');
+  pcTransportContext(location);
   check(signal);const wav = pcAsrWav(audio);
   return new Promise((resolve, reject) => {
     let settled = false, jobId = '', cancellationSent = false, pollTimer = null;

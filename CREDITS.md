@@ -183,3 +183,18 @@ GPT 모델 주요 파일 SHA-256은 `setup_pc_voice.py`, 발음 자료 SHA-256�
 GPT의 Windows 호환을 위해 해당 엔진 프로세스에서만 `jieba_fast`를 Jieba로 연결하고 g2pk2의 MeCab 접근을 python-mecab-ko로 연결합니다. Vox는 이 발음 변환을 거치지 않습니다. 제3자 소스를 직접 수정하거나 eunjeon을 자동 설치하지 않습니다. 편집기의 검증 범위는 한국어 및 한국어·영어 혼용이며 개인 모델 학습은 제공하지 않습니다.
 
 소스·모델의 이용 조건이 녹음자의 동의나 타인 사칭 허락을 대신하지 않습니다. 본인 또는 허락받은 녹음만 등록하도록 안내합니다. PC 모드의 AI 생성 표시 안내는 제품의 사용 원칙이며, MIT 라이선스 자체의 의무라고 주장하지 않습니다.
+
+## 모자이크·크롭 추적
+
+| 구성 | 출처·버전 | 이용 조건 |
+| --- | --- | --- |
+| PC SAM 2.1 Small | [Meta SAM 2 코드](https://github.com/facebookresearch/sam2/tree/2b90b9f5ceec907a1c18123530e92e794ad901a4), [공식 Small 모델](https://huggingface.co/facebook/sam2.1-hiera-small/tree/ee5bba1d82bb8749febdf90f45e84b687142ba03) | [Apache-2.0](https://github.com/facebookresearch/sam2/blob/2b90b9f5ceec907a1c18123530e92e794ad901a4/LICENSE), 설치 소스의 원문 유지 |
+| 브라우저 MediaPipe Tasks Vision | [Google MediaPipe](https://github.com/google-ai-edge/mediapipe), npm @mediapipe/tasks-vision 1.0.1 | Apache-2.0, `public/vendor/mediapipe/1.0.1/LICENSE`와 파일별 SHA-256 manifest 동봉 |
+| 얼굴 모자이크 BlazeFace full-range | [공식 float16 v1 파일](https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_full_range/float16/1/blaze_face_full_range.tflite), [모델 카드](https://storage.googleapis.com/mediapipe-assets/MediaPipe%20BlazeFace%20Model%20Card%20(Full%20Range).pdf) | Apache-2.0, Google MediaPipe 배포 모델 |
+| 대상 크롭 EfficientDet-Lite2 | [공식 float32 v1 파일](https://storage.googleapis.com/mediapipe-models/object_detector/efficientdet_lite2/float32/1/efficientdet_lite2.tflite), [TensorFlow 모델 안내](https://www.kaggle.com/models/tensorflow/efficientdet/tensorFlow2/lite2-detection/1) | Apache-2.0, 검출 모델이 지원하는 대상 범주만 사용 |
+
+브라우저 모델은 같은 사이트의 고정 파일에서 사용자의 첫 다운로드 동의 후 가져오며 영상은 브라우저 안에서 처리합니다. 모델 크기·SHA-256은 `browser-tracking-models.js`에 기록하고 캐시 재사용 때도 검증합니다. 같은 대상을 연결하는 시간축 처리는 이 프로젝트 코드입니다. 원래의 밝기 패턴 매칭 실행 경로는 제거했지만 이전 프로젝트에 저장된 좌표는 보존합니다.
+
+PC 모델·Python 환경은 웹 배포와 설치용 앱 ZIP에 포함하지 않습니다. 사용자가 PC 설치를 실행할 때 공식 배포처에서 별도로 내려받습니다. SAM 소스 ZIP과 모델 해시·revision은 `setup_pc_tracking.py`와 `pc_tracking_worker.py`에 기록합니다. PyTorch·torchvision·PyAV와 CUDA 구성 요소의 별도 라이선스·제3자 고지는 각 설치 패키지에 유지하며 전체 환경을 Apache-2.0 하나로 간주하지 않습니다. 추적 결과는 사람의 검토가 필요하며, 모델 이용 조건은 영상에 포함된 인물의 동의나 소재 권리를 대신하지 않습니다.
+
+PC 연결 설치기의 uv 실행 도구는 [Astral uv 0.12.7](https://github.com/astral-sh/uv/tree/0.12.7)의 공식 Windows wheel을 크기·SHA-256으로 확인합니다. uv의 MIT/Apache-2.0 및 함께 제공되는 고지는 설치 패키지에 유지합니다. 설치 파일은 관리자 권한이나 Windows 보안 설정 변경을 요청하지 않으며 로그인 시 자동 실행은 사용자가 선택한 경우에만 등록합니다.

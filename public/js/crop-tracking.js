@@ -1,9 +1,9 @@
-// 사용자가 고른 영역의 무늬를 추적합니다. 사람·동물을 자동 판별하는 모델이 아닙니다.
-// 모자이크의 동일 추적기를 재사용하되, 실패 구간은 카메라 위치를 유지하고 경고합니다.
-import { normalizedRect, MAX_TRACK_SECONDS } from './mosaic.js';
+// 브라우저 물체 검출 또는 PC 분할 추적으로 고른 대상을 연결합니다.
+// 실패 구간은 카메라 위치를 유지하고 경고하며, 저장 경로는 클립 안의 시각을 사용합니다.
+import { normalizedRect, MAX_TRACK_SECONDS, MAX_TRACK_KEYS } from './mosaic.js';
 
 export const MAX_CROP_TRACK_SECONDS = MAX_TRACK_SECONDS;
-export const MAX_CROP_TRACK_KEYS = 2400;
+export const MAX_CROP_TRACK_KEYS = MAX_TRACK_KEYS;
 const EPSILON = 1e-6;
 const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
 const aborted = signal => { if (signal?.aborted) throw new DOMException('취소됨', 'AbortError'); };
@@ -134,11 +134,12 @@ export async function trackCrop(clip, rect, seedLocalTime = 0, options = {}) {
   const duration = clip?.trimEnd - clip?.trimStart;
   if (clip?.type !== 'video' || !Number.isFinite(duration) || duration <= 0 || clip.trimStart < 0
     || duration > MAX_CROP_TRACK_SECONDS) throw new Error('크롭 추적은 3분 이내의 영상 클립에서 사용할 수 있습니다.');
-  if (!validRect(rect)) throw new Error('무늬가 보이는 대상을 충분한 크기의 사각형으로 선택해 주세요.');
+  if (!validRect(rect)) throw new Error('추적할 대상을 충분한 크기의 사각형으로 선택해 주세요.');
   const seed = clip.trimStart + clamp(Number(seedLocalTime) || 0, 0, Math.max(0, duration - .00001));
   const analyze = options.analyze || (await import('./video-analysis.js')).trackMosaic;
   aborted(signal);
-  const result = await analyze(clip, { rect: normalizedRect(rect), mode: 'static', keyframes: [] }, seed, { signal, onProgress });
+  const result = await analyze(clip, { rect: normalizedRect(rect), mode: 'static', keyframes: [] }, seed,
+    { signal, onProgress, task: 'crop', engine: options.engine ?? 'browser', allowModelDownload: options.allowModelDownload === true });
   aborted(signal);
   const tracking = trackingData(localKeys(result.keyframes, clip.trimStart, clip.trimEnd), options);
   if (!validCropTracking(tracking, duration)) throw new Error('추적 경로가 올바르지 않습니다. 더 짧은 클립으로 다시 시도해 주세요.');

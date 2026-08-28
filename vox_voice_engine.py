@@ -71,7 +71,7 @@ class VoxEngine:
         self.device = settings['device']
         self.model = None
         self.sample_rate = 48000
-        self._ensure_model()
+        # 설치 확인만으로 GPU에 모델을 올리지 않고 실제 음성 생성 때 불러옵니다.
 
     def _ensure_model(self):
         # ASR 종료나 상태 조회만으로 다시 올리지 않고, 다음 TTS에서만 읽는다.

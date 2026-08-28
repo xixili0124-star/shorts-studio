@@ -15,6 +15,10 @@ import { TTS_MODEL, runLocalAI, whisperCaptions, installedVoices, speakInstalled
 import { isPcVoiceOrigin, pcVoiceStatus, saveVoiceReference, deleteVoiceReference, generatePcVoice, decodeVoiceReference, recordVoiceReference } from './pc-voice.js';
 import { isPcAsrOrigin, pcAsrStatus, pcAsrDeviceLabel, pcAsrCaptions, transcribePcAudio, PC_ASR_SETUP_URL } from './pc-asr.js';
 import { uid, clamp } from './util.js';
+import {canUsePcEngine} from './pc-connection.js';
+import {PcHelpController} from './pc-help.js';
+import {pcTrackingStatus} from './pc-tracking.js';
+import {browserTrackingModelInfo} from './browser-tracking-models.js';
 
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]));
 const button = (action, text, disabled = false, primary = false) => '<button class="button ' + (primary?'primary':'secondary') + ' wide" data-smart-action="' + action + '" ' + (disabled?'disabled':'') + '>' + text + '</button>';
@@ -45,6 +49,9 @@ export class StudioTools {
     this.pcVoice={status:null,error:'',checking:false,profileId:'',accepted:false};
     this.captionScope='selected';this.captionEngine='local';this.captionEngineChosen=false;
     this.pcAsr={status:null,error:'',checking:false,checked:false};this.cutOptions={thresholdDb:-38,minSilence:.45,padding:.1};
+    this.pcTracking={status:null,error:'',checking:false,accepted:false};this.trackingEngine='browser';this.trackingEngineChosen=false;
+    this.trackingDownloads={mosaic:false,crop:false};this.pcRefreshAt=0;this.pcStartingChecks=0;
+    this.pcHelp=new PcHelpController({onChange:()=>this.refreshPcEngines(),toast:hooks.toast});
     this.dialog=document.createElement('dialog');this.dialog.className='modal smart-modal';this.dialog.id='smartToolsDialog';
     this.dialog.innerHTML='<div class="modal-heading"><h2 id="smartToolsTitle"></h2><button class="icon-button" data-smart-action="cancel" aria-label="작업 창 닫기">×</button></div><div class="modal-body smart-body"></div>';
     this.dialog.setAttribute('aria-labelledby','smartToolsTitle');document.body.append(this.dialog);
@@ -62,8 +69,53 @@ export class StudioTools {
       host.addEventListener('change',event=>this.change(event.target));
     }
     if (typeof speechSynthesis!=='undefined') speechSynthesis.addEventListener('voiceschanged',()=>{if(this.hooks.view()==='voice'&&this.voice.engine==='device')this.hooks.renderLibrary();});
-    // 확인 요청에는 오디오가 없습니다. 공개·모바일 주소에서는 PC 서버를 탐색하지 않습니다.
-    if(isPcAsrOrigin())queueMicrotask(()=>this.refreshPcAsr().catch(()=>{}));
+    // 설치 확인에는 미디어를 보내지 않습니다. 공개 주소는 사용자가 연결을 승인한 뒤에만 확인합니다.
+    globalThis.window?.addEventListener?.('studio-pc-connection',()=>this.refreshPcEngines());
+    globalThis.window?.addEventListener?.('focus',()=>{if(Date.now()-this.pcRefreshAt>10000&&!this.busy)this.refreshPcEngines();});
+    if(canUsePcEngine())queueMicrotask(()=>this.refreshPcEngines());
+  }
+  async refreshPcEngines(){
+    this.pcRefreshAt=Date.now();
+    if(!canUsePcEngine()){
+      this.pcAsr.status=this.pcVoice.status=this.pcTracking.status=null;
+      this.updatePcAsrStatus();this.updatePcVoiceStatus();this.updateTrackingSettings();return;
+    }
+    await Promise.allSettled([this.refreshPcAsr(),this.refreshPcVoice(),this.refreshPcTracking()]);
+    if(this.pcHelp.status?.engines){
+      this.pcHelp.status.engines={voice:this.pcVoice.status,asr:this.pcAsr.status,tracking:this.pcTracking.status};
+      if(document.getElementById('helpDialog')?.open)this.pcHelp.render();
+    }
+    clearTimeout(this.pcStartingTimer);
+    if(this.pcVoice.status?.state==='starting'&&this.pcStartingChecks++<40)this.pcStartingTimer=setTimeout(()=>this.refreshPcEngines(),2000);
+    else this.pcStartingChecks=0;
+  }
+  async refreshPcTracking(){
+    const pc=this.pcTracking;if(pc.checking||!canUsePcEngine())return;
+    pc.checking=true;pc.error='';
+    try{pc.status=await pcTrackingStatus();if(pc.status.available&&!this.trackingEngineChosen)this.trackingEngine='pc';}
+    catch(error){pc.status=null;pc.error=error.message;}
+    finally{pc.checking=false;this.updateTrackingSettings();}
+  }
+  trackingSettings(task){
+    const model=browserTrackingModelInfo(task),pc=this.trackingEngine==='pc',status=this.pcTracking.status;
+    return '<label class="field-label">추적 엔진<select data-smart-input="tracking-engine"><option value="pc" '+(pc?'selected':'')+'>PC · SAM 2.1 Small</option><option value="browser" '+(!pc?'selected':'')+'>모바일·브라우저 · '+model.name+'</option></select></label>'
+      +(pc?'<p class="inspector-note">'+esc(this.pcTracking.checking?'PC 추적 설치 확인 중…':status?.available?'SAM 2.1 Small · GPU 추적 준비됨':this.pcTracking.error||'도움말에서 PC 설치·연결을 확인해 주세요.')+'</p>'
+        +'<label class="smart-consent"><input type="checkbox" data-smart-input="tracking-pc-consent" '+(this.pcTracking.accepted?'checked':'')+'><span>이 클립의 원본 파일을 이 PC의 추적 엔진으로 보내 분석합니다. 외부 서버로 보내지 않습니다. 최대 3분 · 원본 256MB.</span></label>'
+        +(!status?.available?button('pc-help','도움말 · PC 설치와 연결'):'')
+      :'<p class="inspector-note">'+(task==='mosaic'?'얼굴을 검출하고 같은 얼굴을 연결합니다. 얼굴 외 대상은 PC SAM을 선택하세요.':'사람·고양이·개 등 모델이 지원하는 대상을 검출하고 같은 대상을 연결합니다. 임의의 물체는 PC SAM을 선택하세요.')+'</p>'
+        +'<label class="smart-consent"><input type="checkbox" data-smart-input="tracking-download" '+(this.trackingDownloads[task]?'checked':'')+'><span>최초 '+((model.bytes+model.runtimeBytes)/1000000).toFixed(1)+'MB 모델·엔진 다운로드 허용. 영상은 이 브라우저에서만 처리합니다. 내려받은 모델은 재사용합니다.</span></label>')
+      +'<p class="inspector-note">재추적하면 현재 클립 구간의 기존 추적 경로를 새 결과로 바꿉니다. 적용 전 결과를 확인하세요.</p>';
+  }
+  updateTrackingSettings(){
+    const host=this.body?.querySelector('#trackingSettings'),task=this.state?.kind==='crop-tracking'?'crop':'mosaic';
+    if(host&&!this.busy)host.innerHTML=this.trackingSettings(task);
+  }
+  trackingOptions(task){
+    if(this.trackingEngine==='pc'){
+      if(!canUsePcEngine()||!this.pcTracking.status?.available)throw new Error('도움말에서 PC 설치와 연결을 확인해 주세요. 브라우저 모델로 자동 전환하지 않습니다.');
+      if(!this.pcTracking.accepted)throw new Error('영상을 이 PC에서 처리하는 안내를 확인해 주세요.');
+    }
+    return {engine:this.trackingEngine,allowModelDownload:this.trackingDownloads[task]===true};
   }
   get busy(){return !!this.job;}
   get body(){return this.dialog.querySelector('.smart-body');}
@@ -123,12 +175,10 @@ export class StudioTools {
   }
   pcAsrMarkup(){
     const pc=this.pcAsr,status=pc.status;
-    if(this.captionEngine!=='pc')return '<p class="inspector-note">Whisper Tiny는 브라우저에서 처리합니다. 최초 약 66MB(모델·엔진)를 내려받으며 음성을 서버로 보내지 않습니다.</p>'+(isPcAsrOrigin()?'<div class="pc-voice-actions">'+button('pc-asr-refresh',pc.checking?'PC 연결 확인 중…':'PC 고정밀 연결 확인',pc.checking)+'<a class="button subtle" href="'+PC_ASR_SETUP_URL+'" target="_blank" rel="noopener">PC 고정밀 설치 안내</a></div><p class="inspector-note" role="status">'+esc(pc.checking?'PC 연결 확인 중…':pc.error||(!status?.configured?'Turbo를 사용하려면 PC 초기 설치가 필요합니다.':status.available?'PC 고정밀 준비됨 · '+pcAsrDeviceLabel(status):status.reason||'PC 자막 엔진의 실행 상태를 확인해 주세요.'))+'</p>':'<a class="button subtle wide" href="'+PC_ASR_SETUP_URL+'" target="_blank" rel="noopener">PC 고정밀 자막 사용 안내</a>');
-    if(!isPcAsrOrigin())return '<div class="pc-voice-card"><span class="local-badge">PC 확장 기능</span><h3>Whisper large-v3-turbo</h3><p>PC용 로컬 편집기와 자막 엔진이 필요합니다. 현재 주소에서는 PC 서버에 연결하지 않아요. 작업을 .shorts 파일로 저장한 뒤 PC용 편집기에서 열어 주세요.</p><a class="button secondary wide" href="'+PC_ASR_SETUP_URL+'" target="_blank" rel="noopener">PC 설치·실행 안내</a>'+button('use-browser-captions','브라우저 Tiny 사용')+'</div>';
+    if(this.captionEngine!=='pc')return '<p class="inspector-note">Whisper Tiny · 브라우저 처리 · 첫 다운로드 약 66MB. 소리는 외부 서버로 보내지 않습니다.</p>'+button('pc-help','도움말 · PC 고정밀 설치와 연결');
     const state=pc.checking?'checking':status?.busy?'busy':status?.available?'ready':'offline';
-    const headline=status?.busy?'다른 PC AI 작업이 진행 중입니다. 잠시 뒤 연결을 확인해 주세요.':status?.available?'Whisper large-v3-turbo 연결됨.':status?.configured?'PC 자막 엔진을 실행할 수 없습니다.':'PC 고정밀 자막의 초기 설치가 필요합니다.';
-    const message=pc.checking?'PC 연결 확인 중…':pc.error||headline+(status?.reason?' '+status.reason:'');
-    return '<div class="voice-card"><div class="voice-avatar pc-voice-avatar">PC</div><div><strong>Whisper large-v3-turbo</strong><p>한국어 · PC에서 인식</p></div></div><div class="pc-engine-status" data-state="'+state+'" role="status"><span class="status-dot"></span><span>'+esc(message)+'</span></div>'+(status?.configured?'<p class="inspector-note">'+(status.available?'실행 장치: ':'설정 장치: ')+esc(pcAsrDeviceLabel(status))+'</p>':'')+'<div class="pc-voice-actions">'+button('pc-asr-refresh',pc.checking?'확인 중…':'PC 연결 확인',pc.checking)+'<a class="button subtle" href="'+PC_ASR_SETUP_URL+'" target="_blank" rel="noopener">설치·실행 안내</a></div><p class="inspector-note">실행할 때만 선택 범위의 소리를 이 PC의 서버로 보냅니다. 외부 API로 전환하지 않습니다. 연결 실패 시 Tiny로 자동 대체하지 않아요.</p>';
+    const message=pc.checking?'PC 연결 확인 중…':pc.error||(!canUsePcEngine()?'도움말에서 이 사이트의 PC 연결을 허용해 주세요.':status?.busy?'다른 PC 작업이 진행 중입니다.':status?.available?'준비됨 · '+pcAsrDeviceLabel(status):'도움말에서 설치 확인을 눌러 주세요.');
+    return '<div class="voice-card"><div class="voice-avatar pc-voice-avatar">PC</div><div><strong>Whisper large-v3-turbo</strong><p>고정밀 한국어 자막</p></div></div><div class="pc-engine-status" data-state="'+state+'" role="status"><span class="status-dot"></span><span>'+esc(message)+'</span></div><div class="pc-voice-actions">'+button('pc-asr-refresh',pc.checking?'확인 중…':'연결 다시 확인',pc.checking||!canUsePcEngine())+button('pc-help','도움말 · PC 연결')+'</div><p class="inspector-note">현재 편집기에서 이 PC로만 처리합니다. 연결 실패 시 다른 모델로 자동 전환하지 않습니다.</p>';
   }
   updatePcAsrStatus(){
     if(this.hooks.view?.()!=='captions')return;
@@ -174,10 +224,10 @@ export class StudioTools {
   }
   pcVoiceMarkup(){
     const pc=this.pcVoice,status=pc.status,profiles=status?.profiles||[];
-    if(!isPcVoiceOrigin())return '<div class="pc-voice-card"><span class="local-badge">PC 확장 기능</span><h3>내 목소리 · VoxCPM2</h3><p>PC에 설치한 VoxCPM2가 음성을 만듭니다. 기존 GPT-SoVITS도 선택해서 실행할 수 있어요. 현재 주소에서는 PC 엔진에 연결하지 않습니다.</p><ol><li>작업을 .shorts 파일로 저장</li><li>PC용 편집기와 음성 엔진 실행</li><li>프로젝트를 열어 내 목소리 추가</li></ol><a class="button secondary wide" href="pc-voice-setup.html" target="_blank" rel="noopener">PC 사용 안내</a>'+button('use-browser-voice','브라우저 기본 음성 사용')+'</div>';
+    if(!isPcVoiceOrigin())return '<div class="voice-card"><div class="voice-avatar pc-voice-avatar">PC</div><div><strong>내 목소리 · VoxCPM2</strong><p>이 PC에서 음성 생성</p></div></div><p class="note">도움말에서 한 번 설치·연결하면 현재 편집기에서 바로 사용할 수 있어요.</p>'+button('pc-help','도움말 · PC 설치와 연결');
     const state=pc.checking?'checking':status?.state||'unknown';
     const vox=status?.provider!=='gpt-sovits',model=vox?'VoxCPM2':'GPT-SoVITS';
-    return '<div class="voice-card"><div class="voice-avatar pc-voice-avatar">PC</div><div><strong>내 목소리 · '+model+'</strong><p>한국어 · PC에서 생성'+(vox?' · 48kHz':'')+'</p></div></div><div class="pc-engine-status" data-state="'+state+'" role="status"><span class="status-dot"></span><span>'+esc(pc.checking?'PC 연결 확인 중…':pc.error||status?.message||'PC 음성 엔진의 연결을 확인해 주세요.')+'</span></div><div class="pc-voice-actions">'+button('pc-voice-refresh',pc.checking?'확인 중…':'PC 연결 확인',pc.checking)+'<a class="button subtle" href="pc-voice-setup.html" target="_blank" rel="noopener">설치·실행 안내</a></div>'+
+    return '<div class="voice-card"><div class="voice-avatar pc-voice-avatar">PC</div><div><strong>내 목소리 · '+model+'</strong><p>한국어 · PC에서 생성'+(vox?' · 48kHz':'')+'</p></div></div><div class="pc-engine-status" data-state="'+state+'" role="status"><span class="status-dot"></span><span>'+esc(pc.checking?'PC 연결 확인 중…':pc.error||status?.message||'PC 음성 엔진의 연결을 확인해 주세요.')+'</span></div><div class="pc-voice-actions">'+button('pc-voice-refresh',pc.checking?'확인 중…':'PC 연결 확인',pc.checking)+button('pc-help','도움말 · PC 연결')+'</div>'+
       '<label class="field-label">등록한 목소리<select data-smart-input="pc-voice-profile" '+(!profiles.length?'disabled':'')+'>'+(profiles.length?profiles.map(p=>'<option value="'+esc(p.id)+'" '+(pc.profileId===p.id?'selected':'')+'>'+esc(p.name)+' · '+(p.audioAvailable===false?'참고 파일 없음 · 삭제 필요':Number(p.duration).toFixed(1)+'초')+'</option>').join(''):'<option>아직 등록한 목소리가 없습니다</option>')+'</select></label><div class="pc-voice-actions">'+button('voice-reference','＋ 내 목소리 등록',!status?.localServer||pc.checking||state==='busy')+button('delete-voice-reference','참고 음성 삭제',!pc.profileId||pc.checking||state==='busy')+'</div><p class="inspector-note">기존 등록을 그대로 사용할 수 있어요. 잡음 없는 5~10초 녹음과 정확한 참고 문장을 권장합니다. 원본 녹음은 프로젝트 저장·공유에 포함되지 않아요.</p>'+(vox?'<p class="inspector-note">점수 4대 2는 사 대 이로 읽도록 처리합니다. 속도 변경은 생성 후 음높이를 유지하며 적용합니다. 먼저 짧은 원고로 발음·억양을 확인하세요.</p>':'');
   }
   updatePcVoiceStatus(){
@@ -253,6 +303,7 @@ export class StudioTools {
     if(this.referenceRecording)return;
     if(this.busy)return;
     if(this.state?.cropDrag)return;
+    if(action==='pc-help'){this.pcHelp.show();return;}
     if(action==='pc-asr-refresh')return this.refreshPcAsr();
     if(action==='use-browser-captions'){this.captionEngine='local';this.captionEngineChosen=true;this.hooks.renderLibrary();return;}
     if(action==='pc-voice-refresh')return this.refreshPcVoice();
@@ -295,6 +346,8 @@ export class StudioTools {
     if(key==='system-voice')this.voice.systemVoice=value;
     if(key==='tts-consent')this.voice.accepted=value;
     if(key==='pc-voice-consent')this.pcVoice.accepted=value;
+    if(key==='tracking-pc-consent')this.pcTracking.accepted=value;
+    if(key==='tracking-download')this.trackingDownloads[this.state?.kind==='crop-tracking'?'crop':'mosaic']=value;
     if(key==='pc-voice-profile'){this.pcVoice.profileId=value;this.updatePcVoiceStatus();}
     if(this.state?.kind==='voice-reference'){
       if(key==='reference-name')this.state.name=value;
@@ -326,6 +379,7 @@ export class StudioTools {
   }
   change(input){
     const key=input.dataset.smartInput;if(this.busy)return;
+    if(key==='tracking-engine'&&['pc','browser'].includes(input.value)){this.trackingEngine=input.value;this.trackingEngineChosen=true;this.updateTrackingSettings();if(input.value==='pc')this.refreshPcTracking();}
     if(key==='voice-engine'){this.voice.engine=input.value;this.hooks.renderLibrary();if(input.value==='pc'&&!this.pcVoice.status)this.refreshPcVoice();}
     if(key==='reference-file'){const file=input.files?.[0];input.value='';this.loadVoiceReference(file).catch(error=>this.showError(error));}
     if(key==='caption-engine'&&['local','pc'].includes(input.value)){this.captionEngine=input.value;this.captionEngineChosen=true;this.hooks.renderLibrary();if(input.value==='pc'&&!this.pcAsr.status)this.refreshPcAsr();}
@@ -351,7 +405,7 @@ export class StudioTools {
   }
   renderMosaic(){
     const s=this.state;if(s?.kind!=='mosaic')return;const e=s.effects[s.index],isVideo=s.clip.type==='video';
-    this.setBody('<p class="note"><strong>'+esc(s.clip.name)+'</strong><br>변형 전 원본에서 드래그해 영역을 다시 지정하세요.</p><div class="mosaic-stage"><canvas id="mosaicEditor" width="640" height="360" aria-label="모자이크 영역 지정"></canvas></div>'+(isVideo?rangeInput('원본 시각','mosaic-time',s.time,s.clip.trimStart,Math.max(s.clip.trimStart,s.clip.trimEnd-.001),.01)+'<p class="inspector-note" id="mosaicTimeLabel"></p>':'')+'<label class="check-label"><input type="checkbox" data-smart-input="mosaic-preview" '+(s.preview?'checked':'')+'>모자이크 결과 미리보기 · 끄면 원본</label><div class="field-grid"><label class="field-label">영역<select data-smart-input="mosaic-index">'+s.effects.map((m,i)=>'<option value="'+i+'" '+(i===s.index?'selected':'')+'>영역 '+(i+1)+' · '+(m.mode==='tracked'?'추적':'고정')+'</option>').join('')+'</select></label><div>'+button('add-mask','＋ 영역 추가',s.effects.length>=MAX_MOSAICS)+button('remove-mask','선택 영역 삭제',!e)+'</div></div>'+(e?'<label class="check-label"><input type="checkbox" data-smart-input="mosaic-enabled" '+(e.enabled?'checked':'')+'>선택 영역 켜기</label>'+rangeInput('모자이크 강도','mosaic-strength',e.strength,1,100,1,'%')+rangeInput('가림 여유','mosaic-padding',e.padding*100,0,50,1,'%')+'<details class="smart-details"><summary>영역 위치·크기 숫자로 조절</summary>'+['x','y','w','h'].map((k,i)=>rangeInput(['가로 위치','세로 위치','너비','높이'][i],'rect-'+k,e.rect[k]*100,k==='w'||k==='h'?.5:0,100,.5,'%')).join('')+'</details>'+(isVideo?button('track','현재 위치에서 자동 추적',false,true):''):'')+'<p class="smart-mask-status" id="mosaicStatus" role="status"></p>'+progressMarkup+'<div class="smart-result-actions">'+button('save-mosaic','모자이크 적용',false,true)+(e&&isVideo?button('static-mosaic','추적 없이 고정 영역으로 적용'):'')+'</div><p class="inspector-note">큰 강도일수록 블록이 커집니다. 가림은 완전히 불투명합니다. 추적이 끊기면 원본 보기를 켜 대상을 다시 지정한 뒤 추적을 실행하세요.</p>');
+    this.setBody('<p class="note"><strong>'+esc(s.clip.name)+'</strong><br>변형 전 원본에서 드래그해 영역을 다시 지정하세요.</p>'+(isVideo?'<div id="trackingSettings">'+this.trackingSettings('mosaic')+'</div>':'')+'<div class="mosaic-stage"><canvas id="mosaicEditor" width="640" height="360" aria-label="모자이크 영역 지정"></canvas></div>'+(isVideo?rangeInput('원본 시각','mosaic-time',s.time,s.clip.trimStart,Math.max(s.clip.trimStart,s.clip.trimEnd-.001),.01)+'<p class="inspector-note" id="mosaicTimeLabel"></p>':'')+'<label class="check-label"><input type="checkbox" data-smart-input="mosaic-preview" '+(s.preview?'checked':'')+'>모자이크 결과 미리보기 · 끄면 원본</label><div class="field-grid"><label class="field-label">영역<select data-smart-input="mosaic-index">'+s.effects.map((m,i)=>'<option value="'+i+'" '+(i===s.index?'selected':'')+'>영역 '+(i+1)+' · '+(m.mode==='tracked'?'추적':'고정')+'</option>').join('')+'</select></label><div>'+button('add-mask','＋ 영역 추가',s.effects.length>=MAX_MOSAICS)+button('remove-mask','선택 영역 삭제',!e)+'</div></div>'+(e?'<label class="check-label"><input type="checkbox" data-smart-input="mosaic-enabled" '+(e.enabled?'checked':'')+'>선택 영역 켜기</label>'+rangeInput('모자이크 강도','mosaic-strength',e.strength,1,100,1,'%')+rangeInput('가림 여유','mosaic-padding',e.padding*100,0,50,1,'%')+'<details class="smart-details"><summary>영역 위치·크기 숫자로 조절</summary>'+['x','y','w','h'].map((k,i)=>rangeInput(['가로 위치','세로 위치','너비','높이'][i],'rect-'+k,e.rect[k]*100,k==='w'||k==='h'?.5:0,100,.5,'%')).join('')+'</details>'+(isVideo?button('track','현재 위치에서 자동 추적',false,true):''):'')+'<p class="smart-mask-status" id="mosaicStatus" role="status"></p>'+progressMarkup+'<div class="smart-result-actions">'+button('save-mosaic','모자이크 적용',false,true)+(e&&isVideo?button('static-mosaic','추적 없이 고정 영역으로 적용'):'')+'</div><p class="inspector-note">큰 강도일수록 블록이 커집니다. 가림은 완전히 불투명합니다. 추적이 끊기면 원본 보기를 켜 대상을 다시 지정한 뒤 추적을 실행하세요.</p>');
     const canvas=this.body.querySelector('canvas');let drag=null;
     const point=event=>{const r=canvas.getBoundingClientRect();return{x:clamp((event.clientX-r.left)/r.width,0,1),y:clamp((event.clientY-r.top)/r.height,0,1)};};
     canvas.onpointerdown=event=>{if(event.button!==0||this.busy||!s.effects[s.index])return;event.preventDefault();drag={start:point(event),old:{...s.effects[s.index].rect},edited:s.edited.has(s.effects[s.index].id)};canvas.setPointerCapture(event.pointerId);};
@@ -387,8 +441,9 @@ export class StudioTools {
   }
   async track(){
     const s=this.state,e=s.effects[s.index];if(!e||s.clip.type!=='video')return;
+    const options=this.trackingOptions('mosaic');
     await this.run('tracking',async signal=>{
-      const result=await trackMosaic(s.clip,e,s.time,{signal,onProgress:(p,m)=>this.progress(p,m)});
+      const result=await trackMosaic(s.clip,e,s.time,{...options,signal,onProgress:(p,m)=>this.progress(p,m)});
       if(signal.aborted)return;s.effects[s.index]=result;s.edited.delete(e.id);this.drawMosaic();
     });
   }
@@ -431,7 +486,8 @@ export class StudioTools {
   }
   renderCropTracking(){
     const s=this.state;if(s?.kind!=='crop-tracking')return;
-    this.setBody('<p class="note"><strong>'+esc(s.clip.name)+'</strong><br>원본 화면에서 따라갈 사람·동물·사물을 박스로 지정하세요. 자동 객체 검출이 아니라 선택한 영역의 무늬를 추적합니다.</p>'
+    this.setBody('<p class="note"><strong>'+esc(s.clip.name)+'</strong><br>원본 화면에서 따라갈 대상을 박스로 지정하세요.</p>'
+      +'<div id="trackingSettings">'+this.trackingSettings('crop')+'</div>'
       +'<div class="mosaic-stage"><canvas id="cropTrackingEditor" width="640" height="360" aria-label="따라갈 대상 영역 지정" style="touch-action:none"></canvas></div>'
       +rangeInput('클립 안 시각','crop-track-time',s.time,0,Math.max(0,s.range.duration-.00001),.01,'초')
       +'<p class="inspector-note" id="cropTrackingTime"></p>'+rangeInput('추적 확대','crop-track-zoom',s.zoom,1,3,.05,'×')
@@ -527,8 +583,9 @@ export class StudioTools {
     const s=this.state;if(s?.kind!=='crop-tracking'||!s.selected)return;
     if(s.seeking||s.cropDrag)throw new Error('영역 선택과 프레임 준비가 끝난 뒤 추적해 주세요.');
     if(JSON.stringify(captureDocument())!==JSON.stringify(s.before))throw new Error('편집 내용이 바뀌었습니다. 창을 닫고 다시 선택해 주세요.');
+    const options=this.trackingOptions('crop');
     await this.run('crop-tracking',async signal=>{
-      const result=await trackCrop(s.clip,s.rect,s.seedTime,{signal,zoom:s.zoom,onProgress:(value,message)=>this.progress(value,message)});
+      const result=await trackCrop(s.clip,s.rect,s.seedTime,{...options,signal,zoom:s.zoom,onProgress:(value,message)=>this.progress(value,message)});
       if(signal.aborted||this.state!==s)return;
       s.tracking=result.tracking;s.pending=false;s.selected=false;
     });

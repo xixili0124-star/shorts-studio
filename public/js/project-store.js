@@ -15,8 +15,9 @@ let assetReady = () => {};
 export function onAssetReady(callback) { assetReady = callback; }
 export let documentName = '새 프로젝트';
 export function setDocumentName(name) { documentName = String(name).trim().slice(0, 100) || '새 프로젝트'; }
-const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop','mosaics','keyframes','cropTracking'];
-const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','role','trackId','aiGenerated','keyframes'];
+const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop','mosaics','keyframes','cropTracking','audioSeparated','sourceAudioAssetId'];
+const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','role','trackId','aiGenerated','keyframes','sourceVideoAudio','sourceVideoAssetId'];
+const sourceAudioKeys = ['sourceVideoAudio','sourceVideoAssetId'];
 const copy = value => JSON.parse(JSON.stringify(value));
 const pick = (object, keys) => Object.fromEntries(keys.filter(k => object[k] !== undefined).map(k => [k, object[k]]));
 
@@ -49,12 +50,14 @@ export function restoreDocument(doc) {
       motionDuration: c.motionDuration, motionOffset: c.motionOffset, fadeEnvelope: c.fadeEnvelope ? copy(c.fadeEnvelope) : undefined,
       trackId: c.trackId, transform: c.transform ? copy(c.transform) : undefined, crop: c.crop ? copy(c.crop) : undefined,
       mosaics: c.mosaics ? copy(c.mosaics) : undefined, keyframes:c.keyframes?copy(c.keyframes):undefined,
-      cropTracking:c.cropTracking?copy(c.cropTracking):undefined };
+      cropTracking:c.cropTracking?copy(c.cropTracking):undefined,
+      audioSeparated:c.audioSeparated, sourceAudioAssetId:c.sourceAudioAssetId };
   });
   const tracks = (doc.tracks || []).map(t => {
     const runtime = audioRuntime.get(t.id);
     if (!runtime) throw new Error('프로젝트 오디오를 먼저 불러와야 합니다.');
-    return { ...runtime, ...copy(pick(t,audioKeys)), trackId: t.trackId, role: t.role, fadeEnvelope: t.fadeEnvelope ? copy(t.fadeEnvelope) : undefined, keyframes:t.keyframes?copy(t.keyframes):undefined };
+    return { ...runtime, ...copy(pick(t,audioKeys)), trackId: t.trackId, role: t.role, fadeEnvelope: t.fadeEnvelope ? copy(t.fadeEnvelope) : undefined, keyframes:t.keyframes?copy(t.keyframes):undefined,
+      sourceVideoAudio:t.sourceVideoAudio, sourceVideoAssetId:t.sourceVideoAssetId };
   });
   setDocumentName(doc.name);
   Object.assign(project, pick(doc.settings || {}, ['width','height','fps','quality']));
@@ -95,17 +98,38 @@ export class History {
   clear() { this.past = [];this.future = []; }
 }
 
-export async function addAsset(file, options = {}) {
+function checkedAssetId(file, options) {
   if (!(file instanceof Blob) || !file.size) throw new Error('빈 파일은 추가할 수 없습니다.');
   if (file.size > 600 * 1024 * 1024) throw new Error('실험판은 파일 하나당 600MB까지 지원합니다. 필요한 구간을 잘라서 가져와 주세요.');
-  if (assets.size >= 200) throw new Error('실험판에는 소재를 최대 200개까지 추가할 수 있습니다.');
   const id = options.id || uid();
+  if (!assets.has(id) && assets.size >= 200) throw new Error('실험판에는 소재를 최대 200개까지 추가할 수 있습니다.');
+  return id;
+}
+
+/** 이미 읽은 PCM은 다시 디코딩하지 않습니다. 파일과 버퍼는 동일한 새 오디오 자원이어야 합니다. */
+export function addDecodedAudioAsset(file, buffer, options = {}) {
+  const id = checkedAssetId(file, options);
+  if (assets.has(id)) return assets.get(id);
+  if (!Number.isSafeInteger(buffer?.length) || buffer.length <= 0 || !Number.isFinite(buffer.sampleRate)
+    || buffer.sampleRate <= 0 || !Number.isInteger(buffer.numberOfChannels) || buffer.numberOfChannels < 1
+    || buffer.numberOfChannels > 32 || typeof buffer.getChannelData !== 'function') throw new Error('읽은 오디오 정보가 올바르지 않습니다.');
+  if (options.sourceVideoAudio === true && (typeof options.sourceVideoAssetId !== 'string'
+    || !/^[a-zA-Z0-9_-]{1,80}$/.test(options.sourceVideoAssetId))) throw new Error('영상 원음의 소재 연결이 올바르지 않습니다.');
+  const asset = { id, kind: 'audio', file, buffer, url: URL.createObjectURL(file), duration: buffer.length / buffer.sampleRate,
+    waveform: waveformOf(buffer), aiGenerated: !!options.aiGenerated,
+    ...(options.sourceVideoAudio === true ? pick(options, sourceAudioKeys) : {}) };
+  assets.set(id, asset);
+  return asset;
+}
+
+export async function addAsset(file, options = {}) {
+  const id = checkedAssetId(file, options);
   if (assets.has(id)) return assets.get(id);
   const isAudio = file.type.startsWith('audio/') || /\.(mp3|wav|m4a|aac|ogg|flac|opus)$/i.test(file.name);
   let asset;
   if (isAudio) {
     const buffer = await decodeAudioFile(file);
-    asset = { id, kind: 'audio', file, buffer, url: URL.createObjectURL(file), duration: buffer.duration, waveform: waveformOf(buffer), aiGenerated: !!options.aiGenerated };
+    return addDecodedAudioAsset(file, buffer, { ...options, id });
   } else {
     const base = await createClip(file, options.onStatus);
     asset = { id, kind: base.type, file, base, duration: base.type === 'video' ? base.srcDuration : 3, thumb: base.thumb };
@@ -139,7 +163,8 @@ export function makeAudio(assetId, overrides = {}) {
   const el = document.createElement('audio');el.src = asset.url;el.preload = 'auto';
   const track = { id, assetId, name: asset.file.name, file: asset.file, buffer: asset.buffer, el,
     start: 0, trimStart: 0, trimEnd: asset.duration, volume: .65, fadeIn: .15, fadeOut: .4,
-    muted: false, lane: asset.aiGenerated ? 'voice' : 'music', role: overrides.role || overrides.lane || (asset.aiGenerated ? 'voice' : 'music'), aiGenerated: !!asset.aiGenerated, ...overrides };
+    muted: false, lane: asset.aiGenerated ? 'voice' : 'music', role: overrides.role || overrides.lane || (asset.aiGenerated ? 'voice' : 'music'), aiGenerated: !!asset.aiGenerated,
+    ...pick(asset, sourceAudioKeys), ...overrides };
   audioRuntime.set(id, track);
   return track;
 }
@@ -185,12 +210,22 @@ export function discardStagedInstance(type, id) {
   map.delete(id);
 }
 
+/** 실패한 삽입이 새로 만든 소재만 호출자가 정리합니다. 기존 소재/되돌리기 자원에는 쓰지 않습니다. */
+export function discardStagedAsset(id) {
+  const asset = assets.get(id);
+  if (!asset || project.clips.some(c => c.assetId === id) || project.audio.tracks.some(t => t.assetId === id)) return;
+  disposeResources(new Map([[id, asset]]), new Map(), new Map());
+  assets.delete(id);
+}
+
 async function hydrate(doc, records) {
   // 파일이 손상되었거나 디코딩에 실패해도 열려 있던 프로젝트와 undo 자원은 유지합니다.
   const before=captureDocument(), oldAssets=new Map(assets), oldClips=new Map(clipRuntime), oldAudio=new Map(audioRuntime);
   assets.clear();clipRuntime.clear();audioRuntime.clear();
   try {
     for (const record of records) await addAsset(record.file, record);
+    for (const asset of assets.values()) if (asset.sourceVideoAudio === true
+      && (asset.kind !== 'audio' || assets.get(asset.sourceVideoAssetId)?.kind !== 'video')) throw new Error('영상 원음의 소재 연결이 올바르지 않습니다.');
     for (const clip of doc.clips) {
       const asset=assets.get(clip.assetId);
       if(asset.kind!==clip.type || (clip.type==='video' && clip.trimEnd>asset.duration+.05)) throw new Error('영상 소재와 편집 구간이 일치하지 않습니다.');
@@ -269,8 +304,17 @@ export function validateDocument(doc, records) {
   }
   if(records.some(r=>!r || !safeId(r.id)) || new Set(records.map(r=>r.id)).size!==records.length)throw new Error('소재 식별자가 올바르지 않습니다.');
   const ids = new Set(records.map(r => r.id));
+  for (const item of [...records, ...doc.tracks]) {
+    if (item.sourceVideoAudio !== undefined && typeof item.sourceVideoAudio !== 'boolean') throw new Error('영상 원음 표시가 올바르지 않습니다.');
+    if (item.sourceVideoAssetId !== undefined && (!safeId(item.sourceVideoAssetId) || !ids.has(item.sourceVideoAssetId)
+      || item.sourceVideoAssetId === item.id || item.sourceVideoAudio !== true)) throw new Error('영상 원음의 소재 연결이 올바르지 않습니다.');
+    if (item.sourceVideoAudio === true && !item.sourceVideoAssetId) throw new Error('영상 원음의 소재 연결이 없습니다.');
+  }
   const instanceIds = new Set();
   for(const clip of doc.clips) {
+    if (clip?.audioSeparated !== undefined && (typeof clip.audioSeparated !== 'boolean' || clip.type !== 'video')) throw new Error('영상 원음 분리 표시가 올바르지 않습니다.');
+    if (clip?.sourceAudioAssetId !== undefined && (!safeId(clip.sourceAudioAssetId) || !ids.has(clip.sourceAudioAssetId)
+      || clip.audioSeparated !== true)) throw new Error('분리된 오디오의 소재 연결이 올바르지 않습니다.');
     if (!validMosaics(clip?.mosaics)) throw new Error('모자이크 추적 정보가 올바르지 않습니다.');
     if(!validCropTracking(clip?.cropTracking,clip?.trimEnd-clip?.trimStart)||(clip.cropTracking&&clip.type!=='video'))throw new Error('크롭 추적 정보가 올바르지 않습니다.');
     if(!clip || !['video','image'].includes(clip.type) || !Number.isFinite(clip.scale) || !Number.isFinite(clip.offX) || !Number.isFinite(clip.offY) || !Number.isFinite(clip.trimStart) || !Number.isFinite(clip.trimEnd) || !Number.isFinite(clip.imgDuration))throw new Error('클립 속성이 올바르지 않습니다.');
@@ -313,7 +357,7 @@ export function validateDocument(doc, records) {
 }
 
 export function packProject() {
-  const records = [...assets.values()].map(a => ({ id:a.id, name:a.file.name, type:a.file.type, size:a.file.size, lastModified:a.file.lastModified || 0, aiGenerated:!!a.aiGenerated }));
+  const records = [...assets.values()].map(a => ({ id:a.id, name:a.file.name, type:a.file.type, size:a.file.size, lastModified:a.file.lastModified || 0, aiGenerated:!!a.aiGenerated, ...pick(a, sourceAudioKeys) }));
   const header = new TextEncoder().encode(JSON.stringify({ document:captureDocument(), assets:records }));
   if (header.length > 4 * 1024 * 1024) throw new Error('편집 정보가 너무 큽니다. 추적 클립을 여러 프로젝트로 나눠 저장해 주세요.');
   const length = new Uint8Array(4);new DataView(length.buffer).setUint32(0, header.length, true);
@@ -353,7 +397,7 @@ export async function saveDraft() {
   const total=[...assets.values()].reduce((s,a)=>s+a.file.size,0);
   if(total>300*1024*1024)throw new Error('큰 프로젝트는 저장 버튼으로 .shorts 파일을 보관해 주세요.');
   const db=await openDraftDb();
-  const record={document:captureDocument(),assets:[...assets.values()].map(a=>({id:a.id,file:a.file,aiGenerated:!!a.aiGenerated})),updated:Date.now()};
+  const record={document:captureDocument(),assets:[...assets.values()].map(a=>({id:a.id,file:a.file,aiGenerated:!!a.aiGenerated,...pick(a,sourceAudioKeys)})),updated:Date.now()};
   try { await new Promise((resolve,reject)=>{
     const tx=db.transaction('draft','readwrite');tx.objectStore('draft').put(record,'latest');
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);

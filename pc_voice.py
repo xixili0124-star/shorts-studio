@@ -30,8 +30,8 @@ def validate_asr_reservation(data):
     if not isinstance(data, dict) or set(data) != {'requiredFreeMiB', 'ttlSeconds'}:
         raise VoiceError('INVALID_ASR_RESERVATION', 'PC 자막 예약 요청을 확인해 주세요.')
     required, ttl = data['requiredFreeMiB'], data['ttlSeconds']
-    if (type(required) is not int or not 3200 <= required <= 4096
-            or type(ttl) is not int or not 30 <= ttl <= 660):
+    if (type(required) is not int or not 3200 <= required <= 8192
+            or type(ttl) is not int or not 30 <= ttl <= 1860):
         raise VoiceError('INVALID_ASR_RESERVATION', 'PC 자막 예약 범위를 확인해 주세요.')
     return required, ttl
 
@@ -148,12 +148,20 @@ class VoiceCloneService:
         self.opener = build_opener(ProxyHandler({}), NoRedirect())
         self.lock = threading.Lock()
         self.uncertain = False
+        self.closed = False
 
     @contextmanager
     def exclusive(self):
+        if self.closed:
+            raise VoiceError('PC_STOPPING', 'PC 연결 프로그램이 종료 중입니다. 다시 연결한 뒤 실행해 주세요.', 503)
         if not self.lock.acquire(blocking=False):
             raise VoiceError('VOICE_BUSY', 'PC 엔진이 작업 중입니다. 결과 받기를 취소했어도 현재 생성이 끝날 때까지 기다려 주세요.', 409)
         try:
+            # 종료 직전에 통과한 HTTP 요청도 실제 작업에 진입할 수 없게 한다.
+            if self.closed:
+                raise VoiceError('PC_STOPPING', 'PC 연결 프로그램이 종료 중입니다. 다시 연결한 뒤 실행해 주세요.', 503)
+            if self.uncertain:
+                raise VoiceError('ENGINE_RESTART_REQUIRED', '이전 PC 작업의 종료를 확인하지 못했습니다. PC 실행기를 다시 시작해 주세요.', 503)
             yield
         finally:
             self.lock.release()
@@ -199,6 +207,8 @@ class VoiceCloneService:
                 'profiles': self.profiles(), 'maxProfiles': MAX_PROFILES}
         if self.uncertain:
             return {**base, 'state': 'restart-required', 'message': '이전 요청의 완료를 확인하지 못했습니다. PC 음성 엔진과 편집기 서버를 다시 실행해 주세요.'}
+        if self.closed:
+            return {**base, 'state': 'stopping', 'message': 'PC 연결 프로그램을 종료하고 있습니다. 다시 연결한 뒤 실행해 주세요.'}
         if not self.lock.acquire(blocking=False):
             return {**base, 'state': 'busy', 'message': 'PC 엔진이 처리 중입니다. 잠시 뒤 연결을 다시 확인해 주세요.'}
         try:
@@ -308,16 +318,17 @@ class VoiceCloneService:
 
     def asr_engine_available(self):
         """참고 음성을 읽지 않고 ASR과 조율할 엔진의 신원만 확인한다."""
+        if self.closed:
+            raise VoiceError('PC_STOPPING', 'PC 연결 프로그램이 종료 중입니다. 다시 연결한 뒤 실행해 주세요.', 503)
         if self.uncertain:
             raise VoiceError('ENGINE_RESTART_REQUIRED', '이전 PC 음성 작업의 종료가 불확실합니다. 엔진과 편집기 서버를 다시 실행해 주세요.', 503)
         key = self.engine_headers.get('X-Studio-Engine-Key')
         if not key:
             return False
         ready = verified_engine(self.opener, self.endpoint, key, provider=self.provider, allow_offline=True)
-        if ready is None:
-            return False
         if not ready:
-            raise VoiceError('ENGINE_NOT_READY', 'PC 음성 엔진의 신원이나 작업 상태를 확인하지 못했습니다. 연결을 확인한 뒤 다시 시도해 주세요.', 503)
+            # 설치된 엔진의 부팅 사이에 예약 없이 GPU 작업을 시작하지 않는다.
+            raise VoiceError('ENGINE_NOT_READY', '설치된 PC 음성 엔진이 아직 준비되지 않았습니다. 연결이 확인된 뒤 다시 시도해 주세요.', 503)
         return True
 
     def _asr_request(self, route, payload):

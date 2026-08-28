@@ -7,3 +7,5 @@ public/vendor/supertonic/** -text
 public/licenses/google-fonts/*/OFL.txt -text -whitespace
 public/licenses/google-fonts/*/METADATA.pb -text -whitespace
 public/sounds/licenses/*.txt -text
+# 고정 해시로 검증하는 공급자 파일은 줄바꿈·공백을 포함해 원본 바이트를 보존합니다.
+public/vendor/mediapipe/** -text -whitespace

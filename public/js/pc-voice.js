@@ -1,12 +1,13 @@
-// Only the same-origin PC adapter is contacted. Public/mobile pages never probe localhost.
+// 로컬 편집기 또는 사용자가 승인한 PC 연결을 통해서만 음성을 처리합니다.
 import { encodeWav } from './ai-client.js';
 import { monoPcm } from './silence.js';
+import { canUsePcEngine, pcTransportContext } from './pc-connection.js';
 
 const PREFIX='/api/voice-clone';
 const abortError=()=>new DOMException('결과 받기를 취소했습니다.','AbortError');
 const check=signal=>{if(signal?.aborted)throw abortError();};
 export function isPcVoiceOrigin(location=globalThis.location){
-  return !!location&&location.protocol==='http:'&&['localhost','127.0.0.1'].includes(location.hostname);
+  return canUsePcEngine(location);
 }
 
 async function readBounded(response,maximum){
@@ -20,14 +21,14 @@ async function readBounded(response,maximum){
 }
 
 async function request(path,payload,{signal,timeout=10000,location=globalThis.location,fetchImpl=globalThis.fetch}={}){
-  if(!isPcVoiceOrigin(location))throw new Error('내 목소리 TTS는 PC용 로컬 편집기에서 사용할 수 있어요. 이 화면에서는 기존 브라우저 TTS를 사용할 수 있습니다.');
+  const transport=pcTransportContext(location);
   if(!['/status','/references','/delete','/synthesize'].includes(path))throw new Error('지원하지 않는 PC 음성 요청입니다.');
   check(signal);const ctrl=new AbortController();let expired=false;
   const cancel=()=>ctrl.abort();signal?.addEventListener('abort',cancel,{once:true});
   const timer=setTimeout(()=>{expired=true;ctrl.abort();},timeout);
   try{
-    const response=await fetchImpl(PREFIX+path,{method:payload===undefined?'GET':'POST',
-      headers:{'X-Studio-PC-Voice':'1',...(payload===undefined?{}:{'Content-Type':'application/json','X-Studio-Consent':'voice-clone-local'})},
+    const response=await fetchImpl(transport.base+PREFIX+path,{...transport.options,method:payload===undefined?'GET':'POST',
+      headers:{...transport.headers,'X-Studio-PC-Voice':'1',...(payload===undefined?{}:{'Content-Type':'application/json','X-Studio-Consent':'voice-clone-local'})},
       ...(payload===undefined?{}:{body:JSON.stringify(payload)}),signal:ctrl.signal,credentials:'omit',cache:'no-store',redirect:'error'});
     check(signal);
     if(!response.ok){let message='PC 음성 기능에 연결하지 못했습니다. PC용 편집기를 다시 실행해 주세요.';

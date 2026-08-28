@@ -3,6 +3,8 @@
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 export const MAX_MOSAICS = 4;
 export const MAX_TRACK_SECONDS = 180;
+// PC 15fps의 3분 경로와 트림 경계 키를 함께 저장할 여유를 둡니다.
+export const MAX_TRACK_KEYS = 3000;
 const frameEnd = key => key.time + (Number.isFinite(key.duration) && key.duration > 0 ? key.duration : 0);
 
 export function normalizedRect(rect = {}) {
@@ -30,7 +32,7 @@ export function validMosaics(effects) {
   const validRect = r => r && ['x','y','w','h'].every(k => Number.isFinite(r[k])) && r.x >= 0 && r.y >= 0 && r.w >= .005 && r.h >= .005 && r.x + r.w <= 1.000001 && r.y + r.h <= 1.000001;
   return effects.every(e => e && /^[a-zA-Z0-9_-]{1,80}$/.test(e.id) && typeof e.enabled === 'boolean'
     && ['static','tracked'].includes(e.mode) && validRect(e.rect) && Number.isFinite(e.strength) && e.strength >= 1 && e.strength <= 100
-    && Number.isFinite(e.padding) && e.padding >= 0 && e.padding <= .5 && Array.isArray(e.keyframes) && e.keyframes.length <= 2400
+    && Number.isFinite(e.padding) && e.padding >= 0 && e.padding <= .5 && Array.isArray(e.keyframes) && e.keyframes.length <= MAX_TRACK_KEYS
     && (e.mode !== 'tracked' || (Array.isArray(e.range) && e.range.length === 2 && e.range.every(Number.isFinite) && e.range[0] >= 0 && e.range[1] > e.range[0] && e.range[1] <= 86400))
     && e.keyframes.every((k, i, list) => validRect(k) && Number.isFinite(k.time) && k.time >= 0 && k.time <= 86400
       && (!i || k.time > list[i - 1].time) && Number.isFinite(k.confidence) && k.confidence >= 0 && k.confidence <= 1
@@ -67,7 +69,7 @@ export function mergeTrackingKeys(previous, next) {
     // 두 경로가 모두 끊겼던 사이를 새 보간 선분으로 이어서 가리지 않게 되는 일을 막습니다.
     if (b && !a.lost && !b.lost && !covered(previous,a,b) && !covered(next,a,b)) safe.push({ ...a, time:(a.time+b.time)/2, confidence:0, lost:true });
   }
-  if (safe.length > 2400) throw new Error('추적 키가 너무 많습니다. 클립을 나누거나 추적을 초기화해 주세요.');
+  if (safe.length > MAX_TRACK_KEYS) throw new Error('추적 키가 너무 많습니다. 클립을 나누거나 추적을 초기화해 주세요.');
   return safe;
 }
 
@@ -102,67 +104,4 @@ export function redactSource(ctx, source, clip, fallbackTime) {
     dest.imageSmoothingEnabled = true;
   }
   return { img: cache.image, w: W, h: H, sourceTime: source.sourceTime };
-}
-
-export function grayscale(rgba) {
-  const result = new Float32Array(rgba.length / 4);
-  for (let i = 0; i < result.length; i++) result[i] = (rgba[i * 4] * .299 + rgba[i * 4 + 1] * .587 + rgba[i * 4 + 2] * .114) / 255;
-  return result;
-}
-
-function patch(gray, W, H, rect, grid = 16) {
-  const values = new Float32Array(grid * grid);
-  let sum = 0, square = 0;
-  for (let y = 0; y < grid; y++) for (let x = 0; x < grid; x++) {
-    const sx = clamp(Math.floor((rect.x + (x + .5) / grid * rect.w) * W), 0, W - 1);
-    const sy = clamp(Math.floor((rect.y + (y + .5) / grid * rect.h) * H), 0, H - 1);
-    const value = gray[sy * W + sx];values[y * grid + x] = value;sum += value;square += value * value;
-  }
-  const mean = sum / values.length, deviation = Math.sqrt(Math.max(0, square / values.length - mean * mean));
-  for (let i = 0; i < values.length; i++) values[i] = (values[i] - mean) / Math.max(.001, deviation);
-  return { values, deviation };
-}
-
-function soften(gray,W,H) {
-  const horizontal = new Float32Array(gray.length), output = new Float32Array(gray.length);
-  for (let y=0;y<H;y++) for (let x=0;x<W;x++) horizontal[y*W+x] = (gray[y*W+Math.max(0,x-1)]+gray[y*W+x]+gray[y*W+Math.min(W-1,x+1)])/3;
-  for (let y=0;y<H;y++) for (let x=0;x<W;x++) output[y*W+x] = (horizontal[Math.max(0,y-1)*W+x]+horizontal[y*W+x]+horizontal[Math.min(H-1,y+1)*W+x])/3;
-  return output;
-}
-
-export function trackingTemplate(gray, W, H, rect) {
-  const sampled = patch(soften(gray,W,H), W, H, normalizedRect(rect));
-  if (sampled.deviation < .025) throw new Error('선택 영역의 특징이 부족합니다. 윤곽이나 무늬를 포함해 조금 더 넓게 지정해 주세요.');
-  return { original: sampled.values, recent: sampled.values.slice() };
-}
-
-export function trackRectangle(gray, W, H, template, previous) {
-  gray = soften(gray,W,H);
-  const radius = Math.min(44, Math.max(10, Math.max(previous.w * W, previous.h * H) * .65));
-  let best = null;
-  const candidates = [];
-  const evaluate = (dx, dy, scale) => {
-    const w = Math.min(1, previous.w * scale), h = Math.min(1, previous.h * scale);
-    const rect = normalizedRect({ x: previous.x + dx / W + (previous.w - w) / 2, y: previous.y + dy / H + (previous.h - h) / 2, w, h });
-    const sample = patch(gray, W, H, rect);
-    if (sample.deviation < .015) return;
-    let recent = 0, original = 0;
-    for (let i = 0; i < sample.values.length; i++) { recent += template.recent[i] * sample.values[i]; original += template.original[i] * sample.values[i]; }
-    recent /= sample.values.length;original /= sample.values.length;
-    const score = recent * .75 + original * .25 - Math.hypot(dx, dy) / Math.max(W, H) * .025;
-    candidates.push({ score, x: rect.x, y: rect.y });
-    if (!best || score > best.score) best = { ...rect, score, original, recent, sample: sample.values, dx, dy, scale };
-  };
-  const coarse = Math.floor(radius/3)*3;
-  for (const scale of [1, .94, 1.06]) for (let y = -coarse; y <= coarse; y += 3) for (let x = -coarse; x <= coarse; x += 3) evaluate(x, y, scale);
-  for (let y=-2;y<=2;y++) for (let x=-2;x<=2;x++) evaluate(x,y,1);
-  if (best) { const { dx, dy, scale } = best; for (let y = -2; y <= 2; y++) for (let x = -2; x <= 2; x++) evaluate(dx + x, dy + y, scale); }
-  const separated = Math.max(5, Math.min(previous.w * W, previous.h * H) * .35);
-  let runnerUp = -1;
-  if (best) for (const c of candidates) if (Math.hypot((c.x-best.x)*W, (c.y-best.y)*H) >= separated) runnerUp = Math.max(runnerUp, c.score);
-  const jump = best ? Math.hypot(best.dx-(previous.vx||0), best.dy-(previous.vy||0)) : Infinity;
-  const maximumJump = Math.max(8, Math.min(24, Math.min(previous.w*W, previous.h*H)*.3));
-  if (!best || best.recent < .68 || best.original < .38 || jump > maximumJump || (runnerUp > .65 && best.score-runnerUp < .035)) return { ...previous, confidence: clamp(best?.score || 0, 0, 1), lost: true };
-  if (best.score > .82) for (let i = 0; i < template.recent.length; i++) template.recent[i] = template.recent[i] * .9 + best.sample[i] * .1;
-  return { ...normalizedRect(best), confidence: clamp(best.score, 0, 1), lost: false, vx: best.dx, vy: best.dy };
 }

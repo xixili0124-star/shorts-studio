@@ -12,6 +12,7 @@ import sys
 from pc_asr_worker import (MODEL_ID, MODEL_NAME, MODEL_REV, MODEL_FILES, MODEL_MARKER,
                            PACKAGE_VERSION, CT2_VERSION, offline_environment)
 from setup_pc_voice import download, prepare_uv, PYTHON_VERSION
+from pc_installation import local_data_dir, register_installation
 
 
 ROOT = Path(__file__).resolve().parent
@@ -168,7 +169,7 @@ print(json.dumps({'cudaDllDirs': [str(path) for path in directories]}))
     return directories
 
 
-def write_config(engine, model, python, device, cuda_dll_dirs):
+def write_config(engine, model, python, device, cuda_dll_dirs, local=None):
     """자동 자막 설정만 활성화하며 PC 음성 설정은 읽거나 변경하지 않는다."""
     settings = {'version': 1, 'provider': 'faster-whisper', 'modelName': MODEL_NAME,
                 'modelId': MODEL_ID, 'modelRevision': MODEL_REV,
@@ -177,14 +178,17 @@ def write_config(engine, model, python, device, cuda_dll_dirs):
                 'model': str(model.resolve()), 'device': device,
                 'computeType': 'int8_float16' if device == 'cuda' else 'int8',
                 'cudaDllDirs': list(cuda_dll_dirs)}
-    write_json_atomic(ROOT / '.studio-local' / 'pc-asr.json', settings)
+    local = Path(local) if local is not None else local_data_dir(ROOT)
+    write_json_atomic(local / 'pc-asr.json', settings)
+    register_installation(local, app=ROOT, python=sys.executable)
     return settings
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--yes', action='store_true')
-    parser.add_argument('--engine-dir', type=Path, default=ROOT / '.studio-local' / 'asr-engine')
+    parser.add_argument('--engine-dir', type=Path)
+    parser.add_argument('--local-dir', type=Path, help='Shared local settings and reference directory')
     parser.add_argument('--device', choices=('cuda', 'cpu'), default='cuda')
     parser.add_argument('--python', type=Path, help='Existing Python 3.11 for the separate ASR venv')
     parser.add_argument('--uv', type=Path, help='Existing uv executable')
@@ -197,7 +201,8 @@ def main():
         answer = input('Download PC subtitles model (~1.62 GB) and a separate runtime (CUDA ~0.7 GB extra)? [y/N] ')
         if answer.strip().lower() not in ('y', 'yes'):
             return
-    engine = claim_engine_directory(args.engine_dir)
+    local = args.local_dir.resolve() if args.local_dir else local_data_dir(ROOT)
+    engine = claim_engine_directory(args.engine_dir or local / 'asr-engine')
     if shutil.disk_usage(engine).free < 8 * 1024**3:
         raise RuntimeError('Please make at least 8 GB of free disk space available.')
     model = prepare_models(engine)
@@ -209,7 +214,7 @@ def main():
     if args.prepare_only:
         print('ASR model and runtime verified. Active settings were not changed.', flush=True)
         return
-    write_config(engine, model, python, args.device, directories)
+    write_config(engine, model, python, args.device, directories, local)
     print('PC subtitles installed. Existing browser subtitles and PC voice settings are unchanged.', flush=True)
 
 

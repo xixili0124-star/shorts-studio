@@ -20,6 +20,7 @@ import {StudioTools} from './studio-tools.js';
 import {selectionKey,selectionRefs,resolveSelection,captureItemSettings,planPasteSettings,applySettingsPlan,applySharedProperty,deleteSelectedItems,planBatchSplit,applyBatchSplit,duplicateSelectedItems} from './batch-edits.js';
 import {MonitorEditor} from './monitor-editor.js';
 import {KeyframeEditor} from './keyframe-editor.js';
+import {insertMediaAsset} from './media-insertion.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -338,7 +339,7 @@ function renderInspector(){
     html+=section('타임라인 위치',number('위치','start',clipRange.start)+'<p class="inspector-note">빈 구간에 놓을 수 있습니다. 다른 영상 위에 놓으면 두 클립의 자리를 교환합니다. 다른 클립은 이동하지 않습니다.</p>');
     html+=section('클립 구간',item.type==='image'?number('길이','imgDuration',item.imgDuration,1/project.fps,600,1/project.fps):number('원본 시작','trimStart',item.trimStart,0,item.trimEnd-1/project.fps)+number('원본 끝','trimEnd',item.trimEnd,item.trimStart+1/project.fps,item.srcDuration),item.type==='video'?'원본 기준':'DURATION');
     if(item.type==='image')html+=section('이미지 모션',selectField('움직임','ken',item.ken,[['none','없음'],['in','천천히 확대'],['out','천천히 축소'],['left','왼쪽으로 팬'],['right','오른쪽으로 팬']]));
-    if(item.type==='video')html+=section('원본 오디오',range('볼륨','volume',(item.volume??1)*100,0,300,1,'%')+`<label class="property-row"><input type="checkbox" data-prop="muted" ${item.muted?'checked':''}>음소거</label>${item.decoderOnly?'<p class="note warning">디코더 모드: 미리보기 소리는 지원하지 않으며 내보내기에만 포함됩니다.</p>':''}`);
+    if(item.type==='video')html+=section('원본 오디오',item.audioSeparated?'<p class="inspector-note">원음은 별도 오디오 클립으로 분리됐습니다. 타임라인의 원음 클립을 선택해 볼륨·페이드·음소거를 조절하세요.</p>':range('볼륨','volume',(item.volume??1)*100,0,300,1,'%')+`<label class="property-row"><input type="checkbox" data-prop="muted" ${item.muted?'checked':''}>음소거</label>${item.decoderOnly?'<p class="note warning">디코더 모드: 미리보기 소리는 지원하지 않으며 내보내기에만 포함됩니다.</p>':''}`);
     const pair=currentTransition({id:item.id});
     html+=section('다음 장면과 전환',pair?selectField('효과','transitionType',pair.type,TRANSITIONS.map(t=>[t.id,t.name]))+number('길이','transitionDuration',pair.duration||.5,0,2,.1)+'<p class="inspector-note">두 클립 사이의 아이콘을 누르면 전환을 선택할 수 있어요.</p>':'<p class="inspector-note">다음 영상과 맞닿아야 전환을 넣을 수 있어요.</p>');
 
@@ -401,13 +402,10 @@ async function placeAssetImpl(id,time=null,lane=null,dropPlan=null){
     const target=targetTrack(role,lane,true);
     result=placeTimelineItem('audio',track,dropPlan?.placement||planPlacement(at,track.trimEnd-track.trimStart,target));
   }else{
-    const clip=await makeClip(id,{...(asset.kind==='image'?{imgDuration:3}:{trimStart:0,trimEnd:asset.duration})});
-    const target=targetTrack(role,lane,true);
-    clip.bg=target===timelineTracks().find(track=>track.kind==='visual')?.id?'blur':'transparent';
-    result=placeVideoClip(clip,dropPlan?.placement||planPlacement(at,clipDuration(clip),target));
+    result=await insertMediaAsset(id,{time:at,trackId:targetTrack(role,lane)||undefined,placement:dropPlan?.placement,onStatus:message=>toast(message)});
   }
   selectedItems=[];selection={type:result.type,id:result.id};commit(before,'타임라인에 추가');player.seek(result.start,{allowBeyond:true});timeline.reveal(result);
-  toast(result.start.toFixed(2)+'초부터 '+(result.end-result.start).toFixed(2)+'초 추가'+(result.shifted?' · 같은 트랙 뒤 클립 '+result.shifted+'개 이동':''));
+  toast(result.start.toFixed(2)+'초부터 '+(result.end-result.start).toFixed(2)+'초 추가'+(result.audioStatus==='separated'?' · 영상·원음 분리 · 각각 선택해 편집':result.audioStatus==='silent'?' · 원본 오디오 트랙 없음 · 영상만 추가':'')+(result.shifted?' · 같은 트랙 뒤 클립 '+result.shifted+'개 이동':''));
   return result;
 }
 function addGraphic(id,time=player.time,dropPlan=null){
@@ -670,7 +668,7 @@ function wire(){
   $('projectName').onchange=e=>edit('프로젝트 이름 변경',()=>setDocumentName(e.target.value));
   $('openExport').onclick=openExport;$('startExport').onclick=startExport;$('cancelExport').onclick=()=>exportCtrl?.abort();
   $('exportDialog').addEventListener('cancel',e=>{if(exportCtrl)e.preventDefault();});
-  $('helpButton').onclick=()=>$('helpDialog').showModal();$('toggleInspector').onclick=()=>{$('workbench').classList.toggle('show-inspector');$('workbench').classList.remove('show-library');};
+  $('helpButton').onclick=()=>smartTools.pcHelp.show();$('toggleInspector').onclick=()=>{$('workbench').classList.toggle('show-inspector');$('workbench').classList.remove('show-library');};
   $('emptyImport').onclick=pickMedia;$('loadDemo').onclick=()=>loadDemo().then(scheduleDraft).catch(e=>toast(e.message));
   $('resetDemo').onclick=()=>{if(totalDuration()>0&&!confirm('현재 편집을 샘플 프로젝트로 바꿀까요? 필요한 작업은 먼저 저장해 주세요.'))return;$('helpDialog').close();loadDemo().then(scheduleDraft).catch(e=>toast(e.message));};
   $('newProject').onclick=()=>{if(totalDuration()>0&&!confirm('편집 타임라인을 비울까요? 현재 소재함은 유지합니다.'))return;edit('빈 프로젝트 시작',()=>{project.clips=[];project.overlays=[];project.captions=[];project.audio.tracks=[];project.timelineTracks=undefined;project.template.mode='none';selectedItems=[];selection=null;setDocumentName('새 프로젝트');isDemo=false;});$('helpDialog').close();};

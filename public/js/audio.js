@@ -17,7 +17,7 @@ export async function decodeAudioFile(file) {
 }
 
 export function hasClipAudio() {
-  return project.clips.some(c => c.type === 'video' && !c.muted && hasAudibleVolume(c));
+  return project.clips.some(c => c.type === 'video' && !c.audioSeparated && !c.muted && hasAudibleVolume(c));
 }
 
 export function hasAnyAudio() {
@@ -28,9 +28,9 @@ export function hasAnyAudio() {
 }
 
 /** 영상 클립에서 트림 구간만큼의 오디오를 뽑아 AudioBuffer 로 만든다 */
-export async function extractClipAudio(clip, signal, { ignoreMute = false, strict = false, allChannels = false, allowBoundaryGaps = false, allowMissingTrack = false } = {}) {
+export async function extractClipAudio(clip, signal, { ignoreMute = false, strict = false, allChannels = false, allowBoundaryGaps = false, allowMissingTrack = false, maxBytes = Infinity } = {}) {
   if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
-  if (clip.type !== 'video' || (!ignoreMute && clip.muted) || !clip.file) return null;
+  if (clip.type !== 'video' || (!ignoreMute && (clip.muted || clip.audioSeparated)) || !clip.file) return null;
   let input = null;
   const cancel = () => { try { input?.dispose(); } catch {} };
   try {
@@ -58,9 +58,11 @@ export async function extractClipAudio(clip, signal, { ignoreMute = false, stric
       if (!out) {
         rate = w.buffer.sampleRate;
         ch = Math.min(allChannels ? 32 : 2, w.buffer.numberOfChannels);
+        const length = Math.max(1, Math.ceil(dur * rate));
+        if (!Number.isSafeInteger(length) || length * ch * 4 > maxBytes) throw new Error('소리를 분리하기에 영상이 너무 깁니다. 필요한 구간을 잘라서 가져와 주세요.');
         covered = Math.max(0, Math.round((coverageStart - clip.trimStart) * rate));
         out = new AudioBuffer({
-          length: Math.max(1, Math.ceil(dur * rate)),
+          length,
           numberOfChannels: ch,
           sampleRate: rate,
         });
@@ -99,7 +101,7 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
   if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
   const total = totalDuration();
   const tracks = (project.audio.tracks || []).filter(track => !track.muted
-    && (includeBgm || (includeVoice && (track.role || track.lane) === 'voice')));
+    && (includeBgm || (includeVoice && ((track.role || track.lane) === 'voice' || track.sourceVideoAudio === true))));
   const narration = (includeBgm || includeVoice) && !project.audio.narration?.muted
     ? project.audio.narration : null;
   // 내레이션도 보이스 선택을 따른다. 선택한 원본이 없으면 엄격 모드에서 알려준다.
@@ -115,7 +117,7 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
   master.connect(ctx.destination);
 
   // 1) 클립 원본 소리
-  const videoClips = project.clips.filter(c => c.type === 'video' && !c.muted && hasAudibleVolume(c));
+  const videoClips = project.clips.filter(c => c.type === 'video' && !c.audioSeparated && !c.muted && hasAudibleVolume(c));
   for (let i = 0; i < videoClips.length; i++) {
     const clip = videoClips[i];
     onProgress?.(i / Math.max(1, videoClips.length), `소리 추출 중… (${i + 1}/${videoClips.length})`);

@@ -296,3 +296,16 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 .crop-track-previews{display:grid;grid-template-columns:minmax(0,1fr) 140px;gap:12px;align-items:start}
 .crop-track-output{width:100%;max-height:330px;object-fit:contain;background:#080b08}
 @media(max-width:600px){.crop-track-previews{grid-template-columns:minmax(0,1fr) 92px}}
+.pc-help{border:1px solid #46533d;border-radius:12px;background:#191f19;padding:18px;margin-bottom:24px;scroll-margin-top:12px}
+.pc-help-heading h3{font-size:20px;line-height:1.4;margin:10px 0}
+.pc-install-steps{padding-left:22px;margin:18px 0}.pc-install-steps li{padding:0 0 16px 4px}.pc-install-steps li:last-child{padding-bottom:0}
+.pc-install-steps strong{color:#ecf1e8}.pc-install-steps p{font-size:13px;line-height:1.6;color:#aeb8a9;margin:7px 0 10px}
+.pc-install-steps .button{white-space:normal;text-align:center;max-width:100%;height:auto;min-height:40px;padding:10px 14px}
+.pc-help-status{padding:12px;border-radius:8px;background:#111711;color:#d4e8c6;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.pc-install-engines{display:grid;gap:6px;margin:12px 0}.pc-install-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px;border-bottom:1px solid #34402e;font-size:12px}.pc-install-row strong{white-space:nowrap;color:#cbb786}.pc-install-row strong[data-ready=true]{color:#b8ea75}
+#trackingSettings{border:1px solid #3d4b35;background:#192017;border-radius:10px;padding:12px;margin:12px 0}.pc-engine-status[data-state=starting] .status-dot{background:#d6c068}
+@media(max-width:600px){.pc-help{padding:12px}.pc-install-row{flex-wrap:wrap}.pc-install-steps .button{width:100%}}
+/* 좁은 화면의 타임라인이 도구 모음 아래를 덮어 도움말을 가리지 않게 합니다. */
+.tool-rail{min-height:0;overscroll-behavior:contain}
+@media(max-width:650px){.tool-rail{grid-row:1}}
+#helpDialog>.modal-heading{position:sticky;top:0;z-index:1;background:var(--surface)}

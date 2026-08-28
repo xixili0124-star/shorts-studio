@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SAM 추적 · PC 설치 도움말</title><link rel="stylesheet" href="studio.css"></head>
+<body style="display:block;overflow:auto"><main style="max-width:760px;margin:40px auto;padding:24px"><a href="studio.html">← 편집기로</a><h1>SAM 2.1 Small로 대상 따라가기</h1>
+<p class="note">사람·동물·사물의 선택 영역을 PC에서 분석해 모자이크 위치와 크롭 경로를 만듭니다. 유료 API나 외부 영상 업로드는 사용하지 않습니다.</p>
+<h2>처음 한 번 준비</h2><ol class="pc-install-steps"><li><a class="button primary" href="/downloads/Shorts-Studio-PC-Setup.cmd" download>Windows PC 설치 파일 다운로드</a></li><li>받은 파일을 직접 실행하고 설치할 엔진에서 SAM 추적을 선택하세요. 모델 약 184MB와 전용 실행 환경을 내려받습니다. 총 수 GB의 공간과 시간이 필요합니다.</li><li>편집기 → 도움말 → 설치 확인 · PC 연결을 누르세요. 공개 사이트는 처음에 브라우저의 로컬 네트워크 권한과 PC 연결 승인이 필요합니다.</li></ol>
+<p class="note">설치 정보는 Windows 사용자 폴더에 등록됩니다. 기존 음성 모델·참고 녹음은 유지하며 브라우저를 닫아도 연결 프로그램은 실행됩니다. PC를 재부팅했다면 Windows 시작 메뉴의 Shorts Studio PC로 켜세요. 로그인 시 자동 실행은 설치 중 직접 선택할 수 있습니다.</p>
+<h2>지원 범위</h2><p class="note">Windows 64비트 · CUDA와 BF16을 지원하는 NVIDIA GPU. 이 설치 구성은 CPU로 자동 전환하지 않습니다. 영상의 필요한 구간을 3분 이내로 줄이고, 256MB 이하 MP4·MOV·WebM 원본을 사용하세요. 큰 원본은 먼저 필요한 구간을 별도 파일로 준비해 주세요. 원본 파일 자체는 바꾸지 않습니다.</p>
+<h2>편집기에서 사용</h2><p class="note">영상 클립 → 모자이크 또는 크롭 트래킹 → PC · SAM 2.1 Small을 선택합니다. 대상이 잘 보이는 프레임에서 박스로 지정하고 분석한 뒤 결과를 확인하세요. 모자이크는 놓친 구간을 전체 가림으로 보호하고 내보내기를 막습니다. 크롭은 마지막 확인 위치를 유지합니다. 가림·장면 전환·비슷한 대상 교차는 구간을 나누어 다시 지정해야 할 수 있습니다.</p>
+<h2>모바일에서는</h2><p class="note">모바일·브라우저 모드를 선택하세요. 얼굴 모자이크에는 BlazeFace full-range, 대상 크롭에는 EfficientDet-Lite2를 사용합니다. 모델에 없는 물체나 더 복잡한 장면은 PC SAM으로 작업하세요.</p>
+<details class="smart-details"><summary>저장소를 내려받아 직접 설치하는 경우</summary><p class="note">setup-pc-tracking.cmd 실행 후 start-studio.cmd 또는 설치된 PC 연결 프로그램을 실행하세요. 모델·런타임은 앱 소스와 분리되어 있습니다. 설치·실행 중 네트워크 오류가 나면 완료되지 않은 파일은 모델로 실행하지 않으며, 다시 설치할 때 검증된 파일을 재사용합니다.</p></details>
+<p class="asset-credit">SAM 2.1: Meta · Apache-2.0. 브라우저 MediaPipe 모델 출처와 이용 조건은 프로젝트 CREDITS를 확인하세요.</p></main></body></html>

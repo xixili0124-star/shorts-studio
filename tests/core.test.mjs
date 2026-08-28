@@ -24,10 +24,12 @@ import {applyFade,mixTimeline,extractClipAudio} from '../public/js/audio.js';
 import {Input,InputAudioTrack,AudioBufferSink} from '../public/vendor/mediabunny.min.js';
 import {exportVideo} from '../public/js/exporter.js';
 import {analyzeSilence,monoPcm} from '../public/js/silence.js';
-import {normalizedRect,mosaicAt,validMosaics,unresolvedMosaics,mergeTrackingKeys,redactSource,trackingTemplate,trackRectangle} from '../public/js/mosaic.js';
+import {normalizedRect,mosaicAt,validMosaics,unresolvedMosaics,mergeTrackingKeys,redactSource} from '../public/js/mosaic.js';
+import {createTargetTracker} from '../public/js/browser-tracking.js';
 import {chunkSpeechText,whisperCaptions,runLocalAI,installedVoices,speakInstalled,TTS_MODEL} from '../public/js/local-ai.js';
 import {cachedModel} from '../public/js/model-download.js';
 import {StudioTools} from '../public/js/studio-tools.js';
+import {PcHelpController} from '../public/js/pc-help.js';
 import {selectionRefs,resolveSelection,combineSelection,marqueeHits,captureItemSettings,planPasteSettings,applySettingsPlan,applySharedProperty,deleteSelectedItems,planBatchMove,applyBatchMove,planBatchSplit,applyBatchSplit,duplicateSelectedItems} from '../public/js/batch-edits.js';
 import {MonitorEditor} from '../public/js/monitor-editor.js';
 import {isPcVoiceOrigin,pcVoiceStatus,saveVoiceReference,generatePcVoice,referenceFromPcm,decodeVoiceReference,recordVoiceReference} from '../public/js/pc-voice.js';
@@ -1165,21 +1167,166 @@ test('mosaic validation rejects unsafe keys and version 4 persists independent m
   assert.equal(unresolvedMosaics({...project.clips[1],trimEnd:5}).length,1);
 });
 
-function texturedFrame(W,H,x,y,size=26,frequency=1){
-  const gray=new Float32Array(W*H).fill(.08);
-  for(let j=0;j<size;j++)for(let i=0;i<size;i++)gray[(y+j)*W+x+i]=.5+.2*Math.sin(i*.61*frequency)+.18*Math.cos(j*.83*frequency);
-  return gray;
+test('dense PC tracking paths restore with the existing v4 project format',async()=>{
+  reset();const step=180/2701,keys=Array.from({length:2701},(_,i)=>keyFixture(i*step,{duration:step,x:.1+i/20000}));
+  const effect=maskFixture({mode:'tracked',range:[0,180],keyframes:keys});
+  const cropKeys=keys.map(({duration,...key})=>key);
+  cropKeys.push({...cropKeys.at(-1),time:180});
+  project.clips=[await fixtureClip('dense-tracking',180,'video',{mosaics:[effect],
+    cropTracking:{version:1,enabled:true,zoom:1.15,anchorX:.5,anchorY:.5,keys:cropKeys}})];
+  const before=captureDocument();assert.equal(before.version,4);validateDocument(before,[...assets.values()]);
+  project.clips=[];restoreDocument(before);assert.deepEqual(captureDocument(),before);
+  assert.equal(project.clips[0].mosaics[0].keyframes.length,2701);assert.equal(project.clips[0].cropTracking.keys.length,2702);
+  assert.equal(mosaicAt(project.clips[0].mosaics[0],179.99).full,false);
+  assert.equal(cropTrackingAt(project.clips[0],179.99).lost,false);
+});
+
+// 실제 추론·녹음 대신 모델 파일 실패와 가짜 PC 응답으로 패널의 동의 경계를 확인합니다.
+async function trackingUiFixture(){
+  reset();
+  const effect=maskFixture({mode:'tracked',range:[1,5],keyframes:[keyFixture(1),keyFixture(4.9,{duration:.1})]});
+  const crop={version:1,enabled:true,zoom:1.15,anchorX:.5,anchorY:.5,
+    keys:[{time:0,x:.15,y:.2,w:.3,h:.4,confidence:.8,lost:false},{time:4,x:.25,y:.2,w:.3,h:.4,confidence:.8,lost:false}]};
+  project.clips=[await fixtureClip('saved-tracking',6,'video',{start:0,trimStart:1,trimEnd:5,mosaics:[effect],cropTracking:crop})];
+  const selected=project.clips[0];selected.file=assets.get(selected.assetId).file;
+  const before=captureDocument(),commits=[];
+  const owner=Object.assign(Object.create(StudioTools.prototype),{
+    job:null,trackingEngine:'browser',trackingEngineChosen:false,trackingDownloads:{mosaic:false,crop:false},
+    pcTracking:{status:null,error:'',checking:false,accepted:false},
+    progress(){},drawMosaic(){},drawCropTracking(){},updateTrackingSettings(){},refreshPcTracking(){},
+    run:async(kind,work)=>work(new AbortController().signal),close(){},
+    hooks:{player:{time:1},commit:(snapshot,label)=>commits.push({snapshot,label}),toast(){}}
+  });
+  const select=task=>{
+    owner.state=task==='mosaic'?{kind:'mosaic',clip:selected,range:{start:0,duration:4},before,
+      effects:structuredClone(selected.mosaics),index:0,time:2,edited:new Set()}
+      :{kind:'crop-tracking',clip:selected,range:{start:0,duration:4},before,tracking:structuredClone(selected.cropTracking),
+        rect:{x:.2,y:.2,w:.3,h:.4},zoom:1.15,seedTime:1,selected:true,pending:true};
+  };
+  select('mosaic');return{owner,selected,before,commits,select};
 }
-test('tracking follows textured translation but fails on occlusion and ambiguous jumps',()=>{
-  const W=128,H=128,rect={x:28/W,y:32/H,w:26/W,h:26/H};
-  for(const frequency of [1,2]){
-    const template=trackingTemplate(texturedFrame(W,H,28,32,26,frequency),W,H,rect);let previous=rect;
-    for(let i=1;i<=6;i++){const next=trackRectangle(texturedFrame(W,H,28+i*2,32+i,26,frequency),W,H,template,previous);assert.equal(next.lost,false);assert.ok(Math.abs(next.x*W-(28+i*2))<1);assert.ok(Math.abs(next.y*H-(32+i))<1);previous=next;}
-    assert.equal(trackRectangle(new Float32Array(W*H).fill(.08),W,H,template,previous).lost,true);
-  }
-  assert.throws(()=>trackingTemplate(new Float32Array(W*H),W,H,rect),/특징/);
-  const template=trackingTemplate(texturedFrame(W,H,28,32),W,H,rect);
-  assert.equal(trackRectangle(texturedFrame(W,H,46,32),W,H,template,rect).lost,true);
+
+test('tracking cards keep separate first-download consent and preserve saved paths when a model is absent',async()=>{
+  const saved={fetch:globalThis.fetch,caches:globalThis.caches,createImageBitmap:globalThis.createImageBitmap};
+  const ui=await trackingUiFixture(),calls=[];
+  globalThis.caches={open:async()=>({match:async()=>undefined})};
+  globalThis.createImageBitmap=async()=>{throw new Error('a missing model cannot decode media');};
+  globalThis.fetch=async(url,options)=>{calls.push({url,options});return new Response('',{status:404});};
+  try{
+    for(const [task,name,file,megabytes] of [
+      ['mosaic','BlazeFace full-range','blazeface-full-range-f16-v1.tflite','13.3'],
+      ['crop','EfficientDet-Lite2','efficientdet-lite2-f32-v1.tflite','35.3']
+    ]){
+      ui.select(task);const owner=ui.owner,markup=owner.trackingSettings(task);
+      assert.ok(markup.includes(name));assert.ok(markup.includes('최초 '+megabytes+'MB'));
+      assert.match(markup,/data-smart-input="tracking-download"/);
+      assert.doesNotMatch(markup,/data-smart-input="tracking-download" checked|tracking-pc-consent/);
+      assert.deepEqual(owner.trackingOptions(task),{engine:'browser',allowModelDownload:false});
+      const draft=structuredClone(task==='mosaic'?owner.state.effects:owner.state.tracking),count=calls.length;
+      const run=()=>task==='mosaic'?owner.track():owner.analyzeCropTracking();
+      await assert.rejects(run,{code:'MODEL_DOWNLOAD_REQUIRED'});assert.equal(calls.length,count);
+      owner.input({dataset:{smartInput:'tracking-download'},type:'checkbox',checked:true});
+      assert.equal(owner.trackingOptions(task).allowModelDownload,true);
+      assert.equal(owner.trackingDownloads[task==='mosaic'?'crop':'mosaic'],false);
+      assert.match(owner.trackingSettings(task),/data-smart-input="tracking-download" checked/);
+      await assert.rejects(run,{code:'MODEL_DOWNLOAD_FAILED'});assert.equal(calls.length,count+1);
+      assert.ok(calls.at(-1).url.endsWith('/vendor/mediapipe/models/'+file));
+      assert.equal(calls.at(-1).options.body,undefined);
+      assert.deepEqual(task==='mosaic'?owner.state.effects:owner.state.tracking,draft);
+      assert.deepEqual(captureDocument(),ui.before);assert.equal(ui.commits.length,0);
+      owner.input({dataset:{smartInput:'tracking-download'},type:'checkbox',checked:false});
+      assert.deepEqual(owner.trackingDownloads,{mosaic:false,crop:false});
+    }
+  }finally{Object.assign(globalThis,saved);reset();}
+});
+
+test('PC tracking requires explicit consent and retains the old path until the reviewed result is applied',async()=>{
+  const saved={fetch:globalThis.fetch,location:globalThis.location},ui=await trackingUiFixture(),calls=[];
+  const owner=ui.owner,jobId='d'.repeat(32);
+  globalThis.location={protocol:'https:',hostname:'example.com'};
+  globalThis.fetch=async(url,options)=>{
+    calls.push({url,options});
+    const data=url.endsWith('/track')?{jobId}:{state:'done',result:{model:'sam2.1-hiera-small',device:'cuda',
+      computeType:'bfloat16',duration:4,seedTime:1,points:[0,1,2,3].map(t=>({t,x:.4,y:.2,w:.2,h:.3,confidence:.9,lost:false}))}};
+    return new Response(JSON.stringify(data),{status:url.endsWith('/track')?202:200,headers:{'Content-Type':'application/json'}});
+  };
+  try{
+    owner.change({dataset:{smartInput:'tracking-engine'},value:'pc'});
+    assert.equal(owner.trackingEngine,'pc');assert.equal(owner.trackingEngineChosen,true);
+    assert.match(owner.trackingSettings('mosaic'),/SAM 2\.1 Small/);
+    assert.match(owner.trackingSettings('mosaic'),/tracking-pc-consent/);
+    assert.doesNotMatch(owner.trackingSettings('mosaic'),/tracking-download/);
+    await assert.rejects(()=>owner.track(),/PC 설치와 연결/);
+    globalThis.location={protocol:'http:',hostname:'127.0.0.1'};
+    owner.pcTracking.status={available:true};
+    await assert.rejects(()=>owner.track(),/이 PC에서 처리하는 안내/);
+    assert.equal(calls.length,0);assert.deepEqual(captureDocument(),ui.before);
+    owner.input({dataset:{smartInput:'tracking-pc-consent'},type:'checkbox',checked:true});
+    assert.deepEqual(owner.trackingOptions('mosaic'),{engine:'pc',allowModelDownload:false});
+    await owner.track();
+    assert.equal(calls.length,2);assert.equal(calls[0].url,'/api/pc-tracking/track');
+    assert.equal(calls[0].options.body,ui.selected.file);
+    assert.equal(calls[0].options.headers['X-Studio-Consent'],'video-to-local-tracking');
+    assert.deepEqual(captureDocument(),ui.before);assert.equal(ui.commits.length,0);
+    assert.notDeepEqual(owner.state.effects,ui.selected.mosaics);
+    await owner.saveMosaic(false);
+    assert.equal(ui.commits.length,1);assert.equal(ui.commits[0].label,'모자이크 적용');
+    assert.deepEqual(ui.selected.mosaics,owner.state.effects);
+    assert.deepEqual(ui.selected.cropTracking,ui.before.clips[0].cropTracking);
+    assert.deepEqual(ui.selected.mosaics[0].keyframes.map(key=>key.time),[1,2,3,4]);
+  }finally{Object.assign(globalThis,saved);reset();}
+});
+
+test('installation instructions stay in Help while feature panels only offer the Help action',async()=>{
+  const saved={document:globalThis.document,fetch:globalThis.fetch,location:globalThis.location};
+  const {owner}=await trackingUiFixture(),host=Object.assign(new EventTarget(),{innerHTML:'',scrollIntoView(){}}),panels=[];
+  let requests=0,opened=0;
+  const dialog={open:false,showModal(){this.open=true;opened++;}};
+  globalThis.location={protocol:'https:',hostname:'shorts-studio-75p.pages.dev',origin:'https://shorts-studio-75p.pages.dev'};
+  globalThis.document={getElementById:id=>id==='pcHelp'?host:id==='helpDialog'?dialog:null};
+  globalThis.fetch=async()=>{requests++;throw new Error('opening Help cannot request an unpaired PC');};
+  try{
+    owner.pcHelp=new PcHelpController();
+    owner.state=null;owner.audioRange=()=>null;owner.captionScope='selected';
+    owner.pcAsr={status:null,checking:false,error:''};owner.pcVoice={status:null,checking:false,error:'',profileId:'',accepted:false};
+    owner.voice={engine:'local',text:'원고 보존',voice:'F1',speed:1,steps:5,systemVoice:'',accepted:false};
+    for(const engine of ['local','pc']){
+      owner.voice.engine=engine;const voiceHost={innerHTML:''};owner.renderVoice(voiceHost);panels.push(voiceHost.innerHTML);
+      owner.captionEngine=engine;panels.push(owner.captionControls());
+    }
+    for(const engine of ['browser','pc'])for(const task of ['mosaic','crop']){
+      owner.trackingEngine=engine;panels.push(owner.trackingSettings(task));
+    }
+    for(const markup of panels){
+      assert.doesNotMatch(markup,/pc-install-steps|Windows PC 설치 파일 다운로드|href="[^"]*pc-(?:voice|asr|tracking)-setup\.html|href="[^"]*Shorts-Studio-PC-Setup\.cmd|PC용 로컬 버전|PC 사용 안내/);
+    }
+    assert.match(panels[2],/data-smart-action="pc-help"/);
+    assert.match(panels[3],/data-smart-action="pc-help"/);
+    assert.match(host.innerHTML,/href="\/downloads\/Shorts-Studio-PC-Setup\.cmd"/);
+    assert.match(host.innerHTML,/class="pc-install-steps"/);
+    assert.match(host.innerHTML,/data-pc-help="check"/);
+    for(const engine of ['voice','asr','tracking'])assert.ok(host.innerHTML.includes('/pc-'+engine+'-setup.html'));
+    await owner.action('pc-help');await owner.action('pc-help');
+    assert.equal(opened,1);assert.equal(dialog.open,true);assert.equal(requests,0);
+    const html=readFileSync(new URL('../public/studio.html',import.meta.url),'utf8');
+    const helpDialog=html.match(/<dialog id="helpDialog"[\s\S]*?<\/dialog>/)?.[0]||'';
+    assert.match(helpDialog,/<section id="pcHelp"/);
+    assert.equal((html.match(/id="pcHelp"/g)||[]).length,1);
+  }finally{Object.assign(globalThis,saved);reset();}
+});
+
+test('model detections retain the selected face and mosaic fully covers an unresolved target',()=>{
+  const rect={x:.2,y:.3,w:.15,h:.2}, detection=(x,confidence=.9)=>({...rect,x,confidence,label:'face'});
+  const tracker=createTargetTracker([detection(.2),detection(.7,.99)],rect,0);
+  const moved=tracker.step([detection(.21),detection(.7,.99)],.1);
+  assert.equal(moved.lost,false);assert.ok(Math.abs(moved.x-.21)<1e-9);
+  const lost=tracker.step([detection(.7,.99)],.2);
+  assert.equal(lost.lost,true);assert.equal(lost.x,moved.x);
+  const effect=maskFixture({mode:'tracked',range:[0,.3],keyframes:[
+    {...tracker.initial,time:0,duration:.1},{...moved,time:.1,duration:.1},{...lost,time:.2,duration:.1}
+  ]});
+  assert.equal(validMosaics([effect]),true);assert.equal(mosaicAt(effect,.2).full,true);
+  assert.throws(()=>createTargetTracker([],rect,0),{code:'TARGET_NOT_FOUND'});
 });
 
 test('mosaic replaces transparent details and fully covers unresolved sources',{skip:!canvasModule},()=>{
@@ -1861,7 +2008,7 @@ const referenceBuffer=(duration=4)=>{const data=Float32Array.from({length:Math.r
 test('PC voice only uses the local editor origin and never probes a public/mobile page',async()=>{
   for(const location of [undefined,{protocol:'https:',hostname:'example.com'},{protocol:'http:',hostname:'127.0.0.1.evil.test'},{protocol:'http:',hostname:'192.168.1.2'},{protocol:'file:',hostname:''}]){
     assert.equal(isPcVoiceOrigin(location),false);
-    await assert.rejects(()=>pcVoiceStatus({location,fetchImpl:()=>{throw new Error('must never fetch');}}),/PC용 로컬/);
+    await assert.rejects(()=>pcVoiceStatus({location,fetchImpl:()=>{throw new Error('must never fetch');}}),/PC 연결/);
   }
   assert.ok(isPcVoiceOrigin(pcLocation));assert.ok(isPcVoiceOrigin({protocol:'http:',hostname:'localhost'}));
   let call;
@@ -1931,7 +2078,7 @@ test('voice mode UI preserves browser voices and exposes PC setup without public
   const owner={voice:{engine:'local',text:'원고 유지',voice:'F1',speed:1,steps:5,systemVoice:'',accepted:false},pcVoice:{status:null,error:'',checking:false,profileId:'',accepted:false},pcVoiceMarkup:StudioTools.prototype.pcVoiceMarkup};const host={innerHTML:''};
   try{
     StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/Supertonic 2/);assert.match(host.innerHTML,/원고 유지/);assert.match(host.innerHTML,/value="device"/);assert.match(host.innerHTML,/value="pc"/);
-    owner.voice.engine='pc';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/PC 사용 안내/);assert.match(host.innerHTML,/data-smart-action="voice" disabled/);assert.match(host.innerHTML,/원고 유지/);assert.doesNotMatch(host.innerHTML,/http:\/\/127\.0\.0\.1/);
+    owner.voice.engine='pc';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/data-smart-action="pc-help"/);assert.match(host.innerHTML,/data-smart-action="voice" disabled/);assert.match(host.innerHTML,/원고 유지/);assert.doesNotMatch(host.innerHTML,/http:\/\/127\.0\.0\.1/);
     assert.match(host.innerHTML,/내 목소리 · VoxCPM2/);
     globalThis.location={protocol:'http:',hostname:'127.0.0.1'};
     owner.pcVoice.status={state:'ready',provider:'voxcpm2',localServer:true,profiles:[{id:'ref',name:'saved voice',duration:6,audioAvailable:true}]};owner.pcVoice.profileId='ref';
@@ -2042,8 +2189,8 @@ test('PC ASR blocks public origins and checks the exact local provider without s
   for(const location of [undefined,{protocol:'https:',hostname:'example.com'},{protocol:'http:',hostname:'127.0.0.1.evil.test'},{protocol:'http:',hostname:'192.168.1.2'},{protocol:'file:',hostname:''}]){
     assert.equal(isPcAsrOrigin(location),false);
     const options={location,fetchImpl:()=>{throw new Error('must never fetch');}};
-    await assert.rejects(()=>pcAsrStatus(options),/PC용 로컬/);
-    await assert.rejects(()=>transcribePcAudio(pcAsrPcm(),options),/PC용 로컬/);
+    await assert.rejects(()=>pcAsrStatus(options),/PC 연결/);
+    await assert.rejects(()=>transcribePcAudio(pcAsrPcm(),options),/PC 연결/);
   }
   assert.ok(isPcAsrOrigin(pcLocation));assert.ok(isPcAsrOrigin({protocol:'http:',hostname:'localhost'}));
   let call;
@@ -2175,12 +2322,12 @@ test('PC ASR UI exposes setup and actual device while keeping hosted Tiny usable
   reset();const saved=globalThis.location;
   const owner=Object.assign(Object.create(StudioTools.prototype),{captionScope:'selected',captionEngine:'local',pcAsr:{status:null,error:'',checking:false},audioRange:()=>({item:{name:'선택한 말소리'},duration:1})});
   try{
-    globalThis.location={protocol:'https:',hostname:'example.com'};let html=owner.captionControls();assert.match(html,/value="local" selected/);assert.match(html,/Whisper Tiny/);assert.match(html,/pc-asr-setup.html/);assert.doesNotMatch(html,/http:\/\/127\.0\.0\.1|http:\/\/localhost/);
-    owner.captionEngine='pc';html=owner.captionControls();assert.match(html,/현재 주소에서는 PC 서버에 연결하지/);assert.match(html,/data-smart-action="captions" disabled/);
-    globalThis.location=pcLocation;owner.pcAsr.status=pcAsrReady();html=owner.captionControls();assert.match(html,/실행 장치: GPU \(CUDA\) · float16/);assert.doesNotMatch(html,/data-smart-action="captions" disabled/);
-    owner.pcAsr.status=pcAsrReady({busy:true,reason:'이 PC에서만 처리합니다.'});html=owner.captionControls();assert.match(html,/다른 PC AI 작업이 진행 중/);assert.match(html,/data-smart-action="captions" disabled/);
-    owner.pcAsr.status=pcAsrReady({device:'cpu',computeType:'int8'});assert.match(owner.captionControls(),/실행 장치: CPU · int8/);
-    owner.pcAsr.status=pcAsrReady({available:false,configured:false});assert.match(owner.captionControls(),/초기 설치/);assert.match(owner.captionControls(),/data-smart-action="captions" disabled/);assert.equal(owner.captionEngine,'pc');
+    globalThis.location={protocol:'https:',hostname:'example.com'};let html=owner.captionControls();assert.match(html,/value="local" selected/);assert.match(html,/Whisper Tiny/);assert.match(html,/data-smart-action="pc-help"/);assert.doesNotMatch(html,/http:\/\/127\.0\.0\.1|http:\/\/localhost/);
+    owner.captionEngine='pc';html=owner.captionControls();assert.match(html,/이 사이트의 PC 연결을 허용/);assert.match(html,/data-smart-action="captions" disabled/);
+    globalThis.location=pcLocation;owner.pcAsr.status=pcAsrReady();html=owner.captionControls();assert.match(html,/GPU \(CUDA\) · float16/);assert.doesNotMatch(html,/data-smart-action="captions" disabled/);
+    owner.pcAsr.status=pcAsrReady({busy:true,reason:'이 PC에서만 처리합니다.'});html=owner.captionControls();assert.match(html,/다른 PC 작업이 진행 중/);assert.match(html,/data-smart-action="captions" disabled/);
+    owner.pcAsr.status=pcAsrReady({device:'cpu',computeType:'int8'});assert.match(owner.captionControls(),/CPU · int8/);
+    owner.pcAsr.status=pcAsrReady({available:false,configured:false});assert.match(owner.captionControls(),/도움말에서 설치 확인/);assert.match(owner.captionControls(),/data-smart-action="captions" disabled/);assert.equal(owner.captionEngine,'pc');
     assert.equal(pcAsrDeviceLabel({device:'unknown'}),'실행 장치 미확인');
   }finally{globalThis.location=saved;reset();}
 });

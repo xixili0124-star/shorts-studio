@@ -8,6 +8,11 @@ let sessionConnection = null;
 const abortError = () => new DOMException('PC 연결을 취소했습니다.', 'AbortError');
 const storageDefault = () => { try { return globalThis.localStorage; } catch { return null; } };
 
+function approvedTransport(token, location) {
+  if (!SITES.has(location?.origin) || !TOKEN.test(token || '')) throw new Error('PC 연결 정보를 확인하지 못했습니다.');
+  return { base:PC_BRIDGE_URL, headers:{Authorization:'Bearer ' + token}, options:{targetAddressSpace:'loopback'} };
+}
+
 export function isLoopbackEditor(location = globalThis.location) {
   return !!location && location.protocol === 'http:' && ['localhost','127.0.0.1'].includes(location.hostname);
 }
@@ -31,7 +36,7 @@ export function pcTransportContext(location = globalThis.location, storage = sto
     const error = new Error('도움말의 PC 연결에서 설치 확인을 눌러 이 편집기를 연결해 주세요. 프로젝트를 옮길 필요는 없습니다.');
     error.code = 'PC_CONNECTION_REQUIRED';throw error;
   }
-  return { base:PC_BRIDGE_URL, headers:{Authorization:'Bearer ' + connection.token}, options:{targetAddressSpace:'loopback'} };
+  return approvedTransport(connection.token, location);
 }
 export function rememberPcConnection(token, location = globalThis.location, storage = storageDefault()) {
   if (!SITES.has(location?.origin) || !TOKEN.test(token || '')) throw new Error('PC 연결 정보를 확인하지 못했습니다.');
@@ -41,14 +46,19 @@ export function rememberPcConnection(token, location = globalThis.location, stor
   globalThis.window?.dispatchEvent(new CustomEvent('studio-pc-connection'));
 }
 
-async function bridgeRequest(path, {body, signal, location = globalThis.location, fetchImpl = globalThis.fetch, paired = true, storage} = {}) {
+async function bridgeRequest(path, {body, signal, location = globalThis.location, fetchImpl = globalThis.fetch, paired = true, storage, approvalToken} = {}) {
   if (!['/status','/pair/start','/pair/result','/revoke'].includes(path)) throw new Error('지원하지 않는 PC 연결 요청입니다.');
   if (signal?.aborted) throw abortError();
-  const transport = paired ? pcTransportContext(location, storage) : {base:PC_BRIDGE_URL, headers:{}, options:{targetAddressSpace:'loopback'}};
   if (!isPcSupportedSite(location)) throw new Error('이 주소에서는 PC 연결을 지원하지 않습니다.');
+  const transport = paired
+    ? (approvalToken === undefined ? pcTransportContext(location, storage) : approvedTransport(approvalToken, location))
+    : {base:PC_BRIDGE_URL, headers:{}, options:{targetAddressSpace:'loopback'}};
   const ctrl = new AbortController(), cancel = () => ctrl.abort();
   signal?.addEventListener('abort', cancel, {once:true});
-  const timer = setTimeout(() => ctrl.abort(), 5000);
+  // 최초 연결만 브라우저의 권한 선택을 기다립니다. 상태 확인과 결과 조회는 짧게 유지합니다.
+  const initialPairRequest = path === '/pair/start';
+  let timedOut = false;
+  const timer = setTimeout(() => { timedOut = true;ctrl.abort(); }, initialPairRequest ? 60000 : 5000);
   try {
     const response = await fetchImpl(transport.base + '/api/pc-bridge' + path, {
       ...transport.options, method:body === undefined ? 'GET':'POST',
@@ -63,6 +73,10 @@ async function bridgeRequest(path, {body, signal, location = globalThis.location
     return data;
   } catch (error) {
     if (signal?.aborted) throw abortError();
+    if (initialPairRequest && timedOut) {
+      const timeout = new Error('PC 연결 응답을 60초 동안 받지 못했습니다. 원래 편집기 창에서 브라우저의 로컬 네트워크 허용 요청을 확인한 뒤 다시 설치 확인을 눌러 주세요.');
+      timeout.code = 'PC_PAIR_START_TIMEOUT';throw timeout;
+    }
     if (error instanceof TypeError || error.name === 'AbortError') throw new Error('PC 연결 프로그램이 꺼져 있거나 브라우저의 로컬 네트워크 권한이 필요합니다. 도움말에서 실행한 뒤 설치 확인을 눌러 주세요.');
     throw error;
   } finally { clearTimeout(timer);signal?.removeEventListener('abort', cancel); }
@@ -82,10 +96,22 @@ export async function connectPc({signal, location = globalThis.location, fetchIm
   const popup = windowImpl?.open('about:blank', 'shorts-studio-pc-approval', 'width=620,height=600');
   if (!popup) throw new Error('PC 연결 확인 창이 차단됐습니다. 이 사이트의 팝업을 허용한 뒤 다시 눌러 주세요.');
   try {
-    onProgress('PC 연결 프로그램을 찾는 중…');
+    // 새 창이 원래 편집기의 브라우저 권한 안내를 가리지 않도록 정적인 설명을 남깁니다.
+    try {
+      const doc = popup.document;
+      if (doc?.body) {
+        doc.title = 'PC 연결을 기다리는 중';
+        doc.body.textContent = 'PC 연결을 기다리고 있습니다. 원래 편집기 창으로 돌아가 브라우저가 요청하는 로컬 네트워크 접근을 허용해 주세요. 연결되면 이 창에 PC 연결 승인 화면이 열립니다.';
+        if (doc.body.style) doc.body.style.cssText = 'margin:32px;font-family:system-ui,sans-serif;line-height:1.7';
+      }
+    } catch {}
+    try { windowImpl?.focus?.(); } catch {}
+    onProgress('PC 연결 프로그램을 찾는 중… 원래 편집기 창에서 브라우저가 로컬 네트워크 접근을 요청하면 허용해 주세요.');
     const pending = await bridgeRequest('/pair/start', {body:{},signal,location,fetchImpl,paired:false});
+    if (signal?.aborted) throw abortError();
     if (!/^[a-f0-9]{32}$/.test(pending.requestId || '') || !TOKEN.test(pending.requestSecret || '') || pending.approvalPath !== '/pc-connect.html?request=' + pending.requestId) throw new Error('PC 연결 확인 정보를 읽지 못했습니다.');
     popup.location = PC_BRIDGE_URL + pending.approvalPath;
+    try { popup.focus?.(); } catch {}
     onProgress('열린 PC 확인 창에서 이 편집기에 연결을 허용해 주세요.');
     const deadline = Date.now() + 175000;
     while (Date.now() < deadline) {
@@ -93,8 +119,12 @@ export async function connectPc({signal, location = globalThis.location, fetchIm
       const result = await bridgeRequest('/pair/result', {body:{requestId:pending.requestId,requestSecret:pending.requestSecret},signal,location,fetchImpl,paired:false});
       if (result.state === 'approved') {
         if (signal?.aborted) throw abortError();
+        if (!TOKEN.test(result.token || '')) throw new Error('PC 연결 정보를 확인하지 못했습니다.');
+        // 마지막 상태 확인 중 취소되면 승인 토큰을 저장소나 세션에 남기지 않습니다.
+        const status = await pcConnectionStatus({signal,location,fetchImpl,storage,approvalToken:result.token});
+        if (signal?.aborted) throw abortError();
         rememberPcConnection(result.token,location,storage);
-        return pcConnectionStatus({signal,location,fetchImpl,storage});
+        return status;
       }
       if (result.state !== 'pending') throw new Error('PC 연결 상태를 확인하지 못했습니다.');
       await new Promise((resolve,reject) => {

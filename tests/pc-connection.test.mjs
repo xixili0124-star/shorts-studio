@@ -63,6 +63,165 @@ function popupFixture() {
   return { popup, windowImpl };
 }
 
+const pairStarted = () => json({ requestId, requestSecret, approvalPath: '/pc-connect.html?request=' + requestId }, 201);
+const waitForAbort = signal => new Promise((resolve, reject) => {
+  const cancel = () => reject(new DOMException('cancelled', 'AbortError'));
+  signal.addEventListener('abort', cancel, { once: true });
+  if (signal.aborted) cancel();
+});
+
+test('the first pairing request waits for permission for 60 seconds and reports its own timeout', async t => {
+  const store = storage(), { popup, windowImpl } = popupFixture();
+  await reset(store);
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  let requestSignal;
+  try {
+    const pending = connectPc({ location: site, storage: store, windowImpl, fetchImpl: (url, options) => {
+      assert.ok(url.endsWith('/pair/start'));
+      requestSignal = options.signal;
+      return waitForAbort(requestSignal);
+    } });
+    const rejected = assert.rejects(pending, error => {
+      assert.equal(error.code, 'PC_PAIR_START_TIMEOUT');
+      assert.match(error.message, /60초/);
+      assert.match(error.message, /원래 편집기 창/);
+      return true;
+    });
+    t.mock.timers.tick(5000);
+    assert.equal(requestSignal.aborted, false);
+    t.mock.timers.tick(54999);
+    assert.equal(requestSignal.aborted, false);
+    t.mock.timers.tick(1);
+    await rejected;
+    assert.equal(requestSignal.aborted, true);
+    assert.equal(popup.closed, true);
+    assert.equal(store.getItem(PC_CONNECTION_KEY), null);
+    assert.equal(savedPcConnection(site, store), null);
+  } finally {
+    t.mock.timers.reset();
+    await reset(store);
+  }
+});
+
+test('status and approval result requests retain the five second timeout', async t => {
+  const store = storage();
+  for (const phase of ['status', 'pair/result']) {
+    await reset(store);
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let requestSignal, ready;
+    const waiting = new Promise(resolve => { ready = resolve; });
+    const { popup, windowImpl } = popupFixture();
+    try {
+      if (phase === 'status') rememberPcConnection(token, site, store);
+      const options = { location: site, storage: store, windowImpl, fetchImpl: (url, init) => {
+        if (url.endsWith('/pair/start')) return pairStarted();
+        assert.ok(url.endsWith('/' + phase));
+        requestSignal = init.signal;
+        ready();
+        return waitForAbort(requestSignal);
+      } };
+      const pending = phase === 'status' ? pcConnectionStatus(options) : connectPc(options);
+      const rejected = assert.rejects(pending, error => {
+        assert.notEqual(error.code, 'PC_PAIR_START_TIMEOUT');
+        assert.match(error.message, /PC 연결 프로그램/);
+        assert.doesNotMatch(error.message, /60초/);
+        return true;
+      });
+      await waiting;
+      t.mock.timers.tick(4999);
+      assert.equal(requestSignal.aborted, false);
+      t.mock.timers.tick(1);
+      await rejected;
+      assert.equal(requestSignal.aborted, true);
+      if (phase === 'pair/result') {
+        assert.equal(popup.closed, true);
+        assert.equal(savedPcConnection(site, store), null);
+      }
+    } finally {
+      t.mock.timers.reset();
+      await reset(store);
+    }
+  }
+});
+
+test('pairing shows static permission guidance and safely focuses the editor before the approval popup', async () => {
+  const store = storage();
+  for (const unavailable of [false, true]) {
+    await reset(store);
+    const { popup, windowImpl } = popupFixture(), events = [], progress = [];
+    const document = { title: '', body: { textContent: '', style: {} } };
+    Object.defineProperty(popup, 'document', { get() {
+      if (unavailable) throw new Error('document is not accessible');
+      return document;
+    } });
+    windowImpl.focus = () => { events.push('editor-focus');if (unavailable) throw new Error('focus is not available'); };
+    popup.focus = () => { events.push('popup-focus');if (unavailable) throw new Error('focus is not available'); };
+    try {
+      await connectPc({ location: site, storage: store, windowImpl, onProgress: text => progress.push(text), fetchImpl: async (url, options) => {
+        if (url.endsWith('/pair/start')) {
+          assert.deepEqual(events, ['editor-focus']);
+          if (!unavailable) {
+            assert.match(document.body.textContent, /원래 편집기 창/);
+            assert.match(document.body.textContent, /로컬 네트워크/);
+          }
+          return pairStarted();
+        }
+        if (url.endsWith('/pair/result')) {
+          assert.deepEqual(events, ['editor-focus', 'popup-focus']);
+          assert.equal(popup.location, PC_BRIDGE_URL + '/pc-connect.html?request=' + requestId);
+          return json({ state: 'approved', token });
+        }
+        assert.equal(url, PC_BRIDGE_URL + '/api/pc-bridge/status');
+        assert.equal(options.headers.Authorization, 'Bearer ' + token);
+        assert.equal(store.getItem(PC_CONNECTION_KEY), null);
+        assert.equal(savedPcConnection(site, store), null);
+        return json(bridgeStatus());
+      } });
+      assert.match(progress[0], /원래 편집기 창/);
+      assert.match(progress[0], /로컬 네트워크/);
+      assert.equal(savedPcConnection(site, store).token, token);
+      assert.equal(popup.closed, true);
+    } finally { await reset(store); }
+  }
+});
+
+test('a network rejection during initial pairing is not mislabeled as the 60 second timeout', async () => {
+  const store = storage(), { popup, windowImpl } = popupFixture();
+  await reset(store);
+  try {
+    await assert.rejects(connectPc({ location: site, storage: store, windowImpl, fetchImpl: async () => {
+      throw new TypeError('network request failed');
+    } }), error => {
+      assert.notEqual(error.code, 'PC_PAIR_START_TIMEOUT');
+      assert.doesNotMatch(error.message, /60초/);
+      return true;
+    });
+    assert.equal(popup.closed, true);
+    assert.equal(savedPcConnection(site, store), null);
+  } finally { await reset(store); }
+});
+
+test('explicit cancellation during the first permission wait closes the popup without saving approval', async () => {
+  const store = storage(), controller = new AbortController(), { popup, windowImpl } = popupFixture();
+  await reset(store);
+  let requestSignal;
+  try {
+    const pending = connectPc({ signal: controller.signal, location: site, storage: store, windowImpl, fetchImpl: (url, options) => {
+      assert.ok(url.endsWith('/pair/start'));
+      requestSignal = options.signal;
+      return waitForAbort(requestSignal);
+    } });
+    const rejected = assert.rejects(pending, { name: 'AbortError' });
+    controller.abort();
+    await rejected;
+    assert.equal(requestSignal.aborted, true);
+    assert.equal(popup.location, '');
+    assert.equal(popup.closed, true);
+    assert.equal(store.getItem(PC_CONNECTION_KEY), null);
+    assert.equal(savedPcConnection(site, store), null);
+  } finally { await reset(store); }
+});
+
 test('pairing navigates only to the fixed approval path and saves a successfully approved token', async () => {
   const store = storage(), { popup, windowImpl } = popupFixture(), calls = [];await reset(store);
   try {
@@ -102,6 +261,33 @@ test('a late approved response after cancellation cannot persist a bearer token'
     await polling;controller.abort();approve(json({ state: 'approved', version: 1, token }));
     await assert.rejects(pending, { name: 'AbortError' });
     assert.equal(store.getItem(PC_CONNECTION_KEY), null);assert.equal(savedPcConnection(site, store), null);assert.equal(popup.closed, true);
+  } finally { await reset(store); }
+});
+
+test('cancelling the final status check cannot persist the approved token even after a late response', async () => {
+  const store = storage(), controller = new AbortController(), { popup, windowImpl } = popupFixture();
+  await reset(store);
+  let checking, finishStatus;
+  const statusStarted = new Promise(resolve => { checking = resolve; });
+  try {
+    const pending = connectPc({ signal: controller.signal, location: site, storage: store, windowImpl, fetchImpl: async (url, options) => {
+      if (url.endsWith('/pair/start')) return pairStarted();
+      if (url.endsWith('/pair/result')) return json({ state: 'approved', token });
+      assert.equal(url, PC_BRIDGE_URL + '/api/pc-bridge/status');
+      assert.equal(options.headers.Authorization, 'Bearer ' + token);
+      checking();
+      return new Promise(resolve => { finishStatus = resolve; });
+    } });
+    const rejected = assert.rejects(pending, { name: 'AbortError' });
+    await statusStarted;
+    assert.equal(store.getItem(PC_CONNECTION_KEY), null);
+    assert.equal(savedPcConnection(site, store), null);
+    controller.abort();
+    finishStatus(json(bridgeStatus()));
+    await rejected;
+    assert.equal(store.getItem(PC_CONNECTION_KEY), null);
+    assert.equal(savedPcConnection(site, store), null);
+    assert.equal(popup.closed, true);
   } finally { await reset(store); }
 });
 

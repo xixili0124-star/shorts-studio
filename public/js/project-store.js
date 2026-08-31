@@ -101,7 +101,9 @@ export class History {
 
 function checkedAssetId(file, options) {
   if (!(file instanceof Blob) || !file.size) throw new Error('빈 파일은 추가할 수 없습니다.');
-  if (file.size > 600 * 1024 * 1024) throw new Error('실험판은 파일 하나당 600MB까지 지원합니다. 필요한 구간을 잘라서 가져와 주세요.');
+  // 파일은 통째로 메모리에 올리지 않고 Blob 으로 흘려 읽습니다. 상한은 브라우저가
+  // 한 조각으로 다룰 수 있는 크기와 .shorts 저장을 고려한 값입니다.
+  if (file.size > 2 * 1024 * 1024 * 1024) throw new Error('파일 하나당 2GB까지 지원합니다. 필요한 구간을 잘라서 가져와 주세요.');
   const id = options.id || uid();
   if (!assets.has(id) && assets.size >= 200) throw new Error('실험판에는 소재를 최대 200개까지 추가할 수 있습니다.');
   return id;

@@ -9,6 +9,15 @@ import { uid } from './util.js';
 const EPS = 1e-6;
 export const MAX_SEPARATED_AUDIO_BYTES = 128 * 1024 * 1024;
 const checkAbort = signal => { if (signal?.aborted) throw new DOMException('취소됨', 'AbortError'); };
+/** 진행률 알림을 솎아냅니다. 안내가 너무 자주 바뀌면 오히려 읽을 수 없습니다. */
+function throttled(report, interval = 400) {
+  let last = 0;
+  return fraction => {
+    const now = Date.now();
+    if (now - last < interval) return;
+    last = now;report(fraction);
+  };
+}
 const nextTurn = () => new Promise(resolve => {
   const channel = new MessageChannel();
   channel.port1.onmessage = () => { channel.port1.close(); channel.port2.close(); resolve(); };
@@ -67,12 +76,17 @@ async function stereoBuffer(buffer, signal) {
 }
 
 /** 채널과 원본 시각을 유지하는 PCM16 WAV입니다. ASR용 모노 인코더와 분리합니다. */
-export async function separatedAudioFile(buffer, name, { signal } = {}) {
+export async function separatedAudioFile(buffer, name, { signal, onProgress = null } = {}) {
   checkAbort(signal);
   const channels = buffer.numberOfChannels, rate = buffer.sampleRate, frames = buffer.length;
   const bytes = frames * channels * 2;
-  if (![1, 2].includes(channels) || !Number.isInteger(rate) || rate <= 0 || !Number.isSafeInteger(frames)
-    || frames <= 0 || bytes > MAX_SEPARATED_AUDIO_BYTES || bytes > 0xffffffff - 36) throw new Error('분리할 오디오 크기나 형식이 올바르지 않습니다.');
+  if (![1, 2].includes(channels) || !Number.isInteger(rate) || rate <= 0 || !Number.isSafeInteger(frames) || frames <= 0) {
+    throw new Error('분리할 오디오 크기나 형식이 올바르지 않습니다.');
+  }
+  if (bytes > MAX_SEPARATED_AUDIO_BYTES || bytes > 0xffffffff - 36) {
+    const tooBig = new Error('분리한 소리가 너무 큽니다. 필요한 구간을 잘라서 가져와 주세요.');
+    tooBig.code = 'AUDIO_TOO_LARGE';throw tooBig;
+  }
   const header = new ArrayBuffer(44), view = new DataView(header);
   const text = (at, value) => { for (let i = 0; i < value.length; i++) view.setUint8(at + i, value.charCodeAt(i)); };
   text(0, 'RIFF'); view.setUint32(4, 36 + bytes, true); text(8, 'WAVE'); text(12, 'fmt ');
@@ -90,6 +104,7 @@ export async function separatedAudioFile(buffer, name, { signal } = {}) {
       output.setInt16((frame * channels + channel) * 2, Math.round(value * (value < 0 ? 32768 : 32767)), true);
     }
     parts.push(chunk);
+    onProgress?.((start + count) / frames);
     if (start + count < frames) await nextTurn();
   }
   checkAbort(signal);
@@ -105,20 +120,31 @@ export async function prepareVideoAudio(asset, { signal, onStatus = () => {} } =
   if (!asset || asset.kind !== 'video' || assets.get(asset.id) !== asset) throw new Error('원본 영상 소재를 다시 선택해 주세요.');
   const cached = sourceAudioAsset(asset.id);
   if (cached) return { asset: cached, created: false };
-  if (asset.base.hasAudio === false) return { asset: null, created: false };
+  if (asset.base.hasAudio === false) return { asset: null, created: false, silent: true };
   if (asset.base.hasAudio !== true) {
     const probe = await probeVideoAudio(asset.file, signal);
     asset.base.hasAudio = probe.hasAudio;
     asset.base.audioCodec = probe.codec;
-    if (!probe.hasAudio) return { asset: null, created: false };
+    if (!probe.hasAudio) return { asset: null, created: false, silent: true };
   }
-  onStatus('영상 원음을 분리하는 중…');
-  const decoded = await extractClipAudio({ ...asset.base, file: asset.file, trimStart: 0, trimEnd: asset.duration }, signal,
-    { ignoreMute: true, strict: true, allChannels: true, allowBoundaryGaps: true, maxBytes: MAX_SEPARATED_AUDIO_BYTES });
-  if (!decoded) throw new Error('영상에 오디오 트랙은 있지만 소리를 읽지 못했습니다.');
-  const buffer = await stereoBuffer(decoded, signal);
-  checkAbort(signal);
-  const file = await separatedAudioFile(buffer, asset.file.name, { signal });
+  onStatus('영상 원음을 분리하는 중… 0%');
+  const percent = (label, fraction) => onStatus(label + ' ' + Math.min(99, Math.round(fraction * 100)) + '%');
+  let buffer, file;
+  try {
+    const decoded = await extractClipAudio({ ...asset.base, file: asset.file, trimStart: 0, trimEnd: asset.duration }, signal,
+      { ignoreMute: true, strict: true, allChannels: true, allowBoundaryGaps: true, maxBytes: MAX_SEPARATED_AUDIO_BYTES,
+        onProgress: throttled(fraction => percent('영상 원음을 분리하는 중…', fraction)) });
+    if (!decoded) throw new Error('영상에 오디오 트랙은 있지만 소리를 읽지 못했습니다.');
+    buffer = await stereoBuffer(decoded, signal);
+    checkAbort(signal);
+    file = await separatedAudioFile(buffer, asset.file.name,
+      { signal, onProgress: throttled(fraction => percent('원음 파일을 만드는 중…', fraction)) });
+  } catch (error) {
+    // 긴 영상은 원음을 통째로 메모리에 펼칠 수 없습니다. 추가 자체를 막는 대신
+    // 예전 편집기처럼 영상 클립이 자기 소리를 그대로 내도록 두고 분리만 건너뜁니다.
+    if (error.code !== 'AUDIO_TOO_LARGE') throw error;
+    return { asset: null, created: false, oversized: true, reason: error.message };
+  }
   checkAbort(signal);
   if (assets.get(asset.id) !== asset) throw new Error('소리 분리 중 원본 소재가 변경되었습니다. 다시 추가해 주세요.');
   const existing = sourceAudioAsset(asset.id);
@@ -164,8 +190,10 @@ export async function insertMediaAsset(assetId, { time = 0, trackId, placement, 
     const audioPlan = prepared.asset ? planAudioTrack(videoPlan.start, duration) : null;
     // 영상과 분리한 원음은 프리미어처럼 처음부터 연결해 둡니다. 우클릭 메뉴에서 풀 수 있습니다.
     const linkId = prepared.asset ? uid() : null;
+    // 분리를 건너뛴 영상은 음소거하지 않습니다. 음소거하면 소리가 완전히 사라집니다.
+    const separating = asset.kind === 'video' && !prepared.oversized;
     clip = await makeClip(assetId, { ...saved,
-      ...(asset.kind === 'video' ? { audioSeparated: true, muted: true, sourceAudioAssetId: prepared.asset?.id,
+      ...(separating ? { audioSeparated: true, muted: true, sourceAudioAssetId: prepared.asset?.id,
         ...(linkId ? { linkId } : {}) } : {}) });
     check();
     if (clip.el && clip.audioSeparated) clip.el.muted = true;
@@ -181,7 +209,8 @@ export async function insertMediaAsset(assetId, { time = 0, trackId, placement, 
       if (Math.abs(soundPlan.start - result.start) > EPS || soundPlan.shifts.length) throw new Error('원음을 같은 시각에 놓을 빈 오디오 트랙이 없습니다.');
       audioResult = placeTimelineItem('audio', audio, soundPlan);
     }
-    return { ...result, audioResult, audioStatus: asset.kind === 'video' ? (audio ? 'separated' : 'silent') : null };
+    return { ...result, audioResult, audioReason: prepared.reason,
+      audioStatus: asset.kind !== 'video' ? null : audio ? 'separated' : prepared.oversized ? 'inline' : 'silent' };
   } catch (error) {
     if (changed) restoreDocument(before);
     if (clip) discardStagedInstance('clip', clip.id);

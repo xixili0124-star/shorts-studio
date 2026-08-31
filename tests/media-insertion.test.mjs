@@ -184,10 +184,28 @@ test('extraction codec errors, missing decoded tails and a stale drop plan leave
   assert.deepEqual(captureDocument(), before); assert.equal(assets.size, 1);
 });
 
-test('oversized PCM is rejected before allocating the full decoded video', async () => {
+test('an over-long source skips separation and keeps the clip audible instead of refusing it', async () => {
   const asset = videoAsset('long', { duration: 7200 });
   track.computeDuration = async () => 7200; rows = [{ timestamp: 0, buffer: pcm(.001, 2, .25, 48000) }];
-  await assert.rejects(() => insertMediaAsset(asset.id), /너무 깁니다/); assert.equal(assets.size, 1); assert.equal(project.clips.length, 0);
+  const result = await insertMediaAsset(asset.id);
+  assert.equal(result.audioStatus, 'inline'); assert.equal(result.audioResult, null);
+  assert.match(result.audioReason, /너무 깁니다/);
+  // 분리를 건너뛴 클립은 음소거하지 않습니다. 음소거하면 소리가 완전히 사라집니다.
+  const clip = project.clips[0];
+  assert.ok(!clip.audioSeparated); assert.ok(!clip.muted); assert.equal(clip.linkId, undefined);
+  assert.equal(project.audio.tracks.length, 0);
+  assert.equal(assets.size, 1, '분리한 오디오 소재를 남기지 않습니다');
+  assert.equal(hasClipAudio(), true, '내보내기와 자동자막이 이 클립의 소리를 포함합니다');
+  assert.doesNotThrow(() => validateDocument(captureDocument(), savedRecords()));
+});
+
+test('a multichannel source reaches the decode budget sooner and falls back the same way', async () => {
+  // 5.1 은 채널이 많아 스테레오보다 훨씬 짧은 길이에서 상한에 닿습니다.
+  const asset = videoAsset('surround', { duration: 150 });
+  track.computeDuration = async () => 150; rows = [{ timestamp: 0, buffer: pcm(.001, 6, .25, 48000) }];
+  const result = await insertMediaAsset(asset.id);
+  assert.equal(result.audioStatus, 'inline'); assert.equal(project.audio.tracks.length, 0);
+  assert.ok(!project.clips[0].muted); assert.equal(assets.size, 1);
 });
 
 test('cancellation or a document change during extraction cleans only staged resources', async () => {

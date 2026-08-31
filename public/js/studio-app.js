@@ -413,7 +413,10 @@ async function placeAssetImpl(id,time=null,lane=null,dropPlan=null){
     result=await insertMediaAsset(id,{time:at,trackId:targetTrack(role,lane)||undefined,placement:dropPlan?.placement,onStatus:message=>toast(message)});
   }
   selectedItems=[];selection={type:result.type,id:result.id};commit(before,'타임라인에 추가');player.seek(result.start,{allowBeyond:true});timeline.reveal(result);
-  toast(result.start.toFixed(2)+'초부터 '+(result.end-result.start).toFixed(2)+'초 추가'+(result.audioStatus==='separated'?' · 영상·원음 분리 · 각각 선택해 편집':result.audioStatus==='silent'?' · 원본 오디오 트랙 없음 · 영상만 추가':'')+(result.shifted?' · 같은 트랙 뒤 클립 '+result.shifted+'개 이동':''));
+  const audioNote={separated:' · 영상·원음 분리 · 각각 선택해 편집',
+    silent:' · 원본 오디오 트랙 없음 · 영상만 추가',
+    inline:' · 긴 영상이라 원음을 분리하지 않고 영상 클립에 담았습니다 · 소리는 그대로 나옵니다'}[result.audioStatus]||'';
+  toast(result.start.toFixed(2)+'초부터 '+(result.end-result.start).toFixed(2)+'초 추가'+audioNote+(result.shifted?' · 같은 트랙 뒤 클립 '+result.shifted+'개 이동':''));
   return result;
 }
 function addGraphic(id,time=player.time,dropPlan=null){

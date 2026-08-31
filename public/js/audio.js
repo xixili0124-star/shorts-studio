@@ -28,7 +28,7 @@ export function hasAnyAudio() {
 }
 
 /** 영상 클립에서 트림 구간만큼의 오디오를 뽑아 AudioBuffer 로 만든다 */
-export async function extractClipAudio(clip, signal, { ignoreMute = false, strict = false, allChannels = false, allowBoundaryGaps = false, allowMissingTrack = false, maxBytes = Infinity } = {}) {
+export async function extractClipAudio(clip, signal, { ignoreMute = false, strict = false, allChannels = false, allowBoundaryGaps = false, allowMissingTrack = false, maxBytes = Infinity, onProgress = null } = {}) {
   if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
   if (clip.type !== 'video' || (!ignoreMute && (clip.muted || clip.audioSeparated)) || !clip.file) return null;
   let input = null;
@@ -59,7 +59,11 @@ export async function extractClipAudio(clip, signal, { ignoreMute = false, stric
         rate = w.buffer.sampleRate;
         ch = Math.min(allChannels ? 32 : 2, w.buffer.numberOfChannels);
         const length = Math.max(1, Math.ceil(dur * rate));
-        if (!Number.isSafeInteger(length) || length * ch * 4 > maxBytes) throw new Error('소리를 분리하기에 영상이 너무 깁니다. 필요한 구간을 잘라서 가져와 주세요.');
+        if (!Number.isSafeInteger(length) || length * ch * 4 > maxBytes) {
+          // 호출자가 "분리를 건너뛰고 영상에 소리를 담기"로 넘어갈 수 있도록 코드를 붙입니다.
+          const tooBig = new Error('소리를 분리하기에 영상이 너무 깁니다. 필요한 구간을 잘라서 가져와 주세요.');
+          tooBig.code = 'AUDIO_TOO_LARGE';throw tooBig;
+        }
         covered = Math.max(0, Math.round((coverageStart - clip.trimStart) * rate));
         out = new AudioBuffer({
           length,
@@ -71,6 +75,8 @@ export async function extractClipAudio(clip, signal, { ignoreMute = false, stric
       const offset = Math.round((w.timestamp - clip.trimStart) * rate);
       if (strict && offset > covered + 1) throw new Error('오디오를 읽지 못한 구간이 있습니다. 무음으로 간주하지 않고 분석을 중단합니다.');
       covered = Math.max(covered, offset + w.buffer.length);
+      // 긴 영상은 이 반복만 수십 초가 걸립니다. 멈춘 것처럼 보이지 않게 진행률을 알립니다.
+      if (onProgress && dur > 0) onProgress(Math.min(1, Math.max(0, covered / rate / dur)));
       for (let c = 0; c < ch; c++) {
         const src = w.buffer.getChannelData(Math.min(c, w.buffer.numberOfChannels - 1));
         let s = 0, d = offset;

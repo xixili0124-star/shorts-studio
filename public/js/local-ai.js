@@ -27,6 +27,48 @@ export function chunkSpeechText(text, maximum = 100) {
   return chunks;
 }
 
+// 늘어난 시각을 걸러내되, 느리게 또박또박 말한 정상 구간까지 건드리면 안 됩니다.
+// 실측 사례는 한 글자가 2.66초였고, 정상 발화는 한 글자당 0.5초를 넘기기 어렵습니다.
+// 그래서 글자당 허용치를 넉넉히 두고, 그마저 두 배를 넘길 때만 손봅니다.
+const MAX_SECONDS_PER_CHAR = 1.2;
+const MIN_STRETCH_SECONDS = 2.0;
+
+/**
+ * 못 알아들은 구간을 인접 단어가 덮어쓰는 것을 걸러냅니다.
+ *
+ * Whisper 는 말이 흐려지면 그 구간을 버리는데, 이때 바로 뒤 단어의 시작 시각을
+ * 버린 구간까지 끌어당깁니다. 실측에서 "세" 한 글자가 3.18~5.84초(2.66초)로 나왔습니다.
+ * 그대로 두면 자막이 실제 말보다 2.6초 일찍 뜨고, 더 나쁘게는 findUncaptioned() 가
+ * 그 구간을 "자막이 있는 곳" 으로 판단해 빠진 말소리를 영영 못 찾습니다.
+ *
+ * 그래서 글자 수에 비해 지나치게 긴 단어는 뒤쪽(실제 발음에 가까운 쪽)만 남깁니다.
+ * 버리지 않고 줄이는 이유는, 그 단어 자체는 제대로 인식된 경우가 많기 때문입니다.
+ */
+function trimStretchedWords(words) {
+  if (words.length < 3) return { words, stretched: 0 };
+  // 이 녹음에서 "보통 한 글자에 얼마나 걸리는지" 를 먼저 잽니다. 느리게 말한 녹음을
+  // 빠른 녹음의 기준으로 재단하지 않기 위해서입니다.
+  const rates = words
+    .map(w => ({ chars: [...String(w.word).trim()].length, span: w.end - w.start }))
+    .filter(r => r.chars > 0 && r.span > 0)
+    .map(r => r.span / r.chars)
+    .sort((a, b) => a - b);
+  if (!rates.length) return { words, stretched: 0 };
+  const median = rates[Math.floor(rates.length / 2)];
+
+  let stretched = 0;
+  const fixed = words.map(word => {
+    const chars = [...String(word.word).trim()].length || 1;
+    const span = word.end - word.start;
+    // 글자당 절대 상한과 "이 녹음 기준 4배" 중 느슨한 쪽을 씁니다.
+    const limit = Math.max(MIN_STRETCH_SECONDS, chars * Math.max(MAX_SECONDS_PER_CHAR, median * 4));
+    if (span <= limit) return word;
+    stretched++;
+    return { ...word, start: word.end - limit, stretched: true };
+  });
+  return { words: fixed, stretched };
+}
+
 export function whisperCaptions(result, duration, offset = 0) {
   if (!Number.isFinite(duration) || duration <= 0 || !Number.isFinite(offset) || offset < 0) throw new Error('자막 인식 구간이 올바르지 않습니다.');
   const words = [], chunks = result?.chunks || [];
@@ -40,7 +82,8 @@ export function whisperCaptions(result, duration, offset = 0) {
     words.push({ word: String(chunk.text), start: start + offset, end: end + offset });
   }
   words.sort((a,b) => a.start-b.start);
-  return { captions: transcriptionCaptions({ words }).map(c => ({ ...c, generated: 'local-whisper' })), skipped, text: String(result?.text || '') };
+  const { words: trimmed, stretched } = trimStretchedWords(words);
+  return { captions: transcriptionCaptions({ words: trimmed }).map(c => ({ ...c, generated: 'local-whisper' })), skipped, stretched, text: String(result?.text || '') };
 }
 
 export function runLocalAI(kind, payload, { signal, onProgress = () => {} } = {}) {

@@ -112,7 +112,7 @@ test('PC keys keep source times, real lost states and valid legacy mosaic shape'
   const keys = pcTrackingKeys(raw, clip);
   near(keys[0].time, 12);near(keys[0].duration, .1);near(keys.at(-1).duration, .1);
   const effect = { id: 'mask', enabled: true, mode: 'tracked', rect: face(), strength: 60, padding: .1, range: [12, 12.3], keyframes: keys };
-  assert.equal(validMosaics([effect]), true);assert.equal(mosaicAt(effect, 12.15).full, true);
+  assert.equal(validMosaics([effect]), true);assert.equal(!!mosaicAt(effect, 12.15).uncertain, true);   // 추적 범위 밖 → 고정 사각형으로 가림
   assert.equal(raw[0].duration, undefined);
   for (const invalid of [[], [raw[0], raw[0]], [{ ...raw[0], x: NaN }], [{ ...raw[0], lost: 'false' }], [{ ...raw[0], t: '12' }]])
     assert.throws(() => pcTrackingKeys(invalid, clip), { code: 'INVALID_TRACKING_RESULT' });

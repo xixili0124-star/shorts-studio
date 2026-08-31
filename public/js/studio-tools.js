@@ -690,9 +690,15 @@ export class StudioTools {
       const result=pc?await transcribePcAudio(pcm,{signal,onProgress:(p,m)=>this.progress(p,m)}):await runLocalAI('asr',{audio:pcm},{signal,onProgress:(p,m)=>this.progress(p,m)});
       if(signal.aborted||this.state!==s||!this.dialog.open)return;
       const normalized=pc?pcAsrCaptions(result,duration,range?.start||0):whisperCaptions(result,duration,range?.start||0);
-      if(!normalized.captions.length)throw new Error('유효한 시각이 있는 자막을 만들지 못했습니다. 말소리가 분명한 구간으로 다시 시도해 주세요.');
+      // 시각이 전부 버려져도 인식 원문은 남아 있는 경우가 많습니다. 그냥 실패로 끝내면
+      // 사용자는 "인식을 못 했다" 고 오해하지만, 실제로는 받아쓴 글이 멀쩡히 있습니다.
+      if(!normalized.captions.length){
+        const recognized=String(normalized.text||'').trim();
+        if(!recognized)throw new Error('말소리를 인식하지 못했습니다. 소리가 분명한 구간으로 다시 시도해 주세요.');
+        throw new Error('인식은 됐지만 자막에 넣을 시각을 찾지 못했습니다. 아래 원문을 참고해 직접 입력해 주세요.\n\n'+recognized);
+      }
       Object.assign(s,normalized);s.gaps=findUncaptioned(buffer,s.captions.map(c=>({...c,start:c.start-(range?.start||0),end:c.end-(range?.start||0)})));
-      this.setBody('<div class="smart-success">'+s.captions.length+'개 자막을 만들었어요.</div><p class="inspector-note">'+(pc?'Whisper large-v3-turbo · '+esc(pcAsrDeviceLabel(result)):'Whisper Tiny · 브라우저 처리')+'</p><p class="note">틀린 문구는 여기서 고친 뒤 적용하세요. 기존 자막은 지우지 않습니다.</p><p class="note warning">숫자·이름은 틀릴 수 있습니다.'+(s.segmentFallback?' 일부 문장은 단어 시각 대신 실제 문장 시각으로 보존했습니다.':'')+(s.skipped?' 시각이 불확실한 '+s.skipped+'개 항목은 제외했습니다.':'')+(s.gaps.length?' 소리는 있으나 자막이 없는 '+s.gaps.length+'개 구간도 확인해 주세요.':'')+'</p><div class="smart-caption-review">'+s.captions.map((c,i)=>'<label><span>'+c.start.toFixed(2)+' → '+c.end.toFixed(2)+'초</span><textarea data-caption-index="'+i+'" maxlength="3000" aria-label="자막 '+(i+1)+' 내용">'+esc(c.text)+'</textarea></label>').join('')+'</div><details class="smart-details"><summary>전체 인식 원문</summary><p>'+esc(s.text)+'</p></details>'+progressMarkup+button('apply-captions','자동자막 트랙에 추가',false,true));
+      this.setBody('<div class="smart-success">'+s.captions.length+'개 자막을 만들었어요.</div><p class="inspector-note">'+(pc?'Whisper large-v3-turbo · '+esc(pcAsrDeviceLabel(result)):'Whisper Tiny · 브라우저 처리')+'</p><p class="note">틀린 문구는 여기서 고친 뒤 적용하세요. 기존 자막은 지우지 않습니다.</p><p class="note warning">숫자·이름은 틀릴 수 있습니다.'+(s.segmentFallback?' 일부 문장은 단어 시각 대신 실제 문장 시각으로 보존했습니다.':'')+(s.skipped?' 시각이 불확실한 '+s.skipped+'개 항목은 제외했습니다.':'')+(s.stretched?' 시각이 비정상으로 늘어난 '+s.stretched+'개 자막의 시작점을 당겼습니다. 타임라인에서 확인해 주세요.':'')+(s.gaps.length?' 소리는 있으나 자막이 없는 '+s.gaps.length+'개 구간도 확인해 주세요.':'')+'</p><div class="smart-caption-review">'+s.captions.map((c,i)=>'<label><span>'+c.start.toFixed(2)+' → '+c.end.toFixed(2)+'초</span><textarea data-caption-index="'+i+'" maxlength="3000" aria-label="자막 '+(i+1)+' 내용">'+esc(c.text)+'</textarea></label>').join('')+'</div><details class="smart-details"><summary>전체 인식 원문</summary><p>'+esc(s.text)+'</p></details>'+progressMarkup+button('apply-captions','자동자막 트랙에 추가',false,true));
     });}finally{if(pc)this.refreshPcAsr().catch(()=>{});}
   }
   applyCaptions(){

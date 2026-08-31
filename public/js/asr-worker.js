@@ -3,6 +3,10 @@ import { pipeline, env } from '../vendor/transformers/3.8.1/transformers.min.js'
 import { ASR_MODEL } from './local-ai.js';
 
 env.allowLocalModels = false;env.allowRemoteModels = true;env.useBrowserCache = true;
+// 스레드를 1 로 고정합니다. COOP/COEP 로 교차 출처 격리를 켜고 스레드를 3 으로 올려
+// 실측했더니, 격리 없이 10.5초 걸리던 8.9초 오디오가 166초가 지나도 끝나지 않았습니다.
+// (i5-1335U · GPU 없음 · Chrome). 격리 자체는 폰트·모델 다운로드를 깨뜨리지 않았지만,
+// 이 규모의 모델에서는 스레드 동기화 비용이 이득을 넘어섭니다. 바꾸려면 반드시 재측정하세요.
 env.backends.onnx.wasm.numThreads = 1;env.backends.onnx.wasm.proxy = false;
 env.backends.onnx.wasm.wasmPaths = new URL('../vendor/transformers/3.8.1/', import.meta.url).href;
 const progress = (value, message) => self.postMessage({ type: 'progress', progress: value, message });

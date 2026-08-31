@@ -12,7 +12,20 @@ import {drawTextBlock,renderFrame,renderCaptionPreview,renderGraphicPreview,meas
 const require=createRequire(import.meta.url);
 let nativeCanvas;
 try{nativeCanvas=require(process.env.STUDIO_CANVAS_MODULE||'@napi-rs/canvas');}catch{}
-const canvasTest=(name,run)=>test(name,{skip:!nativeCanvas},run);
+// 캔버스가 없으면 렌더링 검증이 통째로 빠지는데 종료 코드는 0 이라 초록불처럼 보입니다.
+// 회귀를 놓치지 않도록 눈에 띄게 알리고, CI 에서는 STUDIO_REQUIRE_CANVAS=1 로 실패시킵니다.
+if(!nativeCanvas){
+  const notice=[
+    '',
+    '[경고] @napi-rs/canvas 가 없어 렌더링 검증을 건너뜁니다.',
+    '       실제 픽셀 회귀를 잡지 못합니다. 다음으로 설치하세요:',
+    '       npm i --no-save @napi-rs/canvas',
+    '',
+  ].join('\n');
+  if(process.env.STUDIO_REQUIRE_CANVAS==='1'){console.error(notice);process.exit(1);}
+  console.warn(notice);
+}
+const canvasTest=(name,run)=>test(name,{skip:!nativeCanvas&&'@napi-rs/canvas 없음 — 렌더링 검증 건너뜀'},run);
 const makeCanvas=(width=320,height=180)=>nativeCanvas.createCanvas(width,height);
 const pixels=canvas=>canvas.getContext('2d').getImageData(0,0,canvas.width,canvas.height).data;
 const signature=canvas=>createHash('sha256').update(pixels(canvas)).digest('hex');

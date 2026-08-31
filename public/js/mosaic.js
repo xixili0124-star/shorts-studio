@@ -12,16 +12,32 @@ export function normalizedRect(rect = {}) {
   return { x: clamp(Number(rect.x) || 0, 0, 1 - w), y: clamp(Number(rect.y) || 0, 0, 1 - h), w, h };
 }
 
+/**
+ * 추적 위치를 돌려줍니다. 확인되지 않은 구간은 대상을 노출하지 않되 화면도 죽이지 않습니다.
+ *
+ *   확인된 구간        추적 사각형을 보간해 그립니다.
+ *   추적 범위 바깥      사용자가 처음 지정한 effect.rect 로 고정해 가립니다 (uncertain).
+ *   추적 실패(lost)     같은 방식으로 고정해 가립니다 (uncertain).
+ *   시각을 못 믿을 때   원본 전체를 가립니다 (full). 어디를 가려야 할지 알 수 없기 때문입니다.
+ *
+ * 예전에는 위 세 경우를 모두 원본 전체 가림으로 처리했습니다. 그러면 10초 클립에서 2초만
+ * 추적했을 때 나머지 8초가 통째로 검은 화면이 되어, 기능 실패가 아니라 영상이 망가진 것처럼
+ * 보였습니다. 고정 사각형은 대상이 움직였다면 빗나갈 수 있으므로 uncertain 으로 표시하고,
+ * unresolvedMosaics() 가 내보내기를 계속 막습니다.
+ */
 export function mosaicAt(effect, time) {
   if (effect.enabled === false) return null;
   if (effect.mode !== 'tracked') return { ...normalizedRect(effect.rect), full: false };
   const keys = effect.keyframes || [];
-  // 미추적·추적 실패 구간은 임의의 위치로 추측하지 않고 원본 레이어 전체를 가립니다.
-  if (!Number.isFinite(time) || !keys.length || time < keys[0].time - 1e-6 || time > frameEnd(keys.at(-1)) + 1e-6) return { full: true };
+  // 프레임 시각 자체를 못 믿으면 어디를 가려야 할지 알 수 없으므로 전체를 가립니다.
+  if (!Number.isFinite(time)) return { full: true };
+  const fallback = () => ({ ...normalizedRect(effect.rect), full: false, uncertain: true });
+  if (!keys.length || time < keys[0].time - 1e-6 || time > frameEnd(keys.at(-1)) + 1e-6) return fallback();
   let lo = 0, hi = keys.length - 1;
   while (lo < hi) { const mid = Math.ceil((lo + hi) / 2); if (keys[mid].time <= time) lo = mid; else hi = mid - 1; }
   const a = keys[lo], b = keys[Math.min(lo + 1, keys.length - 1)];
-  if (a.lost || b.lost) return { full: true };
+  // 성공 키의 시점 자체는 성공으로 둡니다. 다음 키가 실패라고 직전 구간까지 버리지 않습니다.
+  if (a.lost || (b.lost && time > a.time + 1e-6)) return fallback();
   const p = b.time > a.time ? clamp((time - a.time) / (b.time - a.time), 0, 1) : 0;
   return { ...normalizedRect(Object.fromEntries(['x','y','w','h'].map(k => [k, a[k] + (b[k] - a[k]) * p]))), full: false };
 }
@@ -73,6 +89,31 @@ export function mergeTrackingKeys(previous, next) {
   return safe;
 }
 
+
+/** 어디를 가려야 할지 알 수 없을 때. 검은 단색 대신 빗금이라 "실패" 로 읽힙니다. */
+function paintUnavailable(dest, W, H) {
+  dest.fillStyle = '#151515';
+  dest.fillRect(0, 0, W, H);
+  dest.save();
+  dest.strokeStyle = 'rgba(255,120,120,.5)';
+  dest.lineWidth = Math.max(2, Math.round(Math.min(W, H) / 120));
+  const gap = Math.max(16, Math.round(Math.min(W, H) / 16));
+  dest.beginPath();
+  for (let i = -H; i < W + H; i += gap) { dest.moveTo(i, 0); dest.lineTo(i + H, H); }
+  dest.stroke();
+  dest.restore();
+}
+
+/** 고정 사각형으로 대신 가린 구간임을 테두리로 알립니다. */
+function markUncertain(dest, x, y, w, h) {
+  dest.save();
+  dest.strokeStyle = 'rgba(255,150,90,.85)';
+  dest.lineWidth = Math.max(2, Math.round(Math.min(w, h) / 40));
+  dest.setLineDash([dest.lineWidth * 3, dest.lineWidth * 2]);
+  dest.strokeRect(x + dest.lineWidth / 2, y + dest.lineWidth / 2, w - dest.lineWidth, h - dest.lineWidth);
+  dest.restore();
+}
+
 const surfaces = new WeakMap();
 export function redactSource(ctx, source, clip, fallbackTime) {
   const effects = (clip.mosaics || []).filter(e => e.enabled !== false);
@@ -88,7 +129,7 @@ export function redactSource(ctx, source, clip, fallbackTime) {
     const time = source.timeReliable === false ? NaN : (source.sourceTime ?? fallbackTime);
     const r = mosaicAt(effect, time);
     if (!r) continue;
-    if (r.full) { dest.fillStyle = '#151515'; dest.fillRect(0, 0, W, H); break; }
+    if (r.full) { paintUnavailable(dest, W, H); break; }
     const pad = effect.padding ?? .12;
     const x = Math.max(0, Math.floor((r.x - r.w * pad) * W)), y = Math.max(0, Math.floor((r.y - r.h * pad) * H));
     const w = Math.min(W - x, Math.ceil((r.x + r.w * (1 + pad)) * W) - x);
@@ -102,6 +143,8 @@ export function redactSource(ctx, source, clip, fallbackTime) {
     dest.fillStyle = '#151515';dest.fillRect(x, y, w, h);
     dest.imageSmoothingEnabled = false;dest.drawImage(cache.tile, 0, 0, cache.tile.width, cache.tile.height, x, y, w, h);
     dest.imageSmoothingEnabled = true;
+    // 추적이 확인되지 않은 구간은 가리기는 하되, 위치가 빗나갈 수 있음을 눈에 보이게 알립니다.
+    if (r.uncertain) markUncertain(dest, x, y, w, h);
   }
   return { img: cache.image, w: W, h: H, sourceTime: source.sourceTime };
 }

@@ -1137,10 +1137,10 @@ test('tracking keys use actual frame coverage at 24fps, 15fps and VFR',()=>{
   for(const duration of [1/24,1/15,.27]){
     const effect=maskFixture({mode:'tracked',range:[0,1],keyframes:[keyFixture(0),keyFixture(1-duration,{duration})]});
     assert.equal(validMosaics([effect]),true);assert.deepEqual(unresolvedMosaics({trimStart:0,trimEnd:1,mosaics:[effect]}),[]);
-    assert.equal(mosaicAt(effect,.9999).full,false);assert.equal(mosaicAt(effect,1.01).full,true);
+    assert.equal(mosaicAt(effect,.9999).full,false);assert.equal(!!mosaicAt(effect,1.01).uncertain,true);
   }
   const failed=maskFixture({mode:'tracked',range:[0,2],keyframes:[keyFixture(0),keyFixture(.1,{lost:true}),keyFixture(2)]});
-  assert.equal(mosaicAt(failed,.05).full,true);assert.equal(unresolvedMosaics({trimStart:.02,trimEnd:.08,mosaics:[failed]}).length,1);
+  assert.equal(!!mosaicAt(failed,.05).uncertain,true);assert.equal(unresolvedMosaics({trimStart:.02,trimEnd:.08,mosaics:[failed]}).length,1);
   assert.equal(mosaicAt(failed,NaN).full,true);assert.equal(mosaicAt({...failed,enabled:false},.1),null);
 });
 
@@ -1148,10 +1148,14 @@ test('tracking repair cannot interpolate across two unverified paths or tiny shi
   const previous=[keyFixture(0),keyFixture(.1),keyFixture(.2,{lost:true}),keyFixture(1,{lost:true})];
   const next=[keyFixture(0,{lost:true}),keyFixture(.1,{lost:true}),keyFixture(.2),keyFixture(.3),keyFixture(1)];
   const merged=maskFixture({mode:'tracked',keyframes:mergeTrackingKeys(previous,next)});
-  assert.equal(mosaicAt(merged,.05).full,false);assert.equal(mosaicAt(merged,.15).full,true);assert.equal(mosaicAt(merged,.5).full,false);
+  assert.equal(mosaicAt(merged,.05).full,false);assert.equal(!!mosaicAt(merged,.15).uncertain,true);assert.equal(mosaicAt(merged,.5).full,false);
   const small=[0,.5,1].map(t=>keyFixture(t,{x:.1,w:.005})),shifted=[keyFixture(0,{x:.107,w:.005,lost:true}),keyFixture(.5,{x:.107,w:.005}),keyFixture(1,{x:.107,w:.005,lost:true})];
   const safe=maskFixture({mode:'tracked',keyframes:mergeTrackingKeys(small,shifted)});
-  assert.equal(mosaicAt(safe,.25).full,true);assert.equal(mosaicAt(safe,.5).full,true);
+  // 병합 뒤 확인된 키는 t=.5 하나뿐입니다. 그 한 점은 실제로 검증된 위치이므로 그대로 쓰고,
+  // 앞뒤의 확인되지 않은 구간만 고정 사각형으로 가립니다.
+  assert.equal(!!mosaicAt(safe,.25).uncertain,true);
+  assert.equal(!!mosaicAt(safe,.75).uncertain,true);
+  assert.equal(mosaicAt(safe,.5).uncertain,undefined);assert.equal(mosaicAt(safe,.5).x,.107);
 });
 
 test('mosaic validation rejects unsafe keys and version 4 persists independent masks',async()=>{
@@ -1325,7 +1329,7 @@ test('model detections retain the selected face and mosaic fully covers an unres
   const effect=maskFixture({mode:'tracked',range:[0,.3],keyframes:[
     {...tracker.initial,time:0,duration:.1},{...moved,time:.1,duration:.1},{...lost,time:.2,duration:.1}
   ]});
-  assert.equal(validMosaics([effect]),true);assert.equal(mosaicAt(effect,.2).full,true);
+  assert.equal(validMosaics([effect]),true);assert.equal(!!mosaicAt(effect,.2).uncertain,true);
   assert.throws(()=>createTargetTracker([],rect,0),{code:'TARGET_NOT_FOUND'});
 });
 
@@ -1335,9 +1339,18 @@ test('mosaic replaces transparent details and fully covers unresolved sources',{
   const clip={mosaics:[maskFixture({rect:{x:0,y:0,w:1,h:1},padding:0})]};
   let redacted=redactSource(ctx,{img:source,w:40,h:40,sourceTime:0},clip,0);const r=redacted.img.getContext('2d');
   assert.deepEqual([...r.getImageData(5,5,1,1).data],[...r.getImageData(6,5,1,1).data]);assert.equal(r.getImageData(5,5,1,1).data[3],255);
+  // 추적을 놓친 구간은 화면을 죽이지 않고, 사용자가 지정한 사각형으로 대신 가립니다.
+  // 원본(반투명 빨강/파랑 줄무늬)이 그대로 비치지 않아야 하고, 불투명해야 합니다.
   clip.mosaics=[maskFixture({mode:'tracked',range:[0,1],keyframes:[keyFixture(0,{lost:true})]})];
   redacted=redactSource(ctx,{img:source,w:40,h:40,sourceTime:.1},clip,.1);
-  assert.deepEqual([...redacted.img.getContext('2d').getImageData(5,5,1,1).data],[21,21,21,255]);
+  const lost=redacted.img.getContext('2d');
+  // rect 는 0.2~0.5 이므로 (14,14) 가 가려진 안쪽입니다. 원본 줄무늬가 비치면 안 됩니다.
+  assert.equal(lost.getImageData(14,14,1,1).data[3],255);
+  assert.deepEqual([...lost.getImageData(14,14,1,1).data],[...lost.getImageData(15,14,1,1).data]);
+
+  // 프레임 시각 자체를 못 믿을 때는 어디를 가릴지 알 수 없으므로 전체를 덮습니다.
+  redacted=redactSource(ctx,{img:source,w:40,h:40,timeReliable:false},clip,.1);
+  assert.equal(redacted.img.getContext('2d').getImageData(5,5,1,1).data[3],255);
 });
 
 test('shared renderer keeps a masked source unchanged through split and transformed blur backdrop',{skip:!canvasModule},async()=>{

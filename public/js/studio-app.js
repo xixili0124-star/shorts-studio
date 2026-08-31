@@ -18,6 +18,7 @@ import {typographyControls,textAppearanceControls,captionEffectControls} from '.
 import {evaluateItem,setValueAt,hasKeyframes,keyframeValue} from './keyframes.js';
 import {StudioTools} from './studio-tools.js';
 import {selectionKey,selectionRefs,resolveSelection,captureItemSettings,planPasteSettings,applySettingsPlan,applySharedProperty,deleteSelectedItems,planBatchSplit,applyBatchSplit,duplicateSelectedItems} from './batch-edits.js';
+import {planLink,applyLink,applyUnlink,expandLinked,isLinkedSelection} from './link-groups.js';
 import {MonitorEditor} from './monitor-editor.js';
 import {KeyframeEditor} from './keyframe-editor.js';
 import {insertMediaAsset} from './media-insertion.js';
@@ -40,6 +41,7 @@ const timeline=new Timeline({
   sound:id=>SOUND_EFFECTS.find(s=>s.id===id),graphic:id=>GRAPHICS.find(g=>g.id===id),pause:()=>player.pause(),seek:t=>player.seek(t,{allowBeyond:true}),preview:()=>player.invalidate(),
   busy:()=>!!(exportCtrl||importing||smartTools?.busy||monitor?.dragging||keyframeEditor?.dragging),error:message=>toast(message),
   commit:(before,label)=>commit(before,label),transition:(id,rightId)=>selectTransition(id,rightId),
+  menuItems:()=>timelineMenuItems(),menuAction:(action,ref)=>runTimelineMenu(action,ref),
   drop:async(kind,id,t,lane,plan)=>{
     if(kind==='asset')return placeAsset(id,t,lane,plan);
     const [type,key]=id.split(':');
@@ -91,6 +93,12 @@ function editingSelection(){
   return refs.some(ref=>selectionKey(ref)===selectionKey(selection))?refs:selectionRefs([selection]);
 }
 function validSelection(){return selected()?selection:selectionRefs(selectedItems).at(-1)||null;}
+/**
+ * 이동·분할·삭제·복제처럼 클립의 구조를 바꾸는 명령이 쓰는 선택입니다.
+ * 연결된 짝을 포함해 화면과 소리가 어긋나지 않게 합니다.
+ * 색·크기·볼륨 같은 속성 편집은 클릭한 항목만 바꿔야 하므로 editingSelection 을 그대로 씁니다.
+ */
+function structuralSelection(){return selectionRefs(expandLinked(editingSelection(),project));}
 function updateToolbar(){
   const refs=editingSelection(),gap=currentGap(selection),time=frameTime(player.time);
   let split=gap?{ok:true}:{ok:false,reason:refs.length?'재생 막대를 선택한 클립 안으로 옮겨 주세요.':'분할할 클립을 먼저 선택해 주세요.'};
@@ -453,26 +461,78 @@ function applyTransition(id,all=false,target=null){
 }
 function deleteSelection(ripple=false){
   if(exportCtrl||importing||smartTools.busy||monitor?.dragging||!selection||selection.type==='asset')return;
-  const special=['transition','gap'].includes(selection.type),wasGap=selection.type==='gap',refs=editingSelection();let count=0;
+  const special=['transition','gap'].includes(selection.type),wasGap=selection.type==='gap',refs=structuralSelection();let count=0;
   if(edit(special?(wasGap?'빈 공간 닫기':'전환 제거'):ripple?'선택 클립 당겨 삭제':'선택 클립 삭제',()=>{
     count=special?Number(deleteTimelineItem(selection,ripple)):deleteSelectedItems(refs,ripple);
     selectedItems=[];selection=null;
   })&&count)toast(special?(wasGap?'빈 공간을 닫았어요. 다른 트랙은 그대로입니다.':'전환을 제거하고 두 영상을 연결했어요.'):count+'개 선택 클립을 삭제했어요. '+(ripple?'선택 클립이 있던 트랙만 당겼어요.':'빈 공간은 유지합니다.'));
 }
 async function duplicateSelectionImpl(){
-  const refs=editingSelection();if(!refs.length)return;
+  const refs=structuralSelection();if(!refs.length)return;
   const before=captureDocument();player.pause();const results=await duplicateSelectedItems(refs);
   selectedItems=selectionRefs(results);selection=selectedItems.at(-1)||null;
   commit(before,'선택 클립 복제');if(results.length)timeline.reveal(results[0],{preserveSelection:true});
   toast(results.length+'개 클립을 복제했어요. 트랙 사이의 시간 간격을 유지합니다.');
 }
 async function splitSelectedImpl(){
-  const refs=editingSelection(),plan=planBatchSplit(refs,frameTime(player.time));
+  const refs=structuralSelection(),plan=planBatchSplit(refs,frameTime(player.time));
   if(!plan.eligible.length)return toast(plan.skipped[0]?.check.reason||'분할할 클립을 먼저 선택해 주세요.');
   player.pause();const result=await applyBatchSplit(plan);
   selectedItems=selectionRefs([...plan.skipped,...result.items]);selection=selectionRefs(result.items).at(-1)||selectedItems.at(-1)||null;
   commit(plan.document,'선택 클립 분할');if(result.items.length)timeline.reveal(result.items[0],{preserveSelection:true});
   toast(result.items.length+'개 선택 클립을 분할했어요.'+(result.skipped?' 재생 막대가 없는 '+result.skipped+'개는 유지했어요.':''));
+}
+
+/** 선택한 영상·오디오를 하나로 묶습니다. 묶인 뒤에는 함께 움직이고 함께 잘립니다. */
+function linkSelection(){
+  const plan=planLink(structuralSelection(),project);
+  if(!plan.ok)return toast(plan.reason);
+  if(edit('클립 연결',()=>applyLink(plan,project)))toast(plan.members.length+'개 클립을 연결했어요. 이제 함께 움직입니다.');
+}
+/** 묶음을 통째로 풉니다. 절반만 풀면 남은 쪽이 계속 붙어 다니기 때문입니다. */
+function unlinkSelection(){
+  const refs=editingSelection();
+  if(!isLinkedSelection(refs,project))return toast('연결된 클립을 선택해 주세요.');
+  const count=expandLinked(refs,project).length;
+  if(edit('클립 연결 해제',()=>applyUnlink(refs,project)))toast(count+'개 클립의 연결을 해제했어요. 이제 따로 움직입니다.');
+}
+function toggleLinkSelection(){
+  if(isLinkedSelection(editingSelection(),project))unlinkSelection();else linkSelection();
+}
+function timelineMenuItems(){
+  const refs=editingSelection(),structural=structuralSelection(),time=frameTime(player.time);
+  const linked=isLinkedSelection(refs,project),plan=planLink(structural,project);
+  let split={ok:false,reason:'재생 막대를 선택한 클립 안으로 옮겨 주세요.'};
+  for(const entry of resolveSelection(structural).filter(entry=>time>entry.start+1e-6&&time<entry.end-1e-6)){
+    split=splitAvailability(entry,time);if(split.ok)break;
+  }
+  return [
+    {id:'unlink',label:'연결 해제',hint:'Ctrl+L',disabled:!linked,
+      title:linked?'선택한 묶음을 풀어 화면과 소리를 따로 편집합니다':'연결된 클립을 선택해 주세요'},
+    {id:'link',label:'연결',hint:'Ctrl+L',disabled:!plan.ok,
+      title:plan.ok?'선택한 '+plan.members.length+'개를 묶어 함께 움직이게 합니다':plan.reason},
+    {separator:true},
+    {id:'split',label:'재생 막대에서 분할',hint:'S',disabled:!split.ok,title:split.ok?'연결된 클립은 같은 지점에서 함께 잘립니다':split.reason},
+    {id:'duplicate',label:'복제',hint:'Ctrl+D',disabled:!structural.length},
+    {separator:true},
+    {id:'copy-settings',label:'설정 복사',hint:'Ctrl+Alt+C',disabled:!refs.length},
+    {id:'paste-settings',label:'설정 붙여넣기',hint:'Ctrl+Alt+V',disabled:!refs.length||!settingsClipboard,
+      title:settingsClipboard?'':'먼저 다른 클립의 설정을 복사해 주세요'},
+    {separator:true},
+    {id:'delete',label:'삭제',hint:'Delete',disabled:!structural.length},
+    {id:'ripple-delete',label:'당겨 삭제',hint:'Shift+Delete',disabled:!structural.length,
+      title:'삭제한 뒤 같은 트랙의 오른쪽 클립을 당깁니다'},
+  ];
+}
+function runTimelineMenu(action,ref){
+  if(action==='link')linkSelection();
+  else if(action==='unlink')unlinkSelection();
+  else if(action==='split')splitSelected().catch(error=>toast(error.message));
+  else if(action==='duplicate')duplicateSelection().catch(error=>toast(error.message));
+  else if(action==='copy-settings')copySettings(ref);
+  else if(action==='paste-settings')pasteSettings(ref);
+  else if(action==='delete')deleteSelection();
+  else if(action==='ripple-delete')deleteSelection(true);
 }
 
 const controlBefore=new WeakMap();
@@ -704,6 +764,7 @@ function wire(){
     else if(mod&&e.key.toLowerCase()==='a'){e.preventDefault();selectMany(buildLayout().items);}
     else if(mod&&e.key.toLowerCase()==='z'){e.preventDefault();player.pause();e.shiftKey?history.redo():history.undo();}
     else if(mod&&e.key.toLowerCase()==='d'){e.preventDefault();duplicateSelection().catch(e=>toast(e.message));}
+    else if(mod&&e.key.toLowerCase()==='l'){e.preventDefault();toggleLinkSelection();}
     else if(e.code==='Space'){if(document.activeElement?.tagName==='BUTTON')return;e.preventDefault();player.toggle();}
     else if(e.code==='ArrowLeft'){e.preventDefault();player.step(e.shiftKey?-10:-1);}
     else if(e.code==='ArrowRight'){e.preventDefault();player.step(e.shiftKey?10:1);}

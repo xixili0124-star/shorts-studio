@@ -309,3 +309,23 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 .tool-rail{min-height:0;overscroll-behavior:contain}
 @media(max-width:650px){.tool-rail{grid-row:1}}
 #helpDialog>.modal-heading{position:sticky;top:0;z-index:1;background:var(--surface)}
+
+/* ── 연결된 클립(프리미어의 링크) ──────────────────────────
+   같은 소재에서 나온 영상과 원음처럼 함께 움직이는 항목을 표시합니다.
+   우클릭 메뉴의 [연결 해제] 로 풀 수 있습니다. */
+.timeline-block.linked-block{border-style:solid;box-shadow:inset 0 0 0 1px #ffffff1f}
+.link-mark{position:absolute;left:4px;bottom:3px;z-index:2;font-size:8px;line-height:1;opacity:.62;pointer-events:none}
+.timeline-block.selected .link-mark{opacity:1;color:var(--accent)}
+.short-block .link-mark{display:none}
+
+/* ── 타임라인 우클릭 메뉴 ────────────────────────────────── */
+.timeline-menu{position:fixed;z-index:60;min-width:212px;padding:4px;border:1px solid #3f4448;border-radius:6px;
+  background:#1e2124;box-shadow:0 8px 24px #000a;display:flex;flex-direction:column;gap:1px}
+.timeline-menu hr{border:0;border-top:1px solid #32373a;margin:3px 6px}
+.timeline-menu button{display:flex;align-items:center;gap:12px;width:100%;padding:6px 10px;border-radius:4px;
+  background:transparent;color:#dbe2e4;font-size:11px;text-align:left;white-space:nowrap}
+.timeline-menu button>span{flex:1}
+.timeline-menu button>small{color:var(--faint);font:9px Consolas,monospace}
+.timeline-menu button:hover:not(:disabled),.timeline-menu button:focus-visible{background:#333a2a;color:var(--accent);outline:none}
+.timeline-menu button:hover:not(:disabled)>small,.timeline-menu button:focus-visible>small{color:#93a37a}
+.timeline-menu button:disabled{opacity:.34;cursor:default}

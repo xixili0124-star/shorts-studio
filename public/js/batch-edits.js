@@ -1,5 +1,5 @@
 // 다중 선택은 ID만 보관합니다. 미디어 준비가 끝나기 전에는 프로젝트를 바꾸지 않습니다.
-import { project, buildLayout, migrateTimeline, syncAnchoredItems, newOverlay, trackItems } from './state.js';
+import { project, buildLayout, migrateTimeline, syncAnchoredItems, newOverlay, trackItems, timelineTracks, trackKind } from './state.js';
 import { captureDocument, makeClip, makeAudio, discardStagedInstance } from './project-store.js';
 import { timelineCollection, itemRange, splitAvailability, deleteTimelineItem, normalizeTransitions, planPlacement } from './timeline-edits.js';
 import { transformOf } from './visual-transform.js';
@@ -7,6 +7,7 @@ import { uid, clamp } from './util.js';
 import { TEXT_STYLE_KEYS } from './text-effects.js';
 import { KEYFRAME_CHANNELS, sliceKeyframes, splitKeyframes, setValueAt } from './keyframes.js';
 import { splitCropTracking } from './crop-tracking.js';
+import { relinkCopies } from './link-groups.js';
 
 const EPS = 1e-6;
 const clone = value => JSON.parse(JSON.stringify(value));
@@ -147,25 +148,43 @@ export function deleteSelectedItems(refs, ripple = false) {
   return ranges.length;
 }
 
-/** 여러 행의 상대 시각을 보존해 움직입니다. 선택하지 않은 클립을 덮어쓰지 않습니다. */
-export function planBatchMove(refs, delta, doc = captureDocument()) {
+/**
+ * 여러 행의 상대 시각을 보존해 움직입니다. 선택하지 않은 클립을 덮어쓰지 않습니다.
+ * retarget 을 주면 그 항목 하나만 다른 행으로 옮깁니다. 나머지는 원래 행에 남습니다.
+ * 연결된 영상을 다른 영상 트랙으로 끌 때, 원음이 오디오 트랙에 그대로 남아야 하기 때문입니다.
+ */
+export function planBatchMove(refs, delta, doc = captureDocument(), { retarget = null } = {}) {
   const ranges=resolveSelection(refs,doc),keys=new Set(ranges.map(selectionKey));
   if (!ranges.length || !Number.isFinite(delta)) return {ok:false,reason:'이동할 클립을 선택해 주세요.'};
+  if (retarget) {
+    const track=timelineTracks(doc).find(entry=>entry.id===retarget.trackId);
+    if (!track||track.kind!==trackKind(retarget.type)) return {ok:false,reason:'영상은 영상 트랙에, 소리는 오디오 트랙에 놓아 주세요.',document:doc,delta:0,moves:[]};
+    if (!keys.has(selectionKey(retarget))) return {ok:false,reason:'옮길 클립을 다시 선택해 주세요.',document:doc,delta:0,moves:[]};
+  }
   delta=clamp(delta,-Math.min(...ranges.map(r=>r.start)),86400-Math.max(...ranges.map(r=>r.end)));
-  const moves=ranges.map(r=>({type:r.type,id:r.id,trackId:r.trackId,start:r.start+delta,end:r.end+delta,duration:r.duration}));
+  const moves=ranges.map(r=>({type:r.type,id:r.id,from:r.trackId,
+    trackId:retarget&&selectionKey(retarget)===selectionKey(r)?retarget.trackId:r.trackId,
+    start:r.start+delta,end:r.end+delta,duration:r.duration}));
+  const moved=moves.some(r=>Math.abs(delta)>EPS||r.trackId!==r.from);
   const others=buildLayout(doc).items.filter(r=>!keys.has(selectionKey(r)));
-  const collision=Math.abs(delta)>EPS&&moves.some(r=>others.some(o=>o.trackId===r.trackId&&o.start<r.end-EPS&&o.end>r.start+EPS));
-  return {ok:!collision,reason:collision?'선택하지 않은 클립과 겹칩니다. 빈 구간에 놓아 주세요.':'',document:doc,delta,moves};
+  const overlaps=(a,b)=>a.start<b.end-EPS&&a.end>b.start+EPS;
+  const collision=moved&&(moves.some(r=>others.some(o=>o.trackId===r.trackId&&overlaps(o,r)))
+    // 행을 옮긴 항목만 같은 묶음의 다른 항목과 겹치는지 봅니다.
+    // 전환으로 이어진 클립들은 원래 서로 겹쳐 있으므로 제자리 이동은 검사하지 않습니다.
+    ||moves.some((r,i)=>r.trackId!==r.from&&moves.some((other,j)=>j!==i&&other.trackId===r.trackId&&overlaps(other,r))));
+  return {ok:!collision,reason:collision?'선택하지 않은 클립과 겹칩니다. 빈 구간에 놓아 주세요.':'',document:doc,delta,moves,
+    retargeted:moves.some(r=>r.trackId!==r.from)};
 }
 export function applyBatchMove(plan) {
   if (!plan.ok) throw new Error(plan.reason);
   if (JSON.stringify(captureDocument())!==JSON.stringify(plan.document)) throw new Error('편집 내용이 변경되었습니다. 다시 드래그해 주세요.');
-  if (Math.abs(plan.delta)<EPS) return false;
+  if (Math.abs(plan.delta)<EPS&&!plan.retargeted) return false;
   migrateTimeline();
   const moving=new Set(plan.moves.filter(r=>r.type==='clip').map(r=>r.id));
   for (const clip of project.clips) if (clip.transitionOut?.toId && moving.has(clip.id)!==moving.has(clip.transitionOut.toId)) clip.transitionOut=cut();
   for (const move of plan.moves) {
     const item=timelineCollection(move.type).find(item=>item.id===move.id);
+    if (move.trackId&&move.trackId!==move.from) item.trackId=move.trackId;
     item.start=move.start;if (move.type==='caption'||move.type==='graphic') item.end=move.end;delete item.anchor;
   }
   normalizeTransitions();syncAnchoredItems();return true;
@@ -218,6 +237,8 @@ export async function applyBatchSplit(plan, {signal} = {}) {
         left.fadeOut=0;left.fadeEnvelope=clone(envelope);right.fadeEnvelope={...envelope,offset:envelope.offset+local};
       }
     }
+    // 잘라낸 오른쪽 조각끼리 다시 묶습니다. 원본 묶음을 물려받으면 남의 짝과 함께 움직입니다.
+    relinkCopies(staged.map(entry=>entry.right));
     verifySnapshot(plan.document,signal);migrateTimeline();
     for (const {type,id,left,right} of staged) {
       const list=timelineCollection(type),index=list.findIndex(item=>item.id===id);
@@ -272,6 +293,8 @@ export async function duplicateSelectedItems(refs, {signal} = {}) {
       const item=entry.type==='clip'?await makeClip(saved.assetId,overrides):entry.type==='audio'?makeAudio(saved.assetId,overrides):overrides;
       staged.push({type:entry.type,item});verifySnapshot(doc,signal);
     }
+    // 사본끼리만 연결합니다. 원본의 짝과 함께 끌려다니지 않게 합니다.
+    relinkCopies(staged.map(entry=>entry.item));
     verifySnapshot(doc,signal);migrateTimeline();
     for (const group of groups) {
       for (const shift of group.placement.shifts) {

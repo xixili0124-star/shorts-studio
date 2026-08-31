@@ -4,6 +4,7 @@ import { assets, addDecodedAudioAsset, makeClip, makeAudio, captureDocument, res
 import { planPlacement, placeTimelineItem } from './timeline-edits.js';
 import { extractClipAudio } from './audio.js';
 import { probeVideoAudio } from './media.js';
+import { uid } from './util.js';
 
 const EPS = 1e-6;
 export const MAX_SEPARATED_AUDIO_BYTES = 128 * 1024 * 1024;
@@ -161,12 +162,15 @@ export async function insertMediaAsset(assetId, { time = 0, trackId, placement, 
     check();
     if (prepared.asset && project.audio.tracks.length >= 1000) throw new Error('오디오 클립은 최대 1,000개입니다.');
     const audioPlan = prepared.asset ? planAudioTrack(videoPlan.start, duration) : null;
+    // 영상과 분리한 원음은 프리미어처럼 처음부터 연결해 둡니다. 우클릭 메뉴에서 풀 수 있습니다.
+    const linkId = prepared.asset ? uid() : null;
     clip = await makeClip(assetId, { ...saved,
-      ...(asset.kind === 'video' ? { audioSeparated: true, muted: true, sourceAudioAssetId: prepared.asset?.id } : {}) });
+      ...(asset.kind === 'video' ? { audioSeparated: true, muted: true, sourceAudioAssetId: prepared.asset?.id,
+        ...(linkId ? { linkId } : {}) } : {}) });
     check();
     if (clip.el && clip.audioSeparated) clip.el.muted = true;
     if (prepared.asset) audio = makeAudio(prepared.asset.id, { start: videoPlan.start, trimStart: clip.trimStart,
-      trimEnd: clip.trimEnd, volume: clip.volume ?? 1, fadeIn: 0, fadeOut: 0, muted: false, lane: 'music', role: 'music' });
+      trimEnd: clip.trimEnd, volume: clip.volume ?? 1, fadeIn: 0, fadeOut: 0, muted: false, lane: 'music', role: 'music', linkId });
     check();
     changed = true;
     const audioTrack = audioPlan?.create ? addTimelineTrack('audio', { role: 'audio' }).id : audioPlan?.trackId;

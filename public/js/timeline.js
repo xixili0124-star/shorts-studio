@@ -3,9 +3,10 @@ import { project, buildLayout, totalDuration, transitionPairs, syncAnchoredItems
 import { assets, captureDocument } from './project-store.js';
 import { trackBadge } from './state.js';
 import { TRANSITIONS } from './presets.js';
-import { frameTime, itemRange, planVideoPlacement, placeVideoClip, planClipTrim, applyClipTrim, setItemRange, planPlacement, placeTimelineItem, trackGaps, planItemTrim, applyItemTrim } from './timeline-edits.js';
+import { frameTime, itemRange, planVideoPlacement, placeVideoClip, planClipTrim, applyClipTrim, setItemRange, planPlacement, placeTimelineItem, trackGaps, planItemTrim, applyItemTrim, planLinkedTrim, applyLinkedTrim } from './timeline-edits.js';
 import { clamp } from './util.js';
 import { selectionKey, selectionRefs, combineSelection, marqueeHits, planBatchMove, applyBatchMove } from './batch-edits.js';
+import { expandLinked, linkedRefs, activeLinkIds } from './link-groups.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -15,7 +16,7 @@ const precise = t => stamp(t)+'.'+Math.floor((t % 1) * 100).toString().padStart(
 
 export class Timeline {
   constructor(callbacks) {
-    this.callbacks=callbacks;this.zoom=70;this.snapping=true;this.selection=null;this.selections=[];this.time=0;this.dragging=false;
+    this.callbacks=callbacks;this.zoom=70;this.snapping=true;this.selection=null;this.selections=[];this.explicit=[];this.linkIds=new Set();this.menu=null;this.time=0;this.dragging=false;
     this.activeTrackId='v1';this.activeAudioTrackId='a1';
     this.activeRoleTracks=Object.fromEntries(TRACK_ROLES.map(role=>[role.id,timelineTracks().find(t=>t.role===role.id)?.id]));
     this.activeHeaderId='v1';
@@ -25,6 +26,7 @@ export class Timeline {
     $('zoomOut').onclick=()=>this.setZoom(this.zoom/1.25);
     $('fitTimeline').onclick=()=>this.fit();$('snap').onclick=()=>this.toggleSnap();
     this.canvas.addEventListener('pointerdown',e=>this.pointerDown(e));
+    this.canvas.addEventListener('contextmenu',e=>this.openMenu(e));
     this.canvas.addEventListener('click',e=>{
       const settings=e.target.closest('[data-clip-setting]');
       if(settings){e.preventDefault();e.stopPropagation();if(this.dragging||this.callbacks.busy?.())return;const block=settings.closest('.timeline-block');this.callbacks[settings.dataset.clipSetting==='copy'?'copySettings':'pasteSettings']?.({type:block.dataset.type,id:block.dataset.id});return;}
@@ -48,7 +50,7 @@ export class Timeline {
       if(!button)return;e.preventDefault();e.stopPropagation();
       if(button.dataset.type==='gap')this.chooseGap(button.dataset.id);
       else if(button.dataset.type==='transition')this.callbacks.transition(button.dataset.id,button.dataset.right);
-      else if(e.shiftKey||e.ctrlKey||e.metaKey){const ref={type:button.dataset.type,id:button.dataset.id};this.selectMany(combineSelection(this.selections,[ref],'toggle'),ref);this.callbacks.selectMany?.(this.selections,this.selection);}
+      else if(e.shiftKey||e.ctrlKey||e.metaKey){const ref={type:button.dataset.type,id:button.dataset.id};this.selectMany(combineSelection(this.selections,[ref],'toggle'),ref);this.callbacks.selectMany?.(this.explicit,this.selection);}
       else{this.select(button.dataset.type,button.dataset.id);this.callbacks.select(button.dataset.type,button.dataset.id);}
     });
     this.canvas.addEventListener('dragover',e=>this.externalOver(e));
@@ -81,13 +83,17 @@ export class Timeline {
   select(type,id,rightId){
     const gap=type==='gap'?timelineTracks().flatMap(t=>trackGaps(t.id)).find(g=>g.id===id):null;
     this.selection=type?{type,id,rightId,...(gap||{})}:null;
-    this.selections=['clip','caption','graphic','audio'].includes(type)?[{type,id}]:[];
+    // 연결된 짝은 화면 표시와 구조 편집에만 더합니다. 속성 편집은 클릭한 항목만 씁니다.
+    this.explicit=['clip','caption','graphic','audio'].includes(type)?[{type,id}]:[];
+    this.selections=selectionRefs(expandLinked(this.explicit,project));
     const range=type==='transition'?itemRange('clip',id):itemRange(type,id);
     if(gap||range)this.activateTrack((gap||range).trackId);
     this.paintSelection();
   }
   selectMany(refs,primary){
-    this.selections=selectionRefs(refs);this.selection=this.selections.find(ref=>primary&&selectionKey(ref)===selectionKey(primary))||this.selections.at(-1)||null;
+    this.explicit=selectionRefs(refs);
+    this.selections=selectionRefs(expandLinked(this.explicit,project));
+    this.selection=this.selections.find(ref=>primary&&selectionKey(ref)===selectionKey(primary))||this.explicit.at(-1)||this.selections.at(-1)||null;
     const range=this.selection&&itemRange(this.selection.type,this.selection.id);if(range)this.activateTrack(range.trackId);
     this.paintSelection();
   }
@@ -133,6 +139,7 @@ export class Timeline {
   }
   render(){
     if(this.dragging)return;
+    this.closeMenu();this.linkIds=activeLinkIds(project);
     const layout=buildLayout(),width=Math.max(this.scroll.clientWidth,Math.ceil((Math.max(layout.total,this.time)+3)*this.zoom));
     this.canvas.style.width=width+'px';this.renderRuler(width);
     const registry=timelineTracks();
@@ -169,8 +176,10 @@ export class Timeline {
       detail='<div class="waveform">'+Array.from({length:n},(_,i)=>{const at=(item.trimStart+i/n*duration)/(a?.duration||1),v=wave[Math.min(wave.length-1,Math.floor(at*wave.length))]||0;return '<i style="height:'+Math.max(2,v*100)+'%"></i>';}).join('')+'</div>';
     }
     const prefix={clip:'▧',caption:'T',graphic:'✧',audio:'♫'}[type];
+    const linked=this.linkIds?.has(item.linkId);
+    const linkMark=linked?'<span class="link-mark" aria-hidden="true" title="연결된 클립 · 함께 움직입니다">⛓</span>':'';
     const actions='<div class="clip-settings '+(width<84?'compact':'')+'"><button type="button" data-clip-setting="copy" aria-label="'+esc(label)+' 설정 복사" title="설정 복사 · Ctrl+Alt+C"><span class="settings-copy-symbol" aria-hidden="true"></span></button><button type="button" data-clip-setting="paste" aria-label="'+esc(label)+'에 설정 붙여넣기" title="설정 붙여넣기 · 선택 묶음이면 함께 적용 · Ctrl+Alt+V"><span class="settings-paste-symbol" aria-hidden="true"></span></button></div>';
-    return '<div tabindex="0" role="button" aria-pressed="false" aria-label="'+esc(label)+' · '+duration.toFixed(2)+'초" class="timeline-block '+klass+'-block '+(width<30?'short-block':'')+'" data-type="'+type+'" data-id="'+item.id+'" data-start="'+start+'" data-end="'+(start+duration)+'" style="left:'+visibleStart*this.zoom+'px;width:'+width+'px" title="'+esc(label)+' · '+start.toFixed(2)+'–'+(start+duration).toFixed(2)+'초"><span class="block-grip start" data-edge="start"></span>'+detail+'<span class="block-label">'+prefix+' '+esc(label)+'</span>'+actions+'<span class="block-grip end" data-edge="end"></span></div>';
+    return '<div tabindex="0" role="button" aria-pressed="false" aria-label="'+esc(label)+' · '+duration.toFixed(2)+'초'+(linked?' · 연결됨':'')+'" class="timeline-block '+klass+'-block '+(linked?'linked-block ':'')+(width<30?'short-block':'')+'" data-type="'+type+'" data-id="'+item.id+'" data-start="'+start+'" data-end="'+(start+duration)+'" style="left:'+visibleStart*this.zoom+'px;width:'+width+'px" title="'+esc(label)+' · '+start.toFixed(2)+'–'+(start+duration).toFixed(2)+'초"><span class="block-grip start" data-edge="start"></span>'+detail+'<span class="block-label">'+prefix+' '+esc(label)+'</span>'+linkMark+actions+'<span class="block-grip end" data-edge="end"></span></div>';
   }
   beginExternalDrag(kind,id){this.external={kind,id};this.callbacks.pause();}
   endExternalDrag(){this.external=null;this.clearPreview();this.stopScroll();}
@@ -304,7 +313,7 @@ export class Timeline {
       this.stopScroll();this.dragging=false;this.canvas.classList.remove('is-marquee');marquee.remove();
       if(this.canvas.hasPointerCapture(pointer))this.canvas.releasePointerCapture(pointer);
       if(cancel){if(primary&&['gap','transition'].includes(primary.type))this.select(primary.type,primary.id,primary.rightId);else this.selectMany(initial,primary);return;}
-      if(moved){this.selectMany(chosen,chosen.at(-1));this.callbacks.selectMany?.(this.selections,this.selection);}
+      if(moved){this.selectMany(chosen,chosen.at(-1));this.callbacks.selectMany?.(this.explicit,this.selection);}
       else if(mode==='replace'&&gapId)this.chooseGap(gapId);
       else if(mode==='replace'){this.selectMany([],null);this.callbacks.selectMany?.([],null);this.callbacks.seek(frameTime(origin.x/this.zoom));}
     };
@@ -314,31 +323,104 @@ export class Timeline {
   }
   dragGroup(event,node,range){
     const before=captureDocument(),refs=this.selections.slice(),origin=this.xTime(event.clientX),pointer=event.pointerId,excluded=new Set(refs.map(ref=>ref.id));
+    const linkedMove=refs.length>this.explicit.length,canRetarget=this.explicit.length<=1;
     let last=event,pending=null,changed=false,done=false;
     this.dragging=true;this.canvas.classList.add('is-dragging');node.setPointerCapture(pointer);
     const update=()=>{
-      const delta=this.xTime(last.clientX)-origin;if(!changed&&Math.abs(delta*this.zoom)<3)return;
+      const delta=this.xTime(last.clientX)-origin;
+      // 묶음을 대표해 하나만 잡았을 때만 행을 옮깁니다. 여러 개를 직접 고른 선택은 원래 행에 둡니다.
+      const hovered=canRetarget?document.elementFromPoint(last.clientX,last.clientY)?.closest('.track')?.dataset.track:null;
+      const retarget=hovered&&hovered!==range.trackId&&timelineTracks().some(t=>t.id===hovered&&t.kind===trackKind(range.type))
+        ?{type:range.type,id:range.id,trackId:hovered}:null;
+      if(!changed&&Math.abs(delta*this.zoom)<3&&!retarget)return;
       changed=true;const time=this.snapTime(range.start+delta,excluded,range.duration);
-      pending=planBatchMove(refs,time-range.start,before);this.clearPreview();
+      pending=planBatchMove(refs,time-range.start,before,{retarget});this.clearPreview();
       this.canvas.querySelectorAll('.timeline-block.selected').forEach(n=>n.classList.add('dragging'));
       for(const move of pending.moves||[]){
         const row=$('track-'+move.trackId);if(!row)continue;
         const ghost=document.createElement('div');ghost.className='timeline-insert-preview'+(pending.ok?'':' invalid');ghost.style.left=move.start*this.zoom+'px';ghost.style.width=Math.max(12,move.duration*this.zoom)+'px';row.append(ghost);this.ensureWidth(move.end);
       }
-      const notice=$('timelineNotice');if(notice)notice.textContent=pending.ok?refs.length+'개 함께 이동 · 트랙과 클립 사이 간격 유지':pending.reason;
+      const notice=$('timelineNotice');if(notice)notice.textContent=pending.ok?(linkedMove?'연결된 ':'')+refs.length+'개 함께 이동 · 트랙과 클립 사이 간격 유지':pending.reason;
     };
     const move=e=>{if(e.pointerId!==pointer)return;last=e;update();this.trackScroll(e,update);};
     const finish=cancel=>{
       if(done)return;done=true;node.removeEventListener('pointermove',move);node.removeEventListener('pointerup',up);node.removeEventListener('pointercancel',cancelPointer);node.removeEventListener('lostpointercapture',cancelPointer);window.removeEventListener('keydown',escape);window.removeEventListener('blur',abort);
       this.stopScroll();this.clearPreview();this.dragging=false;this.canvas.classList.remove('is-dragging');
       if(node.hasPointerCapture(pointer))node.releasePointerCapture(pointer);
-      try{if(!cancel&&changed&&pending){if(applyBatchMove(pending))this.callbacks.commit(before,'선택 클립 함께 이동');}}
+      try{if(!cancel&&changed&&pending){if(applyBatchMove(pending))this.callbacks.commit(before,linkedMove?'연결 클립 함께 이동':'선택 클립 함께 이동');}}
       catch(error){this.callbacks.error?.(error.message);}
       this.render();
     };
     const up=e=>{if(e.pointerId===pointer)finish(false);},cancelPointer=e=>{if(e.pointerId===pointer)finish(true);},abort=()=>finish(true),escape=e=>{if(e.key==='Escape'){e.preventDefault();finish(true);}};
     node.addEventListener('pointermove',move);node.addEventListener('pointerup',up);node.addEventListener('pointercancel',cancelPointer);node.addEventListener('lostpointercapture',cancelPointer);window.addEventListener('keydown',escape);window.addEventListener('blur',abort);
   }
+  /**
+   * 우클릭(또는 메뉴 키)으로 클립 메뉴를 엽니다.
+   * 빈 곳에서는 브라우저 기본 메뉴를 그대로 두어 새로고침·검사를 막지 않습니다.
+   */
+  openMenu(event){
+    const hit=event.target.closest('.timeline-block');
+    if(!hit)return;
+    event.preventDefault();
+    if(this.dragging||this.callbacks.busy?.())return;
+    const ref={type:hit.dataset.type,id:hit.dataset.id};
+    if(!itemRange(ref.type,ref.id))return;
+    this.callbacks.pause();
+    // 이미 선택한 묶음 안을 누르면 선택을 유지합니다. 밖을 누르면 그 클립만 고릅니다.
+    if(this.selections.some(entry=>selectionKey(entry)===selectionKey(ref))){
+      this.selectMany(this.explicit,ref);this.callbacks.selectMany?.(this.explicit,this.selection);
+    }else{this.select(ref.type,ref.id);this.callbacks.select(ref.type,ref.id);}
+    const box=hit.getBoundingClientRect();
+    // 키보드로 연 메뉴는 좌표가 없으므로 클립 자리에 붙입니다.
+    const keyboard=event.button===-1||(!event.clientX&&!event.clientY);
+    this.showMenu(ref,keyboard?{x:box.left+12,y:box.bottom-4}:{x:event.clientX,y:event.clientY},hit);
+  }
+  showMenu(ref,at,anchorNode){
+    this.closeMenu();
+    const entries=this.callbacks.menuItems?.(ref)||[];
+    if(!entries.length)return;
+    const menu=document.createElement('div');
+    menu.className='timeline-menu';menu.setAttribute('role','menu');menu.setAttribute('aria-label','타임라인 클립 메뉴');
+    menu.innerHTML=entries.map(entry=>entry.separator?'<hr>'
+      :'<button type="button" role="menuitem" data-menu="'+esc(entry.id)+'"'+(entry.disabled?' disabled':'')
+        +(entry.title?' title="'+esc(entry.title)+'"':'')+'><span>'+esc(entry.label)+'</span>'
+        +(entry.hint?'<small>'+esc(entry.hint)+'</small>':'')+'</button>').join('');
+    document.body.append(menu);
+    const width=menu.offsetWidth,height=menu.offsetHeight;
+    menu.style.left=Math.max(6,Math.min(at.x,window.innerWidth-width-6))+'px';
+    menu.style.top=(at.y+height>window.innerHeight-6?Math.max(6,at.y-height):at.y)+'px';
+    const buttons=()=>[...menu.querySelectorAll('button:not([disabled])')];
+    const close=restore=>{
+      if(this.menu!==state)return;
+      this.menu=null;menu.remove();
+      document.removeEventListener('pointerdown',outside,true);
+      window.removeEventListener('blur',away);window.removeEventListener('resize',away);
+      this.scroll.removeEventListener('scroll',away);
+      if(restore&&anchorNode?.isConnected)anchorNode.focus({preventScroll:true});
+    };
+    const state={close};
+    const outside=event=>{if(!menu.contains(event.target))close(false);};
+    const away=()=>close(false);
+    menu.addEventListener('click',event=>{
+      const button=event.target.closest('button[data-menu]');
+      if(!button||button.disabled)return;
+      close(false);this.callbacks.menuAction?.(button.dataset.menu,ref);
+    });
+    menu.addEventListener('keydown',event=>{
+      const list=buttons(),index=list.indexOf(document.activeElement);
+      if(event.key==='Escape'){event.preventDefault();close(true);}
+      else if(event.key==='ArrowDown'){event.preventDefault();list[(index+1)%list.length]?.focus();}
+      else if(event.key==='ArrowUp'){event.preventDefault();list[(index-1+list.length)%list.length]?.focus();}
+      else if(event.key==='Home'){event.preventDefault();list[0]?.focus();}
+      else if(event.key==='End'){event.preventDefault();list.at(-1)?.focus();}
+      else if(event.key==='Tab'){event.preventDefault();close(true);}
+    });
+    document.addEventListener('pointerdown',outside,true);
+    window.addEventListener('blur',away);window.addEventListener('resize',away);
+    this.scroll.addEventListener('scroll',away);
+    this.menu=state;buttons()[0]?.focus({preventScroll:true});
+  }
+  closeMenu(){this.menu?.close(false);}
   pointerDown(event){
     if(event.button!==0||this.dragging||this.callbacks.busy?.()||event.isPrimary===false)return;
     if(event.target.closest('[data-clip-setting]'))return;
@@ -368,8 +450,12 @@ export class Timeline {
     }
     event.preventDefault();const {type,id}=node.dataset,range=itemRange(type,id);if(!range)return;
     this.callbacks.pause();const ref={type,id},edge=event.target.closest('[data-edge]')?.dataset.edge;
-    if(event.ctrlKey||event.metaKey||event.shiftKey){this.selectMany(combineSelection(this.selections,[ref],'toggle'),ref);this.callbacks.selectMany?.(this.selections,this.selection);return;}
-    if(!edge&&this.selections.length>1&&this.selections.some(r=>selectionKey(r)===selectionKey(ref))){this.selectMany(this.selections,ref);this.callbacks.selectMany?.(this.selections,this.selection);this.dragGroup(event,node,range);return;}
+    if(event.ctrlKey||event.metaKey||event.shiftKey){this.selectMany(combineSelection(this.selections,[ref],'toggle'),ref);this.callbacks.selectMany?.(this.explicit,this.selection);return;}
+    if(!edge&&this.selections.length>1&&this.selections.some(r=>selectionKey(r)===selectionKey(ref))){this.selectMany(this.explicit,ref);this.callbacks.selectMany?.(this.explicit,this.selection);this.dragGroup(event,node,range);return;}
+    // 연결된 클립 하나를 끌면 묶음 전체가 간격을 유지한 채 함께 움직입니다.
+    if(!edge&&linkedRefs(ref,project).length>1){
+      this.select(type,id);this.callbacks.select(type,id);this.dragGroup(event,node,range);return;
+    }
     this.select(type,id);this.callbacks.select(type,id);
     const before=captureDocument(),origin=this.xTime(event.clientX),original={...range.item};
     let changed=false,pending=null,lastEvent=event,done=false;
@@ -389,9 +475,11 @@ export class Timeline {
           :planPlacement(time,range.duration,target,id,project,{targetTime:this.xTime(lastEvent.clientX)});
       }else{
         const time=this.snapTime((edge==='end'?range.end:range.start)+delta,id);
-        pending={...planItemTrim(type,id,edge,time),trackId:range.trackId};
+        const trim=planLinkedTrim(ref,edge,time);
+        pending=trim?{...trim,trackId:trim.trackId??range.trackId}:null;
       }
-      this.showPreview({type,lane:target,trackId:target,name:original.name||original.text,start:pending.start,end:pending.end,placement:!edge?pending:null});
+      if(!pending){this.clearPreview();return;}
+      this.showPreview({type,lane:target,trackId:target,name:original.name||original.text,start:pending.start,end:pending.end,placement:pending});
     };
     const move=e=>{if(e.pointerId!==event.pointerId)return;lastEvent=e;update();this.trackScroll(e,update);};
     const finish=cancel=>{
@@ -403,8 +491,8 @@ export class Timeline {
         try{
           if(JSON.stringify(captureDocument())!==JSON.stringify(before))throw new Error('드래그 중 편집 내용이 변경되었습니다. 다시 시도해 주세요.');
           if(!edge)placeTimelineItem(type,range.item,pending);
-          else applyItemTrim(pending);
-          syncAnchoredItems();this.callbacks.commit(before,edge?'클립 구간 조절':pending.swap?'클립 자리 교환':'클립 위치 이동');
+          else applyLinkedTrim(pending);
+          syncAnchoredItems();this.callbacks.commit(before,edge?(pending.linked?'연결 클립 구간 조절':'클립 구간 조절'):pending.swap?'클립 자리 교환':'클립 위치 이동');
           this.reveal({type,id,trackId:pending.trackId,start:pending.start,end:pending.end,mode:pending.mode});
         }catch(error){this.callbacks.error?.(error.message);this.render();}
       }else this.render();

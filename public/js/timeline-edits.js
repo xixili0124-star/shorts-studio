@@ -6,6 +6,7 @@ import { TRANSITIONS } from './presets.js';
 import { sliceKeyframes, splitKeyframes } from './keyframes.js';
 import { sliceCropTracking, splitCropTracking } from './crop-tracking.js';
 import { uid, clamp } from './util.js';
+import { relinkCopies, linkedRefs } from './link-groups.js';
 
 const EPS = 1e-6;
 const cut = () => ({ type: 'cut', duration: 0 });
@@ -349,6 +350,45 @@ export function applyItemTrim(plan) {
   applyMotion(range.item, motion);
 }
 
+/**
+ * 연결된 항목을 같은 이동량만큼 함께 트림하는 계획입니다.
+ * 절대 시각이 아니라 이동량을 맞춥니다. 직접 연결한 두 클립의 끝이 원래 어긋나 있어도
+ * 그 간격을 그대로 지키기 위해서입니다.
+ * 항목마다 이웃 클립·원본 길이의 한계가 다르므로, 먼저 각자 얼마나 움직일 수 있는지 재고
+ * 가장 적게 움직인 값에 모두를 맞춥니다. 그래도 어긋나면 거절합니다.
+ * 한쪽만 잘리면 화면과 소리가 어긋난 채로 남기 때문입니다.
+ */
+const validTrim = plan => plan && Number.isFinite(plan.start) && Number.isFinite(plan.end);
+const trimEdge = (entry, edge) => edge === 'start' ? entry.start : entry.end;
+export function planLinkedTrim(ref, edge, time, doc = project) {
+  const members = linkedRefs(ref, doc)
+    .map(member => ({ ...member, range: itemRange(member.type, member.id, doc) })).filter(member => member.range);
+  const self = members.find(member => member.type === ref.type && member.id === ref.id);
+  if (!self) return null;
+  const attempt = delta => members.map(member => {
+    const plan = planItemTrim(member.type, member.id, edge, trimEdge(member.range, edge) + delta);
+    return validTrim(plan)
+      ? { ...plan, trackId: plan.trackId ?? member.range.trackId, delta: trimEdge(plan, edge) - trimEdge(member.range, edge) }
+      : null;
+  });
+  const first = attempt(time - trimEdge(self.range, edge));
+  const own = first.find(plan => plan?.id === ref.id);
+  if (!validTrim(own)) return null;
+  if (members.length < 2) return { ...own, plans: [own], linked: false, ok: true };
+  const usable = first.filter(Boolean);
+  const settled = usable.reduce((a, b) => Math.abs(b.delta) < Math.abs(a.delta) ? b : a).delta;
+  const plans = attempt(settled);
+  const agreed = plans.every(plan => plan && Math.abs(plan.delta - settled) < EPS);
+  const primary = plans.find(plan => plan?.id === ref.id) || own;
+  return { ...primary, plans: plans.filter(Boolean), linked: true, ok: agreed,
+    reason: agreed ? '' : '연결된 클립을 같은 만큼 자를 수 없습니다. 먼저 연결을 해제해 주세요.' };
+}
+export function applyLinkedTrim(plan) {
+  if (!plan) return;
+  if (plan.ok === false) throw new Error(plan.reason || '연결된 클립을 함께 자를 수 없습니다.');
+  for (const entry of plan.plans?.length ? plan.plans : [plan]) applyItemTrim(entry);
+}
+
 /** 선택한 종류와 ID만 분할합니다. 자막·그래픽·음성은 각각 별개의 클립입니다. */
 export async function splitTimelineItem(selection, time) {
   const check = splitAvailability(selection, time);
@@ -385,6 +425,8 @@ export async function splitTimelineItem(selection, time) {
     item.fadeEnvelope = { ...envelope };
     right.fadeEnvelope = { ...envelope, offset: envelope.offset + local };
   }
+  // 오른쪽 조각은 원본의 연결을 물려받지 않습니다. 혼자 남은 linkId 는 연결 없음과 같습니다.
+  relinkCopies([right]);
   applyMotion(item, { keyframes: keyframes.left, cropTracking: tracking.left });
   applyMotion(right, { keyframes: keyframes.right, cropTracking: tracking.right });
   return { type, id: right.id, start: time, end: check.end };

@@ -7,6 +7,7 @@ import { validMosaics } from './mosaic.js';
 import { TRANSITIONS } from './presets.js';
 import { validateKeyframes } from './keyframes.js';
 import { validCropTracking } from './crop-tracking.js';
+import { isLinkId } from './link-groups.js';
 
 export const assets = new Map();
 const clipRuntime = new Map();
@@ -15,8 +16,8 @@ let assetReady = () => {};
 export function onAssetReady(callback) { assetReady = callback; }
 export let documentName = '새 프로젝트';
 export function setDocumentName(name) { documentName = String(name).trim().slice(0, 100) || '새 프로젝트'; }
-const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop','mosaics','keyframes','cropTracking','audioSeparated','sourceAudioAssetId'];
-const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','role','trackId','aiGenerated','keyframes','sourceVideoAudio','sourceVideoAssetId'];
+const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop','mosaics','keyframes','cropTracking','audioSeparated','sourceAudioAssetId','linkId'];
+const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','role','trackId','aiGenerated','keyframes','sourceVideoAudio','sourceVideoAssetId','linkId'];
 const sourceAudioKeys = ['sourceVideoAudio','sourceVideoAssetId'];
 const copy = value => JSON.parse(JSON.stringify(value));
 const pick = (object, keys) => Object.fromEntries(keys.filter(k => object[k] !== undefined).map(k => [k, object[k]]));
@@ -51,13 +52,13 @@ export function restoreDocument(doc) {
       trackId: c.trackId, transform: c.transform ? copy(c.transform) : undefined, crop: c.crop ? copy(c.crop) : undefined,
       mosaics: c.mosaics ? copy(c.mosaics) : undefined, keyframes:c.keyframes?copy(c.keyframes):undefined,
       cropTracking:c.cropTracking?copy(c.cropTracking):undefined,
-      audioSeparated:c.audioSeparated, sourceAudioAssetId:c.sourceAudioAssetId };
+      audioSeparated:c.audioSeparated, sourceAudioAssetId:c.sourceAudioAssetId, linkId:c.linkId };
   });
   const tracks = (doc.tracks || []).map(t => {
     const runtime = audioRuntime.get(t.id);
     if (!runtime) throw new Error('프로젝트 오디오를 먼저 불러와야 합니다.');
     return { ...runtime, ...copy(pick(t,audioKeys)), trackId: t.trackId, role: t.role, fadeEnvelope: t.fadeEnvelope ? copy(t.fadeEnvelope) : undefined, keyframes:t.keyframes?copy(t.keyframes):undefined,
-      sourceVideoAudio:t.sourceVideoAudio, sourceVideoAssetId:t.sourceVideoAssetId };
+      sourceVideoAudio:t.sourceVideoAudio, sourceVideoAssetId:t.sourceVideoAssetId, linkId:t.linkId };
   });
   setDocumentName(doc.name);
   Object.assign(project, pick(doc.settings || {}, ['width','height','fps','quality']));
@@ -330,6 +331,7 @@ export function validateDocument(doc, records) {
     for (const key of ['start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','scale','offX','offY','volume','fadeIn','fadeOut']) {
       if (item[key] !== undefined && (!Number.isFinite(item[key]) || Math.abs(item[key]) > 86400)) throw new Error('프로젝트 시간 또는 속성 값이 올바르지 않습니다.');
     }
+    if (item.linkId !== undefined && !isLinkId(item.linkId)) throw new Error('클립 연결 정보가 올바르지 않습니다.');
     if (item.trimStart < 0 || item.trimEnd < item.trimStart || item.imgDuration <= 0 || item.start < 0 || item.scale <= 0) throw new Error('클립 구간이 올바르지 않습니다.');
     if (item.type === 'video' && item.trimEnd <= item.trimStart) throw new Error('영상 클립의 길이가 올바르지 않습니다.');
     if (item.motionDuration < 0 || item.motionOffset < 0) throw new Error('이미지 모션 구간이 올바르지 않습니다.');

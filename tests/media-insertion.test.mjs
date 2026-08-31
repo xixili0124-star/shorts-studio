@@ -7,9 +7,10 @@ import { assets, addAsset, addDecodedAudioAsset, makeClip, makeAudio, clearAsset
 import { createClip, disposeClip, probeVideoAudio } from '../public/js/media.js';
 import { extractClipAudio, hasClipAudio, mixTimeline } from '../public/js/audio.js';
 import { Player } from '../public/js/player.js';
-import { planPlacement, placeTimelineItem, planItemTrim, applyItemTrim, splitTimelineItem } from '../public/js/timeline-edits.js';
-import { duplicateSelectedItems, planBatchSplit, applyBatchSplit } from '../public/js/batch-edits.js';
+import { planPlacement, placeTimelineItem, planItemTrim, applyItemTrim, splitTimelineItem, planLinkedTrim, applyLinkedTrim } from '../public/js/timeline-edits.js';
+import { duplicateSelectedItems, planBatchSplit, applyBatchSplit, planBatchMove, applyBatchMove } from '../public/js/batch-edits.js';
 import { insertMediaAsset, prepareVideoAudio, separatedAudioFile, planAudioTrack } from '../public/js/media-insertion.js';
+import { isLinkId, linkGroups, activeLinkIds, linkedRefs, expandLinked, isLinkedSelection, planLink, applyLink, applyUnlink } from '../public/js/link-groups.js';
 
 const defaults = structuredClone(project);
 const originals = { document: globalThis.document, window: globalThis.window, AudioBuffer: globalThis.AudioBuffer,
@@ -273,4 +274,130 @@ test('project validation rejects malformed separation markers and absent provena
   const bad = structuredClone(doc); bad.tracks[0].sourceVideoAssetId = 'missing'; assert.throws(() => validateDocument(bad, records));
   const older = structuredClone(doc); delete older.clips[0].audioSeparated; delete older.clips[0].sourceAudioAssetId;
   restoreDocument(older); assert.equal(project.clips[0].audioSeparated, undefined);
+});
+
+// ── 연결(프리미어의 링크) ──────────────────────────────────────────────
+// 영상과 그 원음이 타임라인에서 따로 움직이면 화면과 소리가 어긋납니다.
+// 같은 linkId 를 붙여 함께 움직이게 하고, 우클릭 메뉴에서 풀 수 있게 했습니다.
+
+test('separated video audio is linked to its clip and survives save, undo and validation', async () => {
+  await insertMediaAsset(videoAsset().id, { time: 1 });
+  const clip = project.clips[0], audio = project.audio.tracks[0];
+  assert.ok(isLinkId(clip.linkId)); assert.equal(clip.linkId, audio.linkId);
+  const doc = captureDocument();
+  assert.equal(doc.clips[0].linkId, doc.tracks[0].linkId);
+  assert.doesNotThrow(() => validateDocument(doc, savedRecords()));
+  assert.deepEqual(linkedRefs({ type: 'clip', id: clip.id }, project),
+    [{ type: 'clip', id: clip.id }, { type: 'audio', id: audio.id }]);
+  assert.deepEqual(expandLinked([{ type: 'audio', id: audio.id }], project).map(ref => ref.type), ['audio', 'clip']);
+  // 연결을 푼 문서로 되돌리면 런타임에 남은 linkId 도 함께 지워져야 합니다.
+  const unlinked = structuredClone(doc); delete unlinked.clips[0].linkId; delete unlinked.tracks[0].linkId;
+  restoreDocument(unlinked);
+  assert.equal(project.clips[0].linkId, undefined); assert.equal(project.audio.tracks[0].linkId, undefined);
+  assert.equal(linkedRefs({ type: 'clip', id: clip.id }, project).length, 1);
+  restoreDocument(doc); assert.equal(project.clips[0].linkId, project.audio.tracks[0].linkId);
+  const bad = structuredClone(doc); bad.clips[0].linkId = 'not a valid id';
+  assert.throws(() => validateDocument(bad, savedRecords()), /연결 정보/);
+});
+
+test('a link left with a single member counts as no link and links only form from two or more', async () => {
+  const sound = await audioAsset();
+  project.audio.tracks = [makeAudio(sound.id, { start: 0, trackId: 'a1', linkId: 'solo' })];
+  const only = { type: 'audio', id: project.audio.tracks[0].id };
+  assert.equal(linkGroups(project).size, 0); assert.equal(activeLinkIds(project).size, 0);
+  assert.deepEqual(linkedRefs(only, project), [only]);
+  assert.equal(isLinkedSelection([only], project), false);
+  assert.equal(planLink([only], project).ok, false);
+  project.audio.tracks.push(makeAudio(sound.id, { start: 4, trackId: 'a1' }));
+  const second = { type: 'audio', id: project.audio.tracks[1].id };
+  const plan = planLink([only, second], project);
+  assert.equal(plan.ok, true); assert.equal(applyLink(plan, project), 2);
+  assert.equal(activeLinkIds(project).size, 1);
+  assert.equal(planLink([only, second], project).ok, false, '이미 같은 묶음이면 다시 연결하지 않습니다');
+  assert.equal(applyUnlink([only], project), 2, '절반만 풀면 남은 쪽이 계속 붙어 다닙니다');
+  assert.equal(activeLinkIds(project).size, 0);
+});
+
+test('linked clip and audio trim together and stop at the most restrictive limit', async () => {
+  nativeDuration = 4; rows = [{ timestamp: 0, buffer: pcm(4) }];
+  await insertMediaAsset(videoAsset('trim', { duration: 4 }).id, { time: 0 });
+  const clip = project.clips[0], audio = project.audio.tracks[0], ref = { type: 'clip', id: clip.id };
+  const plan = planLinkedTrim(ref, 'end', 1.5);
+  assert.equal(plan.linked, true); assert.equal(plan.ok, true); assert.equal(plan.plans.length, 2);
+  applyLinkedTrim(plan);
+  assert.equal(clip.trimEnd - clip.trimStart, 1.5);
+  assert.equal(audio.trimEnd - audio.trimStart, 1.5);
+  assert.equal(audio.start, clip.start);
+  // 원음 트랙의 뒤 클립이 2.5초부터 있으면 소리가 먼저 막힙니다.
+  // 영상도 같은 지점에서 멈춰야 화면과 소리가 어긋나지 않습니다.
+  const sound = await audioAsset('blocker');
+  project.audio.tracks.push(makeAudio(sound.id, { start: 2.5, trackId: audio.trackId }));
+  const stretch = planLinkedTrim(ref, 'end', 3.5);
+  assert.equal(stretch.ok, true);
+  applyLinkedTrim(stretch);
+  assert.ok(Math.abs((clip.trimEnd - clip.trimStart) - 2.5) < 1e-6);
+  assert.equal(clip.trimEnd - clip.trimStart, audio.trimEnd - audio.trimStart);
+});
+
+test('splitting and duplicating a linked pair keeps the copies together but detached from the original', async () => {
+  await insertMediaAsset(videoAsset('pair').id, { time: 0 });
+  const refs = expandLinked([{ type: 'clip', id: project.clips[0].id }], project);
+  const original = project.clips[0].linkId;
+  const split = await applyBatchSplit(planBatchSplit(refs, 1));
+  assert.equal(split.items.length, 2);
+  const rightClip = project.clips.find(clip => clip.id !== refs[0].id);
+  const rightAudio = project.audio.tracks.find(track => track.id !== refs[1].id);
+  assert.equal(rightClip.linkId, rightAudio.linkId, '잘라낸 오른쪽끼리는 계속 연결됩니다');
+  assert.notEqual(rightClip.linkId, original, '오른쪽 조각이 원본의 짝과 함께 움직이면 안 됩니다');
+  assert.equal(project.clips[0].linkId, original);
+  assert.equal(activeLinkIds(project).size, 2);
+  const copies = await duplicateSelectedItems(expandLinked([{ type: 'clip', id: project.clips[0].id }], project));
+  const copyClip = project.clips.find(clip => clip.id === copies.find(item => item.type === 'clip').id);
+  const copyAudio = project.audio.tracks.find(track => track.id === copies.find(item => item.type === 'audio').id);
+  assert.equal(copyClip.linkId, copyAudio.linkId);
+  assert.notEqual(copyClip.linkId, original);
+  assert.doesNotThrow(() => validateDocument(captureDocument(), savedRecords()));
+});
+
+test('a linked pair moves together across rows and keeps the gap between them', async () => {
+  await insertMediaAsset(videoAsset('move').id, { time: 2 });
+  const refs = expandLinked([{ type: 'clip', id: project.clips[0].id }], project);
+  const plan = planBatchMove(refs, 3);
+  assert.equal(plan.ok, true); assert.equal(plan.moves.length, 2);
+  assert.equal(applyBatchMove(plan), true);
+  assert.equal(project.clips[0].start, 5); assert.equal(project.audio.tracks[0].start, 5);
+});
+
+test('a linked video changes visual row while its original sound stays on the audio row', async () => {
+  await insertMediaAsset(videoAsset('row').id, { time: 1 });
+  const clip = project.clips[0], audio = project.audio.tracks[0], soundRow = audio.trackId;
+  const refs = expandLinked([{ type: 'clip', id: clip.id }], project);
+  const plan = planBatchMove(refs, 2, undefined, { retarget: { type: 'clip', id: clip.id, trackId: 'v2' } });
+  assert.equal(plan.ok, true); assert.equal(plan.retargeted, true);
+  assert.equal(applyBatchMove(plan), true);
+  assert.equal(clip.trackId, 'v2'); assert.equal(clip.start, 3);
+  assert.equal(audio.trackId, soundRow); assert.equal(audio.start, 3);
+  // 자리를 옮기기만 하고 시각은 그대로여도 실제 편집으로 기록해야 합니다.
+  const back = planBatchMove(refs, 0, undefined, { retarget: { type: 'clip', id: clip.id, trackId: 'v1' } });
+  assert.equal(applyBatchMove(back), true); assert.equal(clip.trackId, 'v1'); assert.equal(clip.start, 3);
+  // 소리를 영상 트랙에 놓을 수는 없습니다.
+  assert.equal(planBatchMove(refs, 0, undefined, { retarget: { type: 'audio', id: audio.id, trackId: 'v1' } }).ok, false);
+  assert.doesNotThrow(() => validateDocument(captureDocument(), savedRecords()));
+});
+
+test('a hand-linked pair trims by the same amount and keeps the offset between their edges', async () => {
+  const sound = await audioAsset();
+  project.audio.tracks = [makeAudio(sound.id, { start: 0, trimStart: 0, trimEnd: 2, trackId: 'a1' }),
+    makeAudio(sound.id, { start: .5, trimStart: 0, trimEnd: 1, trackId: 'a2' })];
+  const [first, second] = project.audio.tracks;
+  const refs = project.audio.tracks.map(track => ({ type: 'audio', id: track.id }));
+  assert.equal(applyLink(planLink(refs, project), project), 2);
+  const ends = () => project.audio.tracks.map(track => track.start + track.trimEnd - track.trimStart);
+  assert.deepEqual(ends(), [2, 1.5]);
+  const plan = planLinkedTrim(refs[0], 'end', 1.5);
+  assert.equal(plan.ok, true); assert.equal(plan.linked, true);
+  applyLinkedTrim(plan);
+  // 절대 시각이 아니라 이동량을 맞추므로 두 끝의 0.5초 간격이 그대로 남습니다.
+  assert.deepEqual(ends(), [1.5, 1]);
+  assert.equal(first.trimEnd - first.trimStart, 1.5); assert.equal(second.trimEnd - second.trimStart, .5);
 });

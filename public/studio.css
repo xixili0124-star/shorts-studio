@@ -329,3 +329,28 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 .timeline-menu button:hover:not(:disabled),.timeline-menu button:focus-visible{background:#333a2a;color:var(--accent);outline:none}
 .timeline-menu button:hover:not(:disabled)>small,.timeline-menu button:focus-visible>small{color:#93a37a}
 .timeline-menu button:disabled{opacity:.34;cursor:default}
+
+/* ── 트랙 스위치 (숨김 · 뮤트 · 솔로 · 잠금) ──────────────── */
+.track-heads{width:200px;flex:0 0 200px}
+.track-head{gap:5px;padding:0 6px}
+.track-head .track-selector{min-width:0;flex:1 1 auto}
+.track-head .track-selector strong{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.track-head>button.add-track,.track-head>button.remove-track{width:16px;flex:0 0 16px;padding:0;font-size:11px}
+.track-switches{display:flex;gap:2px;flex:0 0 auto}
+.track-switch{width:15px;height:16px;display:grid;place-items:center;border:1px solid #3a4044;border-radius:3px;
+  background:#20242700;color:#6d767a;font:9px Consolas,monospace;line-height:1;padding:0}
+.track-switch:hover{color:#e9eeed;border-color:#556065}
+.track-switch.on{color:#141618;border-color:transparent;font-weight:700}
+.track-switch.switch-hidden.on{background:#8d97a0;color:#14171a}
+.track-switch.switch-muted.on{background:var(--orange,#e0a45c)}
+.track-switch.switch-solo.on{background:var(--accent);color:#1b2410}
+.track-switch.switch-locked.on{background:#c98b8b;color:#241414}
+
+/* 숨긴 트랙은 화면에서만 빠집니다. 소리·편집은 그대로라 옅게만 표시합니다. */
+.track.is-hidden .timeline-block{opacity:.34}
+.track.is-muted .waveform i{opacity:.22}
+.track.is-solo{background-color:#b8ee6308}
+/* 잠긴 트랙은 선택·드래그가 막힙니다. 손잡이를 숨겨 잡을 곳이 없음을 보여 줍니다. */
+.track.is-locked{background-image:repeating-linear-gradient(135deg,#ffffff00 0 6px,#ffffff08 6px 12px)}
+.track.is-locked .timeline-block{cursor:default;opacity:.62}
+.track.is-locked .block-grip,.track.is-locked .clip-settings{display:none}

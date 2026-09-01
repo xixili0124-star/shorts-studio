@@ -6,6 +6,7 @@ import {readFileSync} from 'node:fs';
 import {runInNewContext} from 'node:vm';
 import {legacyEditorMode,setLegacyEditorMode} from '../public/js/state.js';
 import {trackBadge,ensureAutoCaptionTrack} from '../public/js/state.js';
+import {setTrackSwitch,isTrackMuted,isTrackLocked,isTrackAudible,hasAudioSolo,inlineClipAudible} from '../public/js/state.js';
 import {keyframeValue} from '../public/js/keyframes.js';
 import {cropTrackingAt} from '../public/js/crop-tracking.js';
 import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES} from '../public/js/state.js';
@@ -2377,4 +2378,71 @@ test('PC ASR review applies only on consent and preserves existing captions and 
     assert.equal(history.undo(),'PC Turbo 자동 자막 추가');assert.deepEqual(captureDocument(),before);
     owner.pcAsr.status=pcAsrReady({available:false});globalThis.confirm=()=>{throw new Error('must not run');};await assert.rejects(()=>owner.openCaptions(),/Tiny로 자동 전환하지/);assert.equal(owner.captionEngine,'pc');
   }finally{Object.assign(globalThis,saved);reset();}
+});
+
+// ── 트랙 스위치 (숨김 · 뮤트 · 솔로 · 잠금) ─────────────────────────────
+// 각 스위치가 딱 한 가지만 건드리는지 봅니다. 특히 솔로는 미리보기 전용이라
+// 내보내기 믹스가 따라가면 배경음악이 통째로 빠지는 사고가 납니다.
+
+test('a hidden visual track disappears from the shared renderer but keeps its slot',{skip:!canvasModule},()=>{
+  reset();project.clips=[clip('red',4,1)];
+  const {createCanvas}=canvasModule,out=createCanvas(90,160),ctx=out.getContext('2d');
+  const solid=color=>{const c=createCanvas(90,160),g=c.getContext('2d');g.fillStyle=color;g.fillRect(0,0,90,160);return c;};
+  const opts={source:()=>({img:solid('#ff0000'),w:90,h:160})};
+  renderFrame(ctx,1,opts);assert.deepEqual([...ctx.getImageData(45,80,1,1).data],[255,0,0,255]);
+  migrateTimeline();setTrackSwitch('v1','hidden',true);
+  renderFrame(ctx,1,opts);assert.deepEqual([...ctx.getImageData(45,80,1,1).data],[0,0,0,255],'숨긴 트랙은 그려지지 않습니다');
+  assert.equal(timelineTracks()[0].id,'v1','자리는 그대로 남아 밴드 템플릿 기준이 흔들리지 않습니다');
+  setTrackSwitch('v1','hidden',false);
+  renderFrame(ctx,1,opts);assert.deepEqual([...ctx.getImageData(45,80,1,1).data],[255,0,0,255]);
+  assert.equal(timelineTracks()[0].hidden,undefined,'끈 스위치는 값을 남기지 않습니다');
+});
+
+test('track switches only apply to their own kind and survive save, undo and validation',()=>{
+  reset();migrateTimeline();
+  assert.throws(()=>setTrackSwitch('a1','hidden',true),/영상 계열/);
+  assert.throws(()=>setTrackSwitch('v1','muted',true),/오디오 트랙만/);
+  assert.throws(()=>setTrackSwitch('v1','bogus',true),/지원하지 않는/);
+  assert.throws(()=>setTrackSwitch('missing','locked',true),/트랙을 찾을 수 없습니다/);
+  const before=captureDocument();
+  setTrackSwitch('a1','muted',true);setTrackSwitch('a2','solo',true);setTrackSwitch('v1','locked',true);
+  const after=captureDocument();
+  assert.equal(after.timelineTracks.find(t=>t.id==='a1').muted,true);
+  assert.equal(isTrackMuted('a1'),true);assert.equal(isTrackLocked('v1'),true);assert.equal(hasAudioSolo(),true);
+  assert.doesNotThrow(()=>validateDocument(after,[]));
+  const history=new History();history.push(before,'switches');history.undo();
+  assert.deepEqual(captureDocument(),before);assert.equal(isTrackLocked('v1'),false);
+  history.redo();assert.deepEqual(captureDocument(),after);
+  for(const bad of [{muted:'yes'},{hidden:true}]){
+    const doc=structuredClone(after);Object.assign(doc.timelineTracks.find(t=>t.id==='a1'),bad);
+    assert.throws(()=>validateDocument(doc,[]),/트랙 목록/);
+  }
+});
+
+test('solo silences other audio rows in preview only while mute also reaches the export mix',()=>{
+  reset();migrateTimeline();
+  assert.equal(isTrackAudible('a1'),true);assert.equal(inlineClipAudible(),true);
+  setTrackSwitch('a2','solo',true);
+  assert.equal(isTrackAudible('a1'),false,'솔로가 켜지면 다른 오디오는 미리보기에서 빠집니다');
+  assert.equal(isTrackAudible('a2'),true);
+  assert.equal(inlineClipAudible(),false,'원음을 분리하지 않은 클립 소리도 솔로를 따릅니다');
+  setTrackSwitch('a2','muted',true);
+  assert.equal(isTrackAudible('a2'),false,'음소거가 솔로보다 우선합니다');
+  setTrackSwitch('a2','solo',false);setTrackSwitch('a2','muted',false);
+  assert.equal(isTrackAudible('a2'),true);
+});
+
+test('a locked track refuses every edit path but still renders and plays',()=>{
+  reset();project.clips=[clip('red',4,1)];migrateTimeline();
+  const id=project.clips[0].id;
+  setTrackSwitch('v1','locked',true);
+  assert.equal(planPlacement(2,1,'v1').ok,false);
+  assert.match(planPlacement(2,1,'v1').reason,/잠긴 트랙/);
+  assert.throws(()=>placeTimelineItem('clip',project.clips[0],{ok:true,trackId:'v1',start:2,end:6,duration:4,shifts:[]}),/잠긴 트랙/);
+  assert.throws(()=>deleteTimelineItem({type:'clip',id}),/잠긴 트랙/);
+  assert.equal(planBatchMove([{type:'clip',id}],1).ok,false);
+  assert.equal(project.clips.length,1,'거절된 편집은 문서를 바꾸지 않습니다');
+  assert.equal(buildLayout().entries.length,1,'잠금은 화면과 소리에 영향을 주지 않습니다');
+  setTrackSwitch('v1','locked',false);
+  assert.equal(planPlacement(2,1,'v1').ok,true);
 });

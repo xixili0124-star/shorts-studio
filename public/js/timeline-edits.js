@@ -1,5 +1,5 @@
 // UI와 드래그 미리보기가 함께 쓰는 편집 명령입니다. 다른 트랙은 명시적으로 선택하지 않으면 자르지 않습니다.
-import { project, buildLayout, clipDuration, pinClipPositions, transitionPairs, syncAnchoredItems, trackIdFor, trackItems, migrateTimeline, timelineTracks, trackKind } from './state.js';
+import { project, buildLayout, clipDuration, pinClipPositions, transitionPairs, syncAnchoredItems, trackIdFor, trackItems, migrateTimeline, timelineTracks, trackKind, isTrackLocked } from './state.js';
 import { captureDocument, makeClip, makeAudio, assets, discardStagedInstance } from './project-store.js';
 import { complementRanges } from './silence.js';
 import { TRANSITIONS } from './presets.js';
@@ -138,7 +138,14 @@ function planExistingMove(time, targetTime, source, entries) {
 }
 
 /** 신규 소재는 경계에 삽입하고, 같은 행의 기존 클립 이동은 뒤 클립을 밀지 않습니다. */
+export const LOCKED_TRACK_REASON = '잠긴 트랙입니다. 트랙 머리의 자물쇠를 풀고 편집해 주세요.';
 export function planPlacement(time, duration, trackId, excludeId = null, doc = project, { targetTime = time } = {}) {
+  if (isTrackLocked(trackId, doc)) {
+    // 미리보기가 start/end 를 그대로 읽으므로 거절할 때도 같은 모양으로 돌려줍니다.
+    const at = Math.max(0, Number.isFinite(time) ? time : 0);
+    return { ok: false, reason: LOCKED_TRACK_REASON, start: at, end: at + duration, duration,
+      trackId, shifts: [], shift: 0, mode: 'place', excludeId };
+  }
   const row = trackItems(trackId, doc), source = row.find(entry => entry.id === excludeId);
   if (source) return planExistingMove(time, targetTime, source, row);
   const entries = row.filter(entry => entry.id !== excludeId);
@@ -189,7 +196,9 @@ export function placeTimelineItem(type, item, plan) {
   if (!plan || plan.ok === false) throw new Error(plan?.reason || '클립을 놓을 위치를 다시 선택해 주세요.');
   const target = timelineTracks().find(t => t.id === plan.trackId && t.kind === trackKind(type));
   if (!target) throw new Error('호환되는 트랙에 놓아 주세요.');
+  if (isTrackLocked(target.id)) throw new Error(LOCKED_TRACK_REASON);
   const previousRange = itemRange(type, item.id);
+  if (previousRange && isTrackLocked(previousRange.trackId)) throw new Error(LOCKED_TRACK_REASON);
   if (previousRange && previousRange.item !== item) throw new Error('클립이 변경되었습니다. 다시 선택해 주세요.');
   if (previousRange?.trackId === target.id) {
     const current = planPlacement(plan.requestTime, previousRange.duration, target.id, item.id, project,
@@ -238,6 +247,7 @@ export function setTransition(leftId, rightId, type, requested = .5) {
   if (!TRANSITIONS.some(transition => transition.id === type)) throw new Error('지원하지 않는 전환입니다.');
   const pair = transitionPairs().find(p => p.left.id === leftId && p.right.id === rightId);
   if (!pair) throw new Error('같은 트랙에서 맞닿은 두 미디어 클립의 연결점을 선택해 주세요.');
+  if (isTrackLocked(pair.trackId)) throw new Error(LOCKED_TRACK_REASON);
   const value = Number.isFinite(Number(requested)) ? Number(requested) : .5;
   const duration = type === 'cut' ? 0 : Math.max(0, Math.min(2, value, pair.left.duration / 2, pair.right.duration / 2));
   migrateTimeline();
@@ -268,6 +278,7 @@ export function currentGap(selection, doc = project) {
 export function closeTimelineGap(selection) {
   const gap = currentGap(selection);
   if (!gap) return false;
+  if (isTrackLocked(gap.trackId)) throw new Error(LOCKED_TRACK_REASON);
   migrateTimeline();
   for (const entry of trackItems(gap.trackId)) {
     if (entry.start >= gap.end - EPS) moveRange(entry, entry.start - gap.duration);
@@ -386,6 +397,7 @@ export function planLinkedTrim(ref, edge, time, doc = project) {
 export function applyLinkedTrim(plan) {
   if (!plan) return;
   if (plan.ok === false) throw new Error(plan.reason || '연결된 클립을 함께 자를 수 없습니다.');
+  for (const entry of plan.plans || []) if (isTrackLocked(entry.trackId)) throw new Error(LOCKED_TRACK_REASON);
   for (const entry of plan.plans?.length ? plan.plans : [plan]) applyItemTrim(entry);
 }
 
@@ -393,6 +405,7 @@ export function applyLinkedTrim(plan) {
 export async function splitTimelineItem(selection, time) {
   const check = splitAvailability(selection, time);
   if (!check.ok) throw new Error(check.reason);
+  if (isTrackLocked(check.trackId)) throw new Error(LOCKED_TRACK_REASON);
   const { item, type, local } = check;
   const document = captureDocument();
   const envelope = { ...(item.fadeEnvelope || { offset: 0, duration: check.duration, fadeIn: item.fadeIn || 0, fadeOut: item.fadeOut || 0 }) };
@@ -441,6 +454,7 @@ export function deleteTimelineItem(selection, ripple = false) {
   }
   const range = selection && itemRange(selection.type, selection.id);
   if (!range) return false;
+  if (isTrackLocked(range.trackId)) throw new Error(LOCKED_TRACK_REASON);
   const { type, item } = range;
   migrateTimeline();
   if (type === 'clip') disconnectClip(item.id);

@@ -1,6 +1,6 @@
 // 오디오 믹싱 — 클립 원본 소리 + 배경음악을 하나의 AudioBuffer 로 합친다.
 import { Input, BlobSource, ALL_FORMATS, AudioBufferSink } from '../vendor/mediabunny.min.js';
-import { project, clipDuration, totalDuration, buildLayout, clipFadeGain } from './state.js';
+import { project, clipDuration, totalDuration, buildLayout, clipFadeGain, isTrackMuted, isTrackHidden, trackIdFor } from './state.js';
 import { automateVolume, hasAudibleVolume } from './audio-gain.js';
 
 const RATE = 48000;
@@ -106,7 +106,9 @@ export async function extractClipAudio(clip, signal, { ignoreMute = false, stric
 export async function mixTimeline({ onProgress, signal, includeBgm = true, includeVoice = false, strictSources = false } = {}) {
   if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
   const total = totalDuration();
+  // 트랙 뮤트는 내보내기에도 반영합니다. 솔로는 미리보기 전용이라 여기서 보지 않습니다.
   const tracks = (project.audio.tracks || []).filter(track => !track.muted
+    && !isTrackMuted(trackIdFor('audio', track))
     && (includeBgm || (includeVoice && ((track.role || track.lane) === 'voice' || track.sourceVideoAudio === true))));
   const narration = (includeBgm || includeVoice) && !project.audio.narration?.muted
     ? project.audio.narration : null;

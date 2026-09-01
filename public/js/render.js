@@ -72,7 +72,9 @@ export function renderFrame(ctx, t, opts = {}) {
   };
   const media=layersAt(t,layout);
   for(const [index,track] of visualTracks.entries()){
-    const active=media.filter(e=>e.trackId===track.id);
+    // 숨긴 트랙도 자리는 유지합니다. 밴드 템플릿이 첫 트랙 기준이라 순서가 바뀌면 안 됩니다.
+    const hidden=track.hidden===true;
+    const active=hidden?[]:media.filter(e=>e.trackId===track.id);
     if(active.length===1)paintMedia(ctx,active[0]);
     else if(active.length===2){
       // 두 투명 RGBA 레이어의 premultiplied 색과 알파를 선형 보간합니다.
@@ -84,6 +86,7 @@ export function renderFrame(ctx, t, opts = {}) {
       ctx.drawImage(plates[2],0,0);
     }
     if(index===0&&band)drawTemplate(ctx,W,H,tpl,k);
+    if(hidden)continue;
     for(const entry of layout.items.filter(e=>e.trackId===track.id&&e.type!=='clip'&&atTime>=e.start&&atTime<e.end)){
       const item=entry.item;
       // 구형 화면은 겹친 자막 중 최신 하나만 표시하고, 새 스튜디오의 레이어는 그대로 둡니다.

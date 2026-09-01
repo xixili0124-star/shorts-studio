@@ -1,9 +1,9 @@
 // 드래그 중에는 잡은 DOM을 유지하고, 놓을 때 한 번만 편집 명령을 적용합니다.
-import { project, buildLayout, totalDuration, transitionPairs, syncAnchoredItems, timelineTracks, trackIdFor, trackLabel, trackItems, trackKind, TRACK_ROLES } from './state.js';
+import { project, buildLayout, totalDuration, transitionPairs, syncAnchoredItems, timelineTracks, trackIdFor, trackLabel, trackItems, trackKind, TRACK_ROLES, isTrackLocked } from './state.js';
 import { assets, captureDocument } from './project-store.js';
 import { trackBadge } from './state.js';
 import { TRANSITIONS } from './presets.js';
-import { frameTime, itemRange, planVideoPlacement, placeVideoClip, planClipTrim, applyClipTrim, setItemRange, planPlacement, placeTimelineItem, trackGaps, planItemTrim, applyItemTrim, planLinkedTrim, applyLinkedTrim } from './timeline-edits.js';
+import { frameTime, itemRange, planVideoPlacement, placeVideoClip, planClipTrim, applyClipTrim, setItemRange, planPlacement, placeTimelineItem, trackGaps, planItemTrim, applyItemTrim, planLinkedTrim, applyLinkedTrim, LOCKED_TRACK_REASON } from './timeline-edits.js';
 import { clamp } from './util.js';
 import { selectionKey, selectionRefs, combineSelection, marqueeHits, planBatchMove, applyBatchMove } from './batch-edits.js';
 import { expandLinked, linkedRefs, activeLinkIds } from './link-groups.js';
@@ -35,6 +35,8 @@ export class Timeline {
     });
     $('trackHeaders').addEventListener('click',e=>{
       if(this.callbacks.busy?.())return;
+      const toggle=e.target.closest('[data-track-switch]');
+      if(toggle){this.callbacks.trackSwitch?.(toggle.dataset.track,toggle.dataset.trackSwitch);return;}
       const add=e.target.closest('[data-add-track]');
       if(add){this.callbacks.addTrack?.(add.dataset.addTrack);return;}
       const remove=e.target.closest('[data-remove-track]');
@@ -48,6 +50,8 @@ export class Timeline {
       if(e.target.closest('[data-clip-setting]'))return;
       const button=e.target.closest('.timeline-block,.timeline-gap,.transition-chip');
       if(!button)return;e.preventDefault();e.stopPropagation();
+      const hitRange=button.dataset.type==='gap'?null:itemRange(button.dataset.type==='transition'?'clip':button.dataset.type,button.dataset.id);
+      if(hitRange&&this.refuseLocked(hitRange.trackId))return;
       if(button.dataset.type==='gap')this.chooseGap(button.dataset.id);
       else if(button.dataset.type==='transition')this.callbacks.transition(button.dataset.id,button.dataset.right);
       else if(e.shiftKey||e.ctrlKey||e.metaKey){const ref={type:button.dataset.type,id:button.dataset.id};this.selectMany(combineSelection(this.selections,[ref],'toggle'),ref);this.callbacks.selectMany?.(this.explicit,this.selection);}
@@ -105,8 +109,14 @@ export class Timeline {
     });
   }
   updateSettingButtons(){this.canvas.querySelectorAll('[data-clip-setting="paste"]').forEach(button=>button.disabled=!this.callbacks.canPasteSettings?.());}
+  refuseLocked(trackId){
+    if(!isTrackLocked(trackId))return false;
+    const notice=$('timelineNotice');if(notice)notice.textContent=trackLabel(trackId)+' · '+LOCKED_TRACK_REASON;
+    return true;
+  }
   chooseGap(id) {
     const gap=timelineTracks().flatMap(t=>trackGaps(t.id)).find(g=>g.id===id);if(!gap)return;
+    if(this.refuseLocked(gap.trackId))return;
     this.callbacks.pause();this.select('gap',id);this.callbacks.gap?.(gap);
   }
   tick(t){this.time=t;$('playhead').style.left=t*this.zoom+'px';}
@@ -147,7 +157,8 @@ export class Timeline {
     const pairs=transitionPairs();
     $('timelineRows').innerHTML=rows.map(track=>{
       const items=trackItems(track.id,project,layout);
-      return '<div id="track-'+track.id+'" class="track '+(track.kind==='audio'?'audio-track':'visual-track')+' '+track.role+'-track" data-track="'+track.id+'" data-kind="'+track.kind+'">'+
+      const state=(track.locked?' is-locked':'')+(track.hidden?' is-hidden':'')+(track.muted?' is-muted':'')+(track.solo?' is-solo':'');
+      return '<div id="track-'+track.id+'" class="track '+(track.kind==='audio'?'audio-track':'visual-track')+' '+track.role+'-track'+state+'" data-track="'+track.id+'" data-kind="'+track.kind+'">'+
         trackGaps(track.id).map(gap=>'<div tabindex="0" role="button" aria-pressed="false" aria-label="'+trackLabel(track.id)+' 빈 공간 '+gap.duration.toFixed(2)+'초 · S로 닫기" class="timeline-gap" data-type="gap" data-id="'+gap.id+'" style="left:'+gap.start*this.zoom+'px;width:'+Math.max(1,gap.duration*this.zoom-1)+'px"><span>빈 공간 · '+gap.duration.toFixed(2)+'초</span></div>').join('')+
         items.map(e=>this.block(e.type,e.item,e.start,e.duration,e.start+(e.overlapIn||0)/2,e.end-(e.overlapOut||0)/2)).join('')+
         pairs.filter(p=>p.trackId===track.id).map(pair=>this.transitionButton(pair)).join('')+'</div>';
@@ -155,7 +166,14 @@ export class Timeline {
     $('trackHeaders').innerHTML=rows.map(track=>{
       const count=trackItems(track.id,project,layout).length;
       const active=track.id===this.activeHeaderId,role=TRACK_ROLES.find(role=>role.id===track.role);
-      return '<div class="track-head '+track.kind+'-head '+track.role+'-head"><button class="track-selector '+(active?'active':'')+'" data-track-select="'+track.id+'" aria-pressed="'+active+'" title="이 용도의 새 클립을 추가할 트랙"><span class="track-code">'+trackBadge(track.id)+'</span><strong>'+trackLabel(track.id)+'</strong><small>'+count+'</small></button><button class="add-track" data-add-track="'+track.id+'" aria-label="'+trackLabel(track.id)+(track.kind==='visual'?' 바로 위에 ':' 바로 아래에 ')+role.label+' 트랙 추가" title="'+(track.kind==='visual'?'바로 위에':'바로 아래에')+' '+role.label+' 트랙 추가" '+(registry.filter(t=>t.kind===track.kind).length>=24?'disabled':'')+'>+</button><button class="remove-track" data-remove-track="'+track.id+'" aria-label="'+trackLabel(track.id)+' 빈 트랙 삭제" '+(count||(!role.optional&&registry.filter(t=>t.role===track.role).length<2)?'disabled':'')+'>×</button></div>';
+      const sw=(name,symbol,label,on)=>'<button type="button" class="track-switch switch-'+name+(on?' on':'')+'" data-track-switch="'+name+'" data-track="'+track.id+'" aria-pressed="'+on+'" aria-label="'+esc(trackLabel(track.id)+' '+label)+'" title="'+esc(label)+'">'+symbol+'</button>';
+      const switches='<div class="track-switches">'
+        +(track.kind==='visual'
+          ?sw('hidden',track.hidden?'◌':'◉','화면에서 숨기기 · 클립에 붙은 소리는 그대로 납니다',track.hidden===true)
+          :sw('muted','M','음소거 · 미리보기와 내보내기 양쪽에서 뺍니다',track.muted===true)
+            +sw('solo','S','이 트랙만 듣기 · 미리보기에서만 적용되고 내보내기는 따르지 않습니다',track.solo===true))
+        +sw('locked','L','편집 잠금 · 화면과 소리는 그대로입니다',track.locked===true)+'</div>';
+      return '<div class="track-head '+track.kind+'-head '+track.role+'-head"><button class="track-selector '+(active?'active':'')+'" data-track-select="'+track.id+'" aria-pressed="'+active+'" title="이 용도의 새 클립을 추가할 트랙"><span class="track-code">'+trackBadge(track.id)+'</span><strong>'+trackLabel(track.id)+'</strong><small>'+count+'</small></button>'+switches+'<button class="add-track" data-add-track="'+track.id+'" aria-label="'+trackLabel(track.id)+(track.kind==='visual'?' 바로 위에 ':' 바로 아래에 ')+role.label+' 트랙 추가" title="'+(track.kind==='visual'?'바로 위에':'바로 아래에')+' '+role.label+' 트랙 추가" '+(registry.filter(t=>t.kind===track.kind).length>=24?'disabled':'')+'>+</button><button class="remove-track" data-remove-track="'+track.id+'" aria-label="'+trackLabel(track.id)+' 빈 트랙 삭제" '+(count||(!role.optional&&registry.filter(t=>t.role===track.role).length<2)?'disabled':'')+'>×</button></div>';
     }).join('');
     $('trackHeaders').style.transform='translateY(-'+this.scroll.scrollTop+'px)';
     $('totalDuration').textContent=stamp(layout.total);$('sequenceInfo').textContent=layout.items.length+' 클립 · '+layout.total.toFixed(1)+'초';
@@ -292,7 +310,7 @@ export class Timeline {
     const mode=event.ctrlKey||event.metaKey?'toggle':event.shiftKey?'add':'replace';
     const point=e=>{const rect=this.canvas.getBoundingClientRect();return{x:Math.max(0,e.clientX-rect.left),y:Math.max(27,e.clientY-rect.top)};};
     const origin=point(event),rect=this.canvas.getBoundingClientRect();
-    const boxes=[...this.canvas.querySelectorAll('.timeline-block')].map(node=>{
+    const boxes=[...this.canvas.querySelectorAll('.track:not(.is-locked) .timeline-block')].map(node=>{
       const r=node.getBoundingClientRect();return{type:node.dataset.type,id:node.dataset.id,left:r.left-rect.left,right:r.right-rect.left,top:r.top-rect.top,bottom:r.bottom-rect.top};
     });
     let last=event,moved=false,done=false,chosen=initial;
@@ -363,8 +381,8 @@ export class Timeline {
     if(!hit)return;
     event.preventDefault();
     if(this.dragging||this.callbacks.busy?.())return;
-    const ref={type:hit.dataset.type,id:hit.dataset.id};
-    if(!itemRange(ref.type,ref.id))return;
+    const ref={type:hit.dataset.type,id:hit.dataset.id},hitRange=itemRange(ref.type,ref.id);
+    if(!hitRange||this.refuseLocked(hitRange.trackId))return;
     this.callbacks.pause();
     // 이미 선택한 묶음 안을 누르면 선택을 유지합니다. 밖을 누르면 그 클립만 고릅니다.
     if(this.selections.some(entry=>selectionKey(entry)===selectionKey(ref))){
@@ -449,6 +467,7 @@ export class Timeline {
       window.addEventListener('pointermove',move);window.addEventListener('pointerup',up);window.addEventListener('pointercancel',up);window.addEventListener('blur',finish);window.addEventListener('keydown',escape);return;
     }
     event.preventDefault();const {type,id}=node.dataset,range=itemRange(type,id);if(!range)return;
+    if(this.refuseLocked(range.trackId))return;
     this.callbacks.pause();const ref={type,id},edge=event.target.closest('[data-edge]')?.dataset.edge;
     if(event.ctrlKey||event.metaKey||event.shiftKey){this.selectMany(combineSelection(this.selections,[ref],'toggle'),ref);this.callbacks.selectMany?.(this.explicit,this.selection);return;}
     if(!edge&&this.selections.length>1&&this.selections.some(r=>selectionKey(r)===selectionKey(ref))){this.selectMany(this.explicit,ref);this.callbacks.selectMany?.(this.explicit,this.selection);this.dragGroup(event,node,range);return;}

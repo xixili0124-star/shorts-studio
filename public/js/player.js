@@ -1,5 +1,5 @@
 // 미리보기 재생기 — <video> 엘리먼트를 타임라인에 맞춰 몰고 다니면서 캔버스에 그린다.
-import { project, layersAt, totalDuration, clipFadeGain } from './state.js';
+import { project, layersAt, totalDuration, clipFadeGain, isTrackAudible, inlineClipAudible, trackIdFor } from './state.js';
 import { renderFrame } from './render.js';
 import { clamp } from './util.js';
 import { PreviewAudioGain, volumeAt } from './audio-gain.js';
@@ -224,8 +224,10 @@ export class Player {
       }
       const want = c.trimStart + at.local;
       // 분리된 원음은 별도 오디오 클립만 재생합니다. 영상 음소거를 풀어도 중복되지 않습니다.
-      c.el.muted = !!c.audioSeparated || !!c.muted || this.previewMuted;
-      this.previewGain.set(c.el,c.audioSeparated ? 0 : volumeAt(c,at.local)*project.audio.originalVolume*at.weight*clipFadeGain(c,at.local,at.duration));
+      // 원음 분리를 건너뛴 클립의 소리는 오디오 트랙이 아니라 솔로 여부만 따릅니다.
+      const inline = !c.audioSeparated && inlineClipAudible();
+      c.el.muted = !inline || !!c.muted || this.previewMuted;
+      this.previewGain.set(c.el,inline ? volumeAt(c,at.local)*project.audio.originalVolume*at.weight*clipFadeGain(c,at.local,at.duration) : 0);
 
       if (this.playing) {
         if (Math.abs(c.el.currentTime - want) > 0.22) c.el.currentTime = want;
@@ -296,7 +298,7 @@ export class Player {
       this.trackElements.set(track.id, el);
       const duration = track.trimEnd - track.trimStart;
       const local = this.time - track.start;
-      if (local < 0 || local >= duration || track.muted) { el.pause(); continue; }
+      if (local < 0 || local >= duration || track.muted || !isTrackAudible(trackIdFor('audio', track))) { el.pause(); continue; }
       const desired = track.trimStart + local;
       if (Math.abs(el.currentTime - desired) > (this.playing ? .2 : .02)) el.currentTime = desired;
       el.muted = this.previewMuted || !!track.muted;

@@ -1,7 +1,7 @@
 // 다중 선택은 ID만 보관합니다. 미디어 준비가 끝나기 전에는 프로젝트를 바꾸지 않습니다.
-import { project, buildLayout, migrateTimeline, syncAnchoredItems, newOverlay, trackItems, timelineTracks, trackKind } from './state.js';
+import { project, buildLayout, migrateTimeline, syncAnchoredItems, newOverlay, trackItems, timelineTracks, trackKind, isTrackLocked } from './state.js';
 import { captureDocument, makeClip, makeAudio, discardStagedInstance } from './project-store.js';
-import { timelineCollection, itemRange, splitAvailability, deleteTimelineItem, normalizeTransitions, planPlacement } from './timeline-edits.js';
+import { timelineCollection, itemRange, splitAvailability, deleteTimelineItem, normalizeTransitions, planPlacement, LOCKED_TRACK_REASON } from './timeline-edits.js';
 import { transformOf } from './visual-transform.js';
 import { uid, clamp } from './util.js';
 import { TEXT_STYLE_KEYS } from './text-effects.js';
@@ -161,6 +161,9 @@ export function planBatchMove(refs, delta, doc = captureDocument(), { retarget =
     if (!track||track.kind!==trackKind(retarget.type)) return {ok:false,reason:'영상은 영상 트랙에, 소리는 오디오 트랙에 놓아 주세요.',document:doc,delta:0,moves:[]};
     if (!keys.has(selectionKey(retarget))) return {ok:false,reason:'옮길 클립을 다시 선택해 주세요.',document:doc,delta:0,moves:[]};
   }
+  if (ranges.some(r=>isTrackLocked(r.trackId,doc))||(retarget&&isTrackLocked(retarget.trackId,doc))) {
+    return {ok:false,reason:LOCKED_TRACK_REASON,document:doc,delta:0,moves:[]};
+  }
   delta=clamp(delta,-Math.min(...ranges.map(r=>r.start)),86400-Math.max(...ranges.map(r=>r.end)));
   const moves=ranges.map(r=>({type:r.type,id:r.id,from:r.trackId,
     trackId:retarget&&selectionKey(retarget)===selectionKey(r)?retarget.trackId:r.trackId,
@@ -179,6 +182,7 @@ export function applyBatchMove(plan) {
   if (!plan.ok) throw new Error(plan.reason);
   if (JSON.stringify(captureDocument())!==JSON.stringify(plan.document)) throw new Error('편집 내용이 변경되었습니다. 다시 드래그해 주세요.');
   if (Math.abs(plan.delta)<EPS&&!plan.retargeted) return false;
+  for (const move of plan.moves) if (isTrackLocked(move.trackId)||isTrackLocked(move.from)) throw new Error(LOCKED_TRACK_REASON);
   migrateTimeline();
   const moving=new Set(plan.moves.filter(r=>r.type==='clip').map(r=>r.id));
   for (const clip of project.clips) if (clip.transitionOut?.toId && moving.has(clip.id)!==moving.has(clip.transitionOut.toId)) clip.transitionOut=cut();

@@ -1,5 +1,5 @@
 // UI는 편집 명령을 호출하고, 상태·자원·시간표·렌더러는 각각의 모듈이 담당합니다.
-import {project,FONTS,clipDuration,buildLayout,totalDuration,newOverlay,syncAnchoredItems,pinClipPositions,transitionPairs,timelineTracks,trackIdFor,trackLabel,trackKind,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES,MAX_TRACKS_PER_KIND} from './state.js';
+import {project,FONTS,clipDuration,buildLayout,totalDuration,newOverlay,syncAnchoredItems,pinClipPositions,transitionPairs,timelineTracks,trackIdFor,trackLabel,trackKind,migrateTimeline,addTimelineTrack,removeTimelineTrack,setTrackSwitch,TRACK_ROLES,MAX_TRACKS_PER_KIND} from './state.js';
 import {Player} from './player.js';
 import {loadFonts,measureVisual,renderCaptionPreview,renderGraphicPreview} from './render.js';
 import {detectEngine,exportVideo} from './exporter.js';
@@ -36,7 +36,7 @@ const history=new History(()=>{selection=validSelection();refresh();scheduleDraf
 const timeline=new Timeline({
   select:(type,id)=>select(type,id,{timeline:false}),gap:gap=>select('gap',gap.id,{gap,timeline:false}),
   selectMany:(refs,primary)=>selectMany(refs,primary,{timeline:false}),
-  addTrack:id=>addTrackByRole(null,id),copySettings:ref=>copySettings(ref),pasteSettings:ref=>pasteSettings(ref),canPasteSettings:()=>!!settingsClipboard,
+  addTrack:id=>addTrackByRole(null,id),trackSwitch:(id,name)=>toggleTrackSwitch(id,name),copySettings:ref=>copySettings(ref),pasteSettings:ref=>pasteSettings(ref),canPasteSettings:()=>!!settingsClipboard,
   removeTrack:id=>{try{edit('빈 트랙 삭제',()=>removeTimelineTrack(id));}catch(error){toast(error.message);}},
   sound:id=>SOUND_EFFECTS.find(s=>s.id===id),graphic:id=>GRAPHICS.find(g=>g.id===id),pause:()=>player.pause(),seek:t=>player.seek(t,{allowBeyond:true}),preview:()=>player.invalidate(),
   busy:()=>!!(exportCtrl||importing||smartTools?.busy||monitor?.dragging||keyframeEditor?.dragging),error:message=>toast(message),
@@ -178,6 +178,26 @@ function alignSelection(axis){
     }
   });
 }
+const SWITCH_LABELS={hidden:['화면에서 숨김','다시 표시'],muted:['음소거','음소거 해제'],
+  solo:['이 트랙만 듣기','솔로 해제'],locked:['편집 잠금','잠금 해제']};
+/**
+ * 트랙 스위치를 켜고 끕니다. 재생을 멈추지 않습니다.
+ * 재생하면서 소리를 빼 보는 것이 이 버튼의 쓰임이기 때문입니다.
+ */
+function toggleTrackSwitch(id,name){
+  if(exportCtrl||importing||smartTools?.busy||timeline.dragging)return;
+  const track=timelineTracks().find(entry=>entry.id===id);
+  if(!track||!SWITCH_LABELS[name])return;
+  const next=track[name]!==true,before=captureDocument();
+  try{setTrackSwitch(id,name,next);}
+  catch(error){restoreDocument(before);toast(error.message);return;}
+  commit(before,trackLabel(id)+' '+SWITCH_LABELS[name][next?0:1]);
+  player.invalidate();
+  toast(trackLabel(id)+' · '+SWITCH_LABELS[name][next?0:1]
+    +(name==='solo'&&next?' · 미리보기에서만 적용됩니다. 내보내기는 솔로를 따르지 않습니다.':'')
+    +(name==='hidden'&&next?' · 소리는 그대로 납니다. 소리도 빼려면 오디오 트랙을 음소거하세요.':''));
+}
+
 function scheduleDraft(){
   clearTimeout(draftTimer);$('saveStatus').textContent='저장 중…';
   draftTimer=setTimeout(async()=>{try{await saveDraft();$('saveStatus').textContent='이 브라우저에 저장됨';dirty=false;}catch{$('saveStatus').textContent='파일로 저장 필요';}},650);

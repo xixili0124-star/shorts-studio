@@ -200,6 +200,48 @@ export function trackBadge(id, doc = project) {
   return TRACK_ROLES.find(role => role.id === track.role).code + (number > 1 ? number : '');
 }
 
+/**
+ * 트랙 스위치입니다. 각각 딱 한 가지만 건드립니다.
+ *   hidden  영상 계열 · 화면에서만 뺍니다. 클립에 붙어 있는 소리는 그대로 납니다.
+ *   muted   오디오 · 미리보기와 내보내기 양쪽에서 뺍니다.
+ *   solo    오디오 · 미리보기에서만 그 트랙만 듣습니다. 내보내기는 따르지 않습니다.
+ *           솔로를 켜 둔 채 내보내다가 배경음악이 통째로 빠지는 사고를 막기 위해서입니다.
+ *   locked  편집만 막습니다. 화면과 소리는 그대로입니다.
+ * 꺼진 상태는 값을 지웁니다. 저장 문서가 항상 같은 모양이어야 되돌리기 비교가 흔들리지 않습니다.
+ */
+export const TRACK_SWITCHES = Object.freeze(['hidden', 'muted', 'solo', 'locked']);
+export const SWITCH_KINDS = Object.freeze({ hidden: 'visual', muted: 'audio', solo: 'audio', locked: null });
+const trackEntry = (id, doc) => timelineTracks(doc).find(track => track.id === id);
+export const isTrackHidden = (id, doc = project) => trackEntry(id, doc)?.hidden === true;
+export const isTrackLocked = (id, doc = project) => trackEntry(id, doc)?.locked === true;
+export const isTrackMuted = (id, doc = project) => trackEntry(id, doc)?.muted === true;
+export const hasAudioSolo = (doc = project) => timelineTracks(doc).some(track => track.kind === 'audio' && track.solo === true);
+
+/** 미리보기에서 들리는지입니다. 솔로가 하나라도 켜지면 솔로가 아닌 트랙은 모두 빠집니다. */
+export function isTrackAudible(id, doc = project) {
+  const track = trackEntry(id, doc);
+  if (!track || track.kind !== 'audio') return false;
+  if (track.muted === true) return false;
+  return hasAudioSolo(doc) ? track.solo === true : true;
+}
+
+/** 원음 분리를 건너뛴 영상 클립의 소리입니다. 오디오 트랙이 아니라 솔로에만 영향받습니다. */
+export const inlineClipAudible = (doc = project) => !hasAudioSolo(doc);
+
+export function setTrackSwitch(id, name, value) {
+  if (!TRACK_SWITCHES.includes(name)) throw new Error('지원하지 않는 트랙 스위치입니다.');
+  const track = trackEntry(id);
+  if (!track) throw new Error('트랙을 찾을 수 없습니다.');
+  const kind = SWITCH_KINDS[name];
+  if (kind && track.kind !== kind) {
+    throw new Error(kind === 'visual' ? '영상 계열 트랙만 화면에서 숨길 수 있습니다.' : '오디오 트랙만 음소거하거나 솔로로 들을 수 있습니다.');
+  }
+  migrateTimeline();
+  const entry = project.timelineTracks.find(item => item.id === id);
+  if (value) entry[name] = true; else delete entry[name];
+  return entry[name] === true;
+}
+
 /** 자동자막 결과를 적용할 때만 전용 행을 만들며 수동 자막 행은 그대로 둡니다. */
 export function ensureAutoCaptionTrack() {
   const existing = timelineTracks().find(track => track.role === 'auto-caption');

@@ -7,6 +7,7 @@ import { frameTime, itemRange, planVideoPlacement, placeVideoClip, planClipTrim,
 import { clamp } from './util.js';
 import { selectionKey, selectionRefs, combineSelection, marqueeHits, planBatchMove, applyBatchMove } from './batch-edits.js';
 import { expandLinked, linkedRefs, activeLinkIds } from './link-groups.js';
+import { uncertainMosaicRanges } from './mosaic.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -28,6 +29,15 @@ export class Timeline {
     this.canvas.addEventListener('pointerdown',e=>this.pointerDown(e));
     this.canvas.addEventListener('contextmenu',e=>this.openMenu(e));
     this.canvas.addEventListener('click',e=>{
+      const warn=e.target.closest('[data-mosaic-warn]');
+      if(warn){
+        e.preventDefault();e.stopPropagation();
+        if(this.dragging||this.callbacks.busy?.())return;
+        const at=Number(warn.dataset.mosaicWarn);
+        this.callbacks.pause();this.callbacks.seek(at);this.ensureWidth(at);
+        const notice=$('timelineNotice');if(notice)notice.textContent='추적을 놓친 구간으로 이동했습니다 · '+precise(at)+' · 모자이크 위치를 확인하고 다시 추적하세요.';
+        return;
+      }
       const settings=e.target.closest('[data-clip-setting]');
       if(settings){e.preventDefault();e.stopPropagation();if(this.dragging||this.callbacks.busy?.())return;const block=settings.closest('.timeline-block');this.callbacks[settings.dataset.clipSetting==='copy'?'copySettings':'pasteSettings']?.({type:block.dataset.type,id:block.dataset.id});return;}
       const button=e.target.closest('[data-transition]');
@@ -195,9 +205,21 @@ export class Timeline {
     }
     const prefix={clip:'▧',caption:'T',graphic:'✧',audio:'♫'}[type];
     const linked=this.linkIds?.has(item.linkId);
+    // 추적을 놓친 구간은 재생 막대를 옮겨 봐야만 알 수 있었습니다. 클립 위에 바로 표시합니다.
+    let warnings='',warnCount=0;
+    if(type==='clip'){
+      for(const range of uncertainMosaicRanges(item)){
+        const from=Math.max(start,start+range.start-item.trimStart),to=Math.min(start+duration,start+range.end-item.trimStart);
+        if(to-from<=1e-6)continue;
+        warnCount++;
+        const left=Math.max(0,(from-visibleStart)*this.zoom),right=Math.min(width,(to-visibleStart)*this.zoom);
+        const label='추적을 놓친 구간 '+from.toFixed(2)+'–'+to.toFixed(2)+'초 · 눌러서 이동';
+        warnings+='<button type="button" class="mosaic-warn" data-mosaic-warn="'+from+'" aria-label="'+esc(label)+'" title="'+esc(label)+'" style="left:'+left+'px;width:'+Math.max(2,right-left)+'px"></button>';
+      }
+    }
     const linkMark=linked?'<span class="link-mark" aria-hidden="true" title="연결된 클립 · 함께 움직입니다">⛓</span>':'';
     const actions='<div class="clip-settings '+(width<84?'compact':'')+'"><button type="button" data-clip-setting="copy" aria-label="'+esc(label)+' 설정 복사" title="설정 복사 · Ctrl+Alt+C"><span class="settings-copy-symbol" aria-hidden="true"></span></button><button type="button" data-clip-setting="paste" aria-label="'+esc(label)+'에 설정 붙여넣기" title="설정 붙여넣기 · 선택 묶음이면 함께 적용 · Ctrl+Alt+V"><span class="settings-paste-symbol" aria-hidden="true"></span></button></div>';
-    return '<div tabindex="0" role="button" aria-pressed="false" aria-label="'+esc(label)+' · '+duration.toFixed(2)+'초'+(linked?' · 연결됨':'')+'" class="timeline-block '+klass+'-block '+(linked?'linked-block ':'')+(width<30?'short-block':'')+'" data-type="'+type+'" data-id="'+item.id+'" data-start="'+start+'" data-end="'+(start+duration)+'" style="left:'+visibleStart*this.zoom+'px;width:'+width+'px" title="'+esc(label)+' · '+start.toFixed(2)+'–'+(start+duration).toFixed(2)+'초"><span class="block-grip start" data-edge="start"></span>'+detail+'<span class="block-label">'+prefix+' '+esc(label)+'</span>'+linkMark+actions+'<span class="block-grip end" data-edge="end"></span></div>';
+    return '<div tabindex="0" role="button" aria-pressed="false" aria-label="'+esc(label)+' · '+duration.toFixed(2)+'초'+(linked?' · 연결됨':'')+'" class="timeline-block '+klass+'-block '+(linked?'linked-block ':'')+(width<30?'short-block':'')+'" data-type="'+type+'" data-id="'+item.id+'" data-start="'+start+'" data-end="'+(start+duration)+'" style="left:'+visibleStart*this.zoom+'px;width:'+width+'px" title="'+esc(label)+' · '+start.toFixed(2)+'–'+(start+duration).toFixed(2)+'초"><span class="block-grip start" data-edge="start"></span>'+detail+'<span class="block-label">'+prefix+' '+esc(label)+'</span>'+linkMark+warnings+actions+'<span class="block-grip end" data-edge="end"></span></div>';
   }
   beginExternalDrag(kind,id){this.external={kind,id};this.callbacks.pause();}
   endExternalDrag(){this.external=null;this.clearPreview();this.stopScroll();}
@@ -441,7 +463,7 @@ export class Timeline {
   closeMenu(){this.menu?.close(false);}
   pointerDown(event){
     if(event.button!==0||this.dragging||this.callbacks.busy?.()||event.isPrimary===false)return;
-    if(event.target.closest('[data-clip-setting]'))return;
+    if(event.target.closest('[data-clip-setting],[data-mosaic-warn]'))return;
     const hit=event.target.closest('.timeline-block,.timeline-gap,.transition-chip');
     const info=hit?{type:hit.dataset.type,id:hit.dataset.id,right:hit.dataset.right}:null;
     const typing=/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName);

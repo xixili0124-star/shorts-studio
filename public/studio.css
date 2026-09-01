@@ -354,3 +354,10 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 .track.is-locked{background-image:repeating-linear-gradient(135deg,#ffffff00 0 6px,#ffffff08 6px 12px)}
 .track.is-locked .timeline-block{cursor:default;opacity:.62}
 .track.is-locked .block-grip,.track.is-locked .clip-settings{display:none}
+
+/* ── 추적을 놓친 구간 마커 ────────────────────────────────
+   클립 위쪽에 붉은 빗금으로 표시하고, 누르면 그 지점으로 이동합니다. */
+.mosaic-warn{position:absolute;top:0;height:5px;min-width:2px;z-index:3;padding:0;border:0;border-radius:0 0 2px 2px;
+  background:repeating-linear-gradient(135deg,#ff6b6b 0 3px,#ffc2c2 3px 6px);opacity:.9;cursor:pointer}
+.mosaic-warn:hover,.mosaic-warn:focus-visible{height:9px;opacity:1;outline:1px solid #ffdada;outline-offset:0}
+.short-block .mosaic-warn{height:3px}

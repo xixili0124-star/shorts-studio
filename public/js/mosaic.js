@@ -63,6 +63,54 @@ export function unresolvedMosaics(clip) {
   ));
 }
 
+/** 결과를 다시 쓸 수 있는지 판단할 값싼 지문입니다. 키 배열은 그대로 두고 내용만 바뀌기도 합니다. */
+const rangeSignature = (clip, effects) => effects.map(e => e.id + ':' + (e.keyframes?.length || 0)
+  + ':' + (e.keyframes?.at(-1)?.time ?? -1) + ':' + (e.keyframes?.at(-1)?.duration ?? -1)).join('|')
+  + '#' + clip.trimStart + '#' + clip.trimEnd;
+const rangeCache = new WeakMap();
+export const MAX_WARNING_RANGES = 60;
+
+/**
+ * 추적을 믿을 수 없는 구간을 원본 시각 기준으로 돌려줍니다.
+ *
+ * 판정은 mosaicAt 을 그대로 불러서 합니다. 같은 조건을 여기서 다시 쓰면
+ * 한쪽만 고쳤을 때 화면과 타임라인 표시가 어긋나기 때문입니다.
+ * 키 시각들을 경계로 잘라 각 구간의 가운데를 한 번씩만 확인합니다.
+ */
+export function uncertainMosaicRanges(clip) {
+  const effects = (clip?.mosaics || []).filter(e => e.enabled !== false && e.mode === 'tracked');
+  const from = Number(clip?.trimStart), to = Number(clip?.trimEnd);
+  if (!effects.length || clip.type !== 'video' || !Number.isFinite(from) || !Number.isFinite(to) || to <= from) return [];
+  const signature = rangeSignature(clip, effects);
+  const cached = rangeCache.get(clip);
+  if (cached?.signature === signature) return cached.ranges;
+  const bounds = new Set([from, to]);
+  for (const effect of effects) for (const key of effect.keyframes || []) {
+    for (const time of [key.time, frameEnd(key)]) if (time > from && time < to) bounds.add(time);
+  }
+  const edges = [...bounds].sort((a, b) => a - b);
+  const ranges = [];
+  for (let i = 0; i < edges.length - 1; i++) {
+    const start = edges[i], end = edges[i + 1];
+    if (end - start < 1e-6) continue;
+    const middle = (start + end) / 2;
+    if (!effects.some(effect => { const at = mosaicAt(effect, middle); return at && (at.full || at.uncertain); })) continue;
+    const last = ranges.at(-1);
+    if (last && start - last.end < 1e-6) last.end = end; else ranges.push({ start, end });
+  }
+  // 키가 잘게 끊긴 영상에서 표시가 수백 개로 늘어나지 않도록 가까운 구간을 합칩니다.
+  while (ranges.length > MAX_WARNING_RANGES) {
+    let index = 0, gap = Infinity;
+    for (let i = 0; i < ranges.length - 1; i++) {
+      const between = ranges[i + 1].start - ranges[i].end;
+      if (between < gap) { gap = between; index = i; }
+    }
+    ranges[index].end = ranges[index + 1].end;ranges.splice(index + 1, 1);
+  }
+  rangeCache.set(clip, { signature, ranges });
+  return ranges;
+}
+
 /** 수동으로 새 위치를 지정해 다시 추적하면 성공한 구간만 기존 경로와 합칩니다. */
 export function mergeTrackingKeys(previous, next) {
   if (!previous?.length) return next;

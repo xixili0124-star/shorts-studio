@@ -7,6 +7,7 @@ import {runInNewContext} from 'node:vm';
 import {legacyEditorMode,setLegacyEditorMode} from '../public/js/state.js';
 import {trackBadge,ensureAutoCaptionTrack} from '../public/js/state.js';
 import {setTrackSwitch,isTrackMuted,isTrackLocked,isTrackAudible,hasAudioSolo,inlineClipAudible} from '../public/js/state.js';
+import {uncertainMosaicRanges,MAX_WARNING_RANGES} from '../public/js/mosaic.js';
 import {keyframeValue} from '../public/js/keyframes.js';
 import {cropTrackingAt} from '../public/js/crop-tracking.js';
 import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES} from '../public/js/state.js';
@@ -2445,4 +2446,49 @@ test('a locked track refuses every edit path but still renders and plays',()=>{
   assert.equal(buildLayout().entries.length,1,'잠금은 화면과 소리에 영향을 주지 않습니다');
   setTrackSwitch('v1','locked',false);
   assert.equal(planPlacement(2,1,'v1').ok,true);
+});
+
+// ── 추적을 놓친 구간 표시 ──────────────────────────────────────────────
+// 예전에는 재생 막대를 그 지점에 놓아야만 알 수 있었습니다. 판정은 mosaicAt 을
+// 그대로 불러서 하므로 화면 표시와 타임라인 표시가 갈라지지 않습니다.
+
+const trackedMosaic=(keys,rest={})=>({id:'m1',enabled:true,mode:'tracked',rect:{x:.1,y:.1,w:.2,h:.2},
+  strength:50,padding:.12,range:[0,10],keyframes:keys,...rest});
+const keyAt=(time,lost=false)=>({time,x:.1,y:.1,w:.2,h:.2,duration:.1,confidence:lost?0:1,lost});
+
+test('untracked and lost stretches are reported as ranges in source time',()=>{
+  const clip={type:'video',trimStart:0,trimEnd:10,mosaics:[trackedMosaic([keyAt(2),keyAt(4)])]};
+  assert.deepEqual(uncertainMosaicRanges(clip),[{start:0,end:2},{start:4.1,end:10}]);
+  // 트림하면 남은 구간만 봅니다. 잘라 낸 바깥까지 경고하지 않습니다.
+  assert.deepEqual(uncertainMosaicRanges({...clip,trimStart:2,trimEnd:4}),[]);
+  // 실패 키 뒤는 다음 성공 키까지 믿을 수 없습니다. 성공 키의 시점 자체는 성공으로 둡니다.
+  const lost={type:'video',trimStart:2,trimEnd:8,mosaics:[trackedMosaic([keyAt(2),keyAt(4,true),keyAt(6),keyAt(8)])]};
+  assert.deepEqual(uncertainMosaicRanges(lost),[{start:2,end:6}]);
+  for(const at of [3,5]) assert.equal(mosaicAt(lost.mosaics[0],at).uncertain,true);
+  assert.equal(mosaicAt(lost.mosaics[0],7).uncertain,undefined);
+});
+
+test('range reporting matches the export block and skips clips that cannot have tracking',()=>{
+  const clean={type:'video',trimStart:2,trimEnd:4,mosaics:[trackedMosaic([keyAt(2),keyAt(4)])]};
+  assert.equal(uncertainMosaicRanges(clean).length,0);
+  assert.equal(unresolvedMosaics(clean).length,0,'경고가 없으면 내보내기도 막지 않습니다');
+  const gap={type:'video',trimStart:0,trimEnd:10,mosaics:[trackedMosaic([keyAt(2),keyAt(4)])]};
+  assert.ok(uncertainMosaicRanges(gap).length>0);
+  assert.equal(unresolvedMosaics(gap).length,1,'경고가 있으면 내보내기가 막힙니다');
+  assert.deepEqual(uncertainMosaicRanges({...gap,mosaics:[{...gap.mosaics[0],enabled:false}]}),[]);
+  assert.deepEqual(uncertainMosaicRanges({...gap,mosaics:[{...gap.mosaics[0],mode:'static'}]}),[]);
+  assert.deepEqual(uncertainMosaicRanges({...gap,type:'image'}),[]);
+  assert.deepEqual(uncertainMosaicRanges({type:'video',trimStart:0,trimEnd:10}),[]);
+});
+
+test('a clip broken into many short tracking gaps collapses to a readable number of marks',()=>{
+  const keys=[];for(let i=0;i<400;i++)keys.push(keyAt(i*.05+.5,i%2===0));
+  const clip={type:'video',trimStart:0,trimEnd:24,mosaics:[trackedMosaic(keys,{range:[0,24]})]};
+  const ranges=uncertainMosaicRanges(clip);
+  assert.ok(ranges.length<=MAX_WARNING_RANGES,'표시가 수백 개로 늘어나지 않습니다');
+  assert.ok(ranges.length>0);
+  for(let i=0;i<ranges.length-1;i++)assert.ok(ranges[i].end<ranges[i+1].start,'합친 뒤에도 순서와 경계가 유지됩니다');
+  assert.equal(uncertainMosaicRanges(clip),ranges,'같은 클립을 다시 물으면 계산을 되씁니다');
+  clip.mosaics[0].keyframes=[keyAt(1),keyAt(23)];
+  assert.notDeepEqual(uncertainMosaicRanges(clip),ranges,'키가 바뀌면 다시 계산합니다');
 });

@@ -1,0 +1,14 @@
+{
+  "name": "shorts-studio-tests",
+  "private": true,
+  "description": "회귀 테스트 전용. 루트에 두면 Cloudflare Pages 가 정적 배포 대신 빌드를 시도할 수 있어 여기에 둡니다.",
+  "scripts": {
+    "test": "node --test *.test.mjs"
+  },
+  "devDependencies": {
+    "@napi-rs/canvas": "^0.1.80"
+  },
+  "engines": {
+    "node": ">=20.11"
+  }
+}

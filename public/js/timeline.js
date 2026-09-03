@@ -35,7 +35,7 @@ export class Timeline {
         if(this.dragging||this.callbacks.busy?.())return;
         const at=Number(warn.dataset.mosaicWarn);
         this.callbacks.pause();this.callbacks.seek(at);this.ensureWidth(at);
-        const notice=$('timelineNotice');if(notice)notice.textContent='추적을 놓친 구간으로 이동했습니다 · '+precise(at)+' · 모자이크 위치를 확인하고 다시 추적하세요.';
+        this.notice('추적을 놓친 구간으로 이동했습니다 · '+precise(at)+' · 모자이크 위치를 확인하고 다시 추적하세요.','warn');
         return;
       }
       const settings=e.target.closest('[data-clip-setting]');
@@ -74,6 +74,14 @@ export class Timeline {
     this.scroll.addEventListener('wheel',e=>{
       if(e.ctrlKey||e.metaKey){e.preventDefault();this.setZoom(this.zoom*(e.deltaY<0?1.12:.89));}
     },{passive:false});
+  }
+  /**
+   * 타임라인 상태줄에 씁니다. 화면에 보이는 줄이면서 aria-live 영역이기도 합니다.
+   * 예전에는 sr-only 라 드래그 미리보기·거절 사유가 눈에 보이지 않았습니다.
+   */
+  notice(text,tone='info'){
+    const host=$('timelineNotice');if(!host)return;
+    host.textContent=text||'';host.dataset.tone=tone;
   }
   setZoom(value){if(this.dragging)return;this.zoom=clamp(value,18,180);$('timelineZoom').value=this.zoom;this.render();}
   fit(){this.setZoom((this.scroll.clientWidth-70)/Math.max(4,totalDuration()));}
@@ -121,7 +129,7 @@ export class Timeline {
   updateSettingButtons(){this.canvas.querySelectorAll('[data-clip-setting="paste"]').forEach(button=>button.disabled=!this.callbacks.canPasteSettings?.());}
   refuseLocked(trackId){
     if(!isTrackLocked(trackId))return false;
-    const notice=$('timelineNotice');if(notice)notice.textContent=trackLabel(trackId)+' · '+LOCKED_TRACK_REASON;
+    this.notice(trackLabel(trackId)+' · '+LOCKED_TRACK_REASON,'warn');
     return true;
   }
   chooseGap(id) {
@@ -269,7 +277,7 @@ export class Timeline {
     text.style.left=clamp(plan.start*this.zoom,this.scroll.scrollLeft+4,Math.max(this.scroll.scrollLeft+4,this.scroll.scrollLeft+this.scroll.clientWidth-290))+'px';
     const shifted=plan.placement?.shifts?.length?' · 뒤 '+plan.placement.shifts.length+'개 +'+plan.placement.shift.toFixed(2)+'초':'';
     text.textContent=invalid?plan.placement.reason:label||trackLabel(plan.trackId||plan.lane)+' · '+precise(plan.start)+' → '+precise(plan.end)+' · '+(plan.end-plan.start).toFixed(2)+'초'+(swap?' · 두 클립만 자리 교환':shifted);
-    const notice=$('timelineNotice');if(notice)notice.textContent=text.textContent;
+    this.notice(text.textContent,invalid?'warn':'info');
     this.canvas.append(text);this.preview=plan;
   }
   clearPreview(){
@@ -307,7 +315,7 @@ export class Timeline {
       if(top<this.scroll.scrollTop+27)this.scroll.scrollTop=Math.max(0,top-27);
       else if(top+(row?.offsetHeight||54)>this.scroll.scrollTop+this.scroll.clientHeight)this.scroll.scrollTop=top+(row?.offsetHeight||54)-this.scroll.clientHeight;
       node.classList.add('just-added');setTimeout(()=>node.classList.remove('just-added'),1600);}
-    const notice=$('timelineNotice');if(notice)notice.textContent=(result.type==='transition'?'전환 선택':result.mode==='swap'?'두 클립 자리 교환':'클립 배치')+': '+precise(result.start||0)+(result.end!=null?'부터 '+(result.end-result.start).toFixed(2)+'초':'');
+    this.notice((result.type==='transition'?'전환 선택':result.mode==='swap'?'두 클립 자리 교환':'클립 배치')+': '+precise(result.start||0)+(result.end!=null?'부터 '+(result.end-result.start).toFixed(2)+'초':''));
   }
   trackScroll(event,update){
     this.scrollPoint={x:event.clientX,y:event.clientY};this.scrollUpdate=update;
@@ -343,7 +351,7 @@ export class Timeline {
       moved=true;marquee.hidden=false;
       Object.assign(marquee.style,{left:Math.min(origin.x,p.x)+'px',top:Math.min(origin.y,p.y)+'px',width:Math.abs(p.x-origin.x)+'px',height:Math.abs(p.y-origin.y)+'px'});
       chosen=combineSelection(initial,marqueeHits(origin,p,boxes),mode);this.selectMany(chosen,chosen.at(-1));
-      const notice=$('timelineNotice');if(notice)notice.textContent=chosen.length+'개 클립 선택 · Shift는 더하기 · Ctrl은 선택 반전';
+      this.notice(chosen.length+'개 클립 선택 · Shift는 더하기 · Ctrl은 선택 반전');
     };
     const move=e=>{if(e.pointerId!==pointer)return;last=e;update();this.trackScroll(e,update);};
     const finish=cancel=>{
@@ -380,7 +388,7 @@ export class Timeline {
         const row=$('track-'+move.trackId);if(!row)continue;
         const ghost=document.createElement('div');ghost.className='timeline-insert-preview'+(pending.ok?'':' invalid');ghost.style.left=move.start*this.zoom+'px';ghost.style.width=Math.max(12,move.duration*this.zoom)+'px';row.append(ghost);this.ensureWidth(move.end);
       }
-      const notice=$('timelineNotice');if(notice)notice.textContent=pending.ok?(linkedMove?'연결된 ':'')+refs.length+'개 함께 이동 · 트랙과 클립 사이 간격 유지':pending.reason;
+      this.notice(pending.ok?(linkedMove?'연결된 ':'')+refs.length+'개 함께 이동 · 트랙과 클립 사이 간격 유지':pending.reason,pending.ok?'info':'warn');
     };
     const move=e=>{if(e.pointerId!==pointer)return;last=e;update();this.trackScroll(e,update);};
     const finish=cancel=>{

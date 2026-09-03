@@ -389,3 +389,6 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 
 .asset-tools{display:flex;justify-content:flex-end;margin:2px 0 6px}
 .asset-tools .button{font-size:11px;padding:5px 9px;min-height:0}
+
+/* 소리를 밖으로 보내는 엔진은 "기기에서 처리" 배지와 색을 달리해 구분합니다. */
+.local-badge.server-badge{background:#3a2f1c;color:#e8bd76;border-color:#6b5326}

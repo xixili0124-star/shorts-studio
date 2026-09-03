@@ -8,6 +8,7 @@ import {legacyEditorMode,setLegacyEditorMode} from '../public/js/state.js';
 import {trackBadge,ensureAutoCaptionTrack} from '../public/js/state.js';
 import {setTrackSwitch,isTrackMuted,isTrackLocked,isTrackAudible,hasAudioSolo,inlineClipAudible} from '../public/js/state.js';
 import {uncertainMosaicRanges,MAX_WARNING_RANGES} from '../public/js/mosaic.js';
+import {serverCaptions} from '../public/js/transcribe.js';
 import {keyframeValue} from '../public/js/keyframes.js';
 import {cropTrackingAt} from '../public/js/crop-tracking.js';
 import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES} from '../public/js/state.js';
@@ -2491,4 +2492,37 @@ test('a clip broken into many short tracking gaps collapses to a readable number
   assert.equal(uncertainMosaicRanges(clip),ranges,'같은 클립을 다시 물으면 계산을 되씁니다');
   clip.mosaics[0].keyframes=[keyAt(1),keyAt(23)];
   assert.notDeepEqual(uncertainMosaicRanges(clip),ranges,'키가 바뀌면 다시 계산합니다');
+});
+
+// ── 서버 자동 자막(Whisper large-v3-turbo) ─────────────────────────────
+// 브라우저 Tiny 는 한국어 인식이 크게 떨어져서, 설치 없이 쓸 수 있는
+// 서버 엔진을 새 편집기의 기본으로 되돌렸습니다.
+
+test('server segments become captions with the selection offset applied',()=>{
+  const result={segments:[{start:0,end:1.2,text:'안녕하세요'},{start:1.3,end:2.4,text:'오늘은'}],text:'안녕하세요 오늘은'};
+  const out=serverCaptions(result,5,10);
+  assert.equal(out.captions.length,2);
+  assert.deepEqual(out.captions.map(c=>[c.start,c.end]),[[10,11.2],[11.3,12.4]]);
+  assert.equal(out.captions[0].generated,'server-whisper');
+  assert.ok(out.captions.every(c=>c.id&&c.id!==out.captions[0].id===false||typeof c.id==='string'));
+  assert.equal(out.text,'안녕하세요 오늘은');
+  assert.equal(out.skipped,0);
+});
+
+test('server captions drop unusable spans, clamp to the range and keep the raw transcript',()=>{
+  const result={segments:[
+    {start:0,end:1,text:'유효'},
+    {start:2,end:2,text:'길이 0'},
+    {start:9,end:10,text:'범위 밖'},
+    {start:'x',end:1,text:'숫자 아님'},
+    {start:0,end:.5,text:'   '},
+    {start:2.5,end:99,text:'끝을 넘김'},
+  ],text:''};
+  const out=serverCaptions(result,5,0);
+  assert.equal(out.skipped,3,'길이 0 · 범위 밖 · 숫자 아님만 버립니다');
+  assert.deepEqual(out.captions.map(c=>c.text),['유효','끝을 넘김']);
+  assert.equal(out.captions.at(-1).end,5,'구간 길이를 넘지 않습니다');
+  assert.equal(out.text,'유효 길이 0 범위 밖 숫자 아님 끝을 넘김','원문은 서버가 준 그대로 이어 붙입니다');
+  assert.deepEqual(serverCaptions({segments:[]},5,0),{captions:[],skipped:0,text:''});
+  for(const bad of [[0,0],[5,-1],[NaN,0]])assert.throws(()=>serverCaptions({segments:[]},bad[0],bad[1]),/구간/);
 });

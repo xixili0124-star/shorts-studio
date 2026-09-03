@@ -7,6 +7,7 @@ import {parseSrt,buildSrt} from './srt.js';
 import {uid,clamp,download} from './util.js';
 import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,demoSound,onAssetReady,discardStagedAsset} from './project-store.js';
 import {Timeline} from './timeline.js';
+import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight,STORAGE_KEY} from './layout.js';
 import {frameTime,timelineCollection,itemRange,splitAvailability,placeVideoClip,planClipTrim,applyClipTrim,setTransition,deleteTimelineItem,planPlacement,placeTimelineItem,currentGap,planItemTrim,applyItemTrim} from './timeline-edits.js';
 import {GRAPHICS,CAPTIONS,TRANSITIONS} from './presets.js';
 import {transformOf,alignVisual} from './visual-transform.js';
@@ -196,6 +197,68 @@ function toggleTrackSwitch(id,name){
   toast(trackLabel(id)+' · '+SWITCH_LABELS[name][next?0:1]
     +(name==='solo'&&next?' · 미리보기에서만 적용됩니다. 내보내기는 솔로를 따르지 않습니다.':'')
     +(name==='hidden'&&next?' · 소리는 그대로 납니다. 소리도 빼려면 오디오 트랙을 음소거하세요.':''));
+}
+
+// ── 모니터와 타임라인의 높이 배분 ────────────────────────────────────
+// 세로 영상은 높이가 곧 크기라, 화면이 낮은 노트북에서는 이 경계가 중요합니다.
+let expandedFrom=null;
+const workbenchHeight=()=>$('workbench')?.getBoundingClientRect().height||0;
+const currentTimelineHeight=()=>Math.round($('timelineScroll')?.closest('.timeline-panel')?.getBoundingClientRect().height||0);
+function applyTimelineHeight(height,{store=true}={}){
+  const next=clampTimelineHeight(height,workbenchHeight());
+  if(next===null)return null;
+  document.documentElement.style.setProperty('--timeline-h',next+'px');
+  if(store)try{localStorage.setItem(STORAGE_KEY,String(next));}catch{}
+  timeline?.render();player.invalidate();
+  return next;
+}
+function setExpanded(on){
+  const button=$('expandMonitor');
+  if(on){
+    expandedFrom=currentTimelineHeight();
+    applyTimelineHeight(MIN_TIMELINE,{store:false});
+  }else{
+    applyTimelineHeight(expandedFrom||clampTimelineHeight(currentTimelineHeight(),workbenchHeight()),{store:false});
+    expandedFrom=null;
+  }
+  button?.classList.toggle('active',on);
+  button?.setAttribute('aria-pressed',String(on));
+  button?.setAttribute('aria-label',on?'미리보기 크게 보기 끄기':'미리보기 크게 보기');
+}
+function setupLayout(){
+  let saved=null;try{saved=localStorage.getItem(STORAGE_KEY);}catch{}
+  const stored=readStoredHeight(saved,workbenchHeight());
+  if(stored)applyTimelineHeight(stored,{store:false});
+  const bar=$('timelineResizer');
+  $('expandMonitor').onclick=()=>setExpanded(!expandedFrom);
+  bar.addEventListener('pointerdown',event=>{
+    if(event.button!==0||timeline.dragging)return;
+    event.preventDefault();
+    // 포인터 캡처는 브라우저에 따라 거절될 수 있습니다. 실패해도 끌기는 이어져야 합니다.
+    try{bar.setPointerCapture(event.pointerId);}catch{}
+    bar.classList.add('dragging');document.body.classList.add('resizing-timeline');
+    const startY=event.clientY,startH=currentTimelineHeight();
+    let latest=startH;
+    const move=e=>{if(e.pointerId!==event.pointerId)return;latest=applyTimelineHeight(startH+(startY-e.clientY),{store:false})??latest;};
+    const stop=()=>{
+      bar.removeEventListener('pointermove',move);bar.removeEventListener('pointerup',stop);bar.removeEventListener('pointercancel',stop);
+      bar.classList.remove('dragging');document.body.classList.remove('resizing-timeline');
+      try{if(bar.hasPointerCapture(event.pointerId))bar.releasePointerCapture(event.pointerId);}catch{}
+      expandedFrom=null;setExpanded(false);applyTimelineHeight(latest);
+    };
+    bar.addEventListener('pointermove',move);bar.addEventListener('pointerup',stop);bar.addEventListener('pointercancel',stop);
+  });
+  // 키보드로도 조절할 수 있어야 마우스를 쓸 수 없는 사람이 미리보기를 키울 수 있습니다.
+  bar.addEventListener('keydown',event=>{
+    const step=event.shiftKey?48:12;
+    if(event.key==='ArrowUp')applyTimelineHeight(currentTimelineHeight()+step);
+    else if(event.key==='ArrowDown')applyTimelineHeight(currentTimelineHeight()-step);
+    else if(event.key==='Home')applyTimelineHeight(MIN_TIMELINE);
+    else if(event.key==='End')applyTimelineHeight(maxTimelineHeight(workbenchHeight()));
+    else return;
+    event.preventDefault();
+  });
+  addEventListener('resize',()=>{const now=currentTimelineHeight();const fixed=clampTimelineHeight(now,workbenchHeight());if(fixed!==null&&fixed!==now)applyTimelineHeight(fixed,{store:false});});
 }
 
 function scheduleDraft(){
@@ -850,7 +913,7 @@ function wire(){
 }
 
 async function init(){
-  wire();
+  wire();setupLayout();
   engine=await detectEngine();$('engineLabel').textContent=engine.label;
   try{if(new URLSearchParams(location.search).has('empty')){setDocumentName('새 프로젝트');refresh();}else if(await loadDraft()){selectedItems=[];selection=null;refresh();$('saveStatus').textContent='저장된 작업 복구';}else await loadDemo();}
   catch(e){console.warn('초기 프로젝트 로딩 실패',e);try{await loadDemo();}catch{refresh();toast('샘플을 불러오지 못했어요. 파일 가져오기로 시작해 주세요.');}}

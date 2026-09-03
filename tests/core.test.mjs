@@ -9,6 +9,7 @@ import {trackBadge,ensureAutoCaptionTrack} from '../public/js/state.js';
 import {setTrackSwitch,isTrackMuted,isTrackLocked,isTrackAudible,hasAudioSolo,inlineClipAudible} from '../public/js/state.js';
 import {uncertainMosaicRanges,MAX_WARNING_RANGES} from '../public/js/mosaic.js';
 import {serverCaptions} from '../public/js/transcribe.js';
+import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight} from '../public/js/layout.js';
 import {keyframeValue} from '../public/js/keyframes.js';
 import {cropTrackingAt} from '../public/js/crop-tracking.js';
 import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES} from '../public/js/state.js';
@@ -2525,4 +2526,24 @@ test('server captions drop unusable spans, clamp to the range and keep the raw t
   assert.equal(out.text,'유효 길이 0 범위 밖 숫자 아님 끝을 넘김','원문은 서버가 준 그대로 이어 붙입니다');
   assert.deepEqual(serverCaptions({segments:[]},5,0),{captions:[],skipped:0,text:''});
   for(const bad of [[0,0],[5,-1],[NaN,0]])assert.throws(()=>serverCaptions({segments:[]},bad[0],bad[1]),/구간/);
+});
+
+// ── 모니터·타임라인 높이 배분 ──────────────────────────────────────────
+// 세로 영상은 높이가 곧 크기입니다. 타임라인 고정 높이가 미리보기를 눌러
+// 1366×768 에서 캔버스가 130×231px 이던 문제를 사용자가 직접 조절하게 했습니다.
+
+test('the timeline height stays usable and never eats the whole workbench',()=>{
+  assert.equal(clampTimelineHeight(50,700),MIN_TIMELINE,'너무 낮으면 타임라인이 제구실을 못합니다');
+  assert.equal(clampTimelineHeight(300,700),300);
+  assert.equal(clampTimelineHeight(9999,700),maxTimelineHeight(700));
+  assert.ok(maxTimelineHeight(700)<700,'모니터 자리는 항상 남깁니다');
+  assert.equal(maxTimelineHeight(100),MIN_TIMELINE,'화면이 아주 낮으면 최소 높이를 지킵니다');
+  for(const bad of [NaN,'abc',undefined,null])assert.equal(clampTimelineHeight(bad,700),null);
+});
+
+test('a stored height is validated before it is trusted',()=>{
+  assert.equal(readStoredHeight('320',700),320);
+  assert.equal(readStoredHeight('99999',700),maxTimelineHeight(700));
+  assert.equal(readStoredHeight('20',700),MIN_TIMELINE);
+  for(const bad of ['','abc',null,undefined,'-5','0'])assert.equal(readStoredHeight(bad,700),null);
 });

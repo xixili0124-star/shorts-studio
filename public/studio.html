@@ -58,7 +58,7 @@
     </section>
 
     <section class="viewer" aria-label="영상 미리보기">
-      <div class="viewer-heading"><span>프로그램 모니터</span><div><span class="format-chip">9:16</span><span class="muted" id="previewResolution">1080 × 1920</span><button id="toggleInspector" class="icon-button" aria-label="속성 패널 열기/닫기" title="속성 패널">☷</button></div></div>
+      <div class="viewer-heading"><span>프로그램 모니터</span><div><span class="format-chip">9:16</span><span class="muted" id="previewResolution">1080 × 1920</span><button id="expandMonitor" class="icon-button" aria-pressed="false" title="타임라인을 접어 미리보기를 크게 봅니다" aria-label="미리보기 크게 보기">⛶</button><button id="toggleInspector" class="icon-button" aria-label="속성 패널 열기/닫기" title="속성 패널">☷</button></div></div>
       <div class="viewer-stage" id="viewerStage">
         <canvas id="preview" width="1080" height="1920" aria-label="편집 중인 세로 영상"></canvas>
         <div id="monitorOverlay" class="monitor-overlay" hidden><svg id="monitorOutline" aria-hidden="true" focusable="false"></svg></div>
@@ -94,6 +94,7 @@
     </aside>
 
     <section class="timeline-panel" aria-label="편집 타임라인">
+      <div id="timelineResizer" class="timeline-resizer" role="separator" aria-orientation="horizontal" tabindex="0" aria-label="모니터와 타임라인의 높이 경계 · 위아래 화살표로 조절" title="끌어서 미리보기 크기를 조절합니다"></div>
       <div class="timeline-toolbar">
         <div class="timeline-title"><span class="timeline-indicator"></span><strong>타임라인</strong><span id="sequenceInfo" class="muted">시퀀스 01</span><div class="track-add-tools"><select id="trackRoleSelect" aria-label="새 트랙 종류"><option value="video">영상</option><option value="graphic">그래픽</option><option value="caption">자막</option><option value="audio">오디오</option><option value="voice">보이스</option></select><button id="addTrack" class="button subtle" title="선택한 종류의 트랙 추가">＋ 트랙</button></div></div>
         <div class="edit-tools"><button id="splitClip" class="tool-button" title="선택한 클립만 분할 · S">✂ <span>분할</span></button><button id="duplicateClip" class="tool-button" title="선택 항목 복제 · Ctrl+D">▣ <span>복제</span></button><button id="deleteClip" class="tool-button" title="선택 항목 삭제 · 빈 공간 유지 · Delete">× <span>삭제</span></button><button id="rippleDeleteClip" class="tool-button" title="선택 트랙에서 뒤 클립 당겨 삭제 · Shift+Delete">⇤ <span>당겨 삭제</span></button><span class="divider"></span><button id="copyClipSettings" class="tool-button" title="설정 복사 · Ctrl+Alt+C" aria-label="선택 클립 설정 복사"><i class="settings-copy-symbol" aria-hidden="true"></i><span>설정 복사</span></button><button id="pasteClipSettings" class="tool-button" title="설정 붙여넣기 · Ctrl+Alt+V" aria-label="선택 클립들에 설정 붙여넣기"><i class="settings-paste-symbol" aria-hidden="true"></i><span>붙여넣기</span></button><span id="selectionCount" class="selection-count" role="status"></span><button id="snap" class="tool-button active" aria-pressed="true" title="스냅 · N">⌁ <span>스냅</span></button></div>

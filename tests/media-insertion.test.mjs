@@ -3,7 +3,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Input, InputAudioTrack, AudioBufferSink } from '../public/vendor/mediabunny.min.js';
 import { project, newClipDefaults, timelineTracks, setLegacyEditorMode } from '../public/js/state.js';
-import { assets, addAsset, addDecodedAudioAsset, makeClip, makeAudio, clearAssets, captureDocument, restoreDocument, History, packProject, unpackProject, validateDocument } from '../public/js/project-store.js';
+import { assets, addAsset, addDecodedAudioAsset, makeClip, makeAudio, clearAssets, captureDocument, restoreDocument, History, packProject, unpackProject, validateDocument, discardStagedAsset } from '../public/js/project-store.js';
 import { createClip, disposeClip, probeVideoAudio } from '../public/js/media.js';
 import { extractClipAudio, hasClipAudio, mixTimeline } from '../public/js/audio.js';
 import { Player } from '../public/js/player.js';
@@ -418,4 +418,30 @@ test('a hand-linked pair trims by the same amount and keeps the offset between t
   // 절대 시각이 아니라 이동량을 맞추므로 두 끝의 0.5초 간격이 그대로 남습니다.
   assert.deepEqual(ends(), [1.5, 1]);
   assert.equal(first.trimEnd - first.trimStart, 1.5); assert.equal(second.trimEnd - second.trimStart, .5);
+});
+
+// ── 소재 라이브러리에서 지우기 ────────────────────────────────────────
+// 삭제 버튼이 기대는 안전장치입니다. 타임라인에서 쓰는 소재를 지우면
+// 클립이 소재를 잃어 프로젝트가 깨집니다.
+
+test('an asset in use is never removed while an unused one is disposed', async () => {
+  const asset = videoAsset('keep');
+  await insertMediaAsset(asset.id, { time: 0 });
+  const sound = await audioAsset('spare');
+  assert.equal(assets.size, 3, '영상·분리한 원음·여분 오디오');
+  // 타임라인의 영상 클립과 분리된 원음이 쓰는 소재는 그대로 남아야 합니다.
+  discardStagedAsset(asset.id);
+  discardStagedAsset(project.audio.tracks[0].assetId);
+  assert.equal(assets.has(asset.id), true);
+  assert.equal(assets.has(project.audio.tracks[0].assetId), true);
+  assert.equal(project.clips.length, 1);
+  // 어디에도 놓지 않은 소재만 사라집니다.
+  discardStagedAsset(sound.id);
+  assert.equal(assets.has(sound.id), false);
+  assert.equal(assets.size, 2);
+  assert.doesNotThrow(() => validateDocument(captureDocument(), savedRecords()));
+  // 클립을 지우고 나면 그때는 소재도 지울 수 있습니다.
+  project.clips = []; project.audio.tracks = [];
+  discardStagedAsset(asset.id);
+  assert.equal(assets.has(asset.id), false);
 });

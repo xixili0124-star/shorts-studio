@@ -5,7 +5,7 @@ import {loadFonts,measureVisual,renderCaptionPreview,renderGraphicPreview} from 
 import {detectEngine,exportVideo} from './exporter.js';
 import {parseSrt,buildSrt} from './srt.js';
 import {uid,clamp,download} from './util.js';
-import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,demoSound,onAssetReady} from './project-store.js';
+import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,demoSound,onAssetReady,discardStagedAsset} from './project-store.js';
 import {Timeline} from './timeline.js';
 import {frameTime,timelineCollection,itemRange,splitAvailability,placeVideoClip,planClipTrim,applyClipTrim,setTransition,deleteTimelineItem,planPlacement,placeTimelineItem,currentGap,planItemTrim,applyItemTrim} from './timeline-edits.js';
 import {GRAPHICS,CAPTIONS,TRANSITIONS} from './presets.js';
@@ -216,7 +216,7 @@ function renderLibrary(){
   const host=$('libraryContent');
   if(['voice','mosaic','silence'].includes(view)){smartTools.render(view,host);return;}
   if(view==='media'){
-    host.innerHTML=`<button class="import-zone" data-action="import"><span class="import-plus">＋</span><strong>파일 가져오기</strong><span>영상 · 이미지 · 오디오를 한곳에</span><small>또는 여기에 파일을 놓아주세요</small></button><div class="filter-tabs" aria-label="소재 종류">${[['all','전체'],['video','영상'],['image','이미지'],['audio','오디오']].map(([key,label])=>`<button data-filter="${key}" class="${mediaFilter===key?'active':''}">${label}</button>`).join('')}</div><label class="search-box"><span>⌕</span><input id="mediaSearch" type="search" placeholder="소재 검색" aria-label="소재 검색" value="${esc(search)}"><kbd>/</kbd></label><div id="assetGrid" class="asset-grid"></div><p class="library-hint">더블클릭·＋는 재생 막대 위치에 추가합니다.<br>끌어 넣을 때 초록색 범위가 실제 배치 위치예요.<br>이미지 기본 3초 · 영상은 원본 길이</p>`;
+    host.innerHTML=`<button class="import-zone" data-action="import"><span class="import-plus">＋</span><strong>파일 가져오기</strong><span>영상 · 이미지 · 오디오를 한곳에</span><small>또는 여기에 파일을 놓아주세요</small></button><div class="filter-tabs" aria-label="소재 종류">${[['all','전체'],['video','영상'],['image','이미지'],['audio','오디오']].map(([key,label])=>`<button data-filter="${key}" class="${mediaFilter===key?'active':''}">${label}</button>`).join('')}</div><label class="search-box"><span>⌕</span><input id="mediaSearch" type="search" placeholder="소재 검색" aria-label="소재 검색" value="${esc(search)}"><kbd>/</kbd></label><div class="asset-tools"><button id="clearAssets" class="button subtle" title="타임라인에서 쓰지 않는 소재만 라이브러리에서 지웁니다">안 쓰는 소재 비우기</button></div><div id="assetGrid" class="asset-grid"></div><p class="library-hint">더블클릭·＋는 재생 막대 위치에 추가합니다.<br>끌어 넣을 때 초록색 범위가 실제 배치 위치예요.<br>이미지 기본 3초 · 영상은 원본 길이</p>`;
     renderAssets();
   }else if(view==='graphics'){
     host.innerHTML='<p class="preset-intro">직접 구성한 모션 타이포그래피.<br>클릭하거나 타임라인으로 끌어 넣으세요.</p><div class="preset-grid">'+GRAPHICS.map(g=>'<button class="preset-card" draggable="true" data-preset="g:'+g.id+'" aria-label="'+esc(g.name)+' 추가"><div class="preset-art real-preview"><canvas data-graphic-preview="'+g.id+'" width="420" height="300" aria-label="'+esc(g.name)+' 실제 그래픽"></canvas><span class="preview-loading">폰트 준비 중</span></div><strong>'+esc(g.name)+'</strong><small>'+esc(g.hint)+'</small></button>').join('')+'</div><p class="library-hint">문구·색상·크기는 오른쪽 속성에서,<br>길이와 배치는 타임라인에서 조절하세요.</p>';
@@ -266,13 +266,52 @@ function preparePresetPreviews(host){
   canvases.forEach(canvas=>presetPreviewObserver.observe(canvas));
 }
 
+/** 이 소재를 쓰는 타임라인 항목 수입니다. 하나라도 있으면 지우지 않습니다. */
+function assetUses(id){
+  return project.clips.filter(c=>c.assetId===id).length
+    +(project.audio.tracks||[]).filter(t=>t.assetId===id).length;
+}
+const unusedAssetIds=()=>[...assets.keys()].filter(id=>!assetUses(id));
+/**
+ * 소재를 라이브러리에서 지웁니다. 타임라인에서 쓰는 소재는 건드리지 않습니다.
+ *
+ * 되돌리기 기록은 함께 비웁니다. 기록 속 문서가 지운 소재를 가리키고 있으면
+ * 되돌렸을 때 blob 주소가 이미 해제돼 있어 화면이 깨지고, 저장도 실패합니다.
+ * 조용히 깨진 상태로 두는 것보다 기록을 비우고 그 사실을 알리는 편이 낫습니다.
+ */
+function removeAssets(ids){
+  if(exportCtrl||importing||smartTools?.busy)return;
+  const wanted=[...new Set(ids)].filter(id=>assets.has(id));
+  const removable=wanted.filter(id=>!assetUses(id)),blocked=wanted.length-removable.length;
+  if(!removable.length){
+    toast(blocked?'타임라인에서 사용 중인 소재예요. 타임라인에서 먼저 지운 뒤 다시 시도해 주세요.':'지울 소재가 없어요.');
+    return;
+  }
+  player.pause();
+  for(const id of removable){
+    if(selection?.type==='asset'&&selection.id===id){selection=null;selectedItems=[];player.selection=null;}
+    discardStagedAsset(id);
+  }
+  const undone=history.past.length||history.future.length;
+  history.clear();dirty=true;isDemo=false;
+  refresh();scheduleDraft();
+  toast(removable.length+'개 소재를 라이브러리에서 지웠어요.'
+    +(blocked?' 타임라인에서 사용 중인 '+blocked+'개는 남겨 뒀어요.':'')
+    +(undone?' 되돌리기 기록은 초기화됐어요.':''));
+}
+
 function renderAssets(){
   const grid=$('assetGrid');if(!grid)return;
   const list=[...assets.values()].filter(a=>(mediaFilter==='all'||a.kind===mediaFilter)&&a.file.name.toLowerCase().includes(search.toLowerCase()));
   grid.innerHTML=list.map(a=>{
     const picture=a.kind==='audio'?`<div class="audio-thumb">${(a.waveform||[]).filter((_,i)=>i%5===0).map(v=>`<i style="height:${Math.max(2,v*43)}px"></i>`).join('')}</div>`:`<img src="${a.thumb||''}" alt="${esc(a.file.name)}" draggable="false">`;
-    return `<article class="asset-card ${selection?.type==='asset'&&selection.id===a.id?'selected':''}" data-asset="${a.id}" draggable="true" tabindex="0" role="button" aria-label="${esc(a.file.name)}"><div class="asset-image">${picture}<span class="asset-kind">${a.kind==='audio'?'♫':a.kind==='video'?'▶':'▧'}</span><span class="asset-duration">${a.kind==='image'?'IMAGE':fmt(a.duration)}</span><button class="asset-add" data-add-asset="${a.id}" aria-label="${esc(a.file.name)} 타임라인에 추가">＋</button></div><h3>${esc(a.file.name)}</h3><p>${a.kind==='video'?'영상':a.kind==='audio'?(a.aiGenerated?'AI 음성':'오디오'):'이미지'} · ${a.kind==='audio'?`${a.duration.toFixed(1)}초`:`${a.base.natW} × ${a.base.natH}`}</p></article>`;
+    return `<article class="asset-card ${selection?.type==='asset'&&selection.id===a.id?'selected':''}" data-asset="${a.id}" draggable="true" tabindex="0" role="button" aria-label="${esc(a.file.name)}"><div class="asset-image">${picture}<span class="asset-kind">${a.kind==='audio'?'♫':a.kind==='video'?'▶':'▧'}</span><span class="asset-duration">${a.kind==='image'?'IMAGE':fmt(a.duration)}</span><button class="asset-add" data-add-asset="${a.id}" aria-label="${esc(a.file.name)} 타임라인에 추가" title="재생 막대 위치에 추가">＋</button><button class="asset-remove" data-remove-asset="${a.id}" aria-label="${esc(a.file.name)} 라이브러리에서 지우기" title="${assetUses(a.id)?'타임라인에서 사용 중 · 먼저 타임라인에서 지워 주세요':'라이브러리에서 지우기'}"${assetUses(a.id)?' disabled':''}>×</button></div><h3>${esc(a.file.name)}</h3><p>${a.kind==='video'?'영상':a.kind==='audio'?(a.aiGenerated?'AI 음성':'오디오'):'이미지'} · ${a.kind==='audio'?`${a.duration.toFixed(1)}초`:`${a.base.natW} × ${a.base.natH}`}</p></article>`;
   }).join('')||'<p class="note" style="grid-column:1/-1;padding:20px 0">아직 소재가 없어요.<br>파일을 가져오면 여기에서 찾을 수 있어요.</p>';
+  const clear=$('clearAssets'),unused=unusedAssetIds().length;
+  if(clear){
+    clear.disabled=!unused;
+    clear.textContent=unused?'안 쓰는 소재 '+unused+'개 비우기':'안 쓰는 소재 없음';
+  }
 }
 function renderCaptionList(){const list=$('captionList');if(!list)return;list.innerHTML=project.captions.map(c=>`<button data-select-caption="${c.id}" class="${selection?.id===c.id?'selected':''}"><small>${c.start.toFixed(2)} → ${c.end.toFixed(2)} · ${trackLabel(trackIdFor('caption',c))}</small>${esc(c.text)}</button>`).join('');}
 
@@ -765,6 +804,9 @@ function wire(){
     const scope=e.target.closest('[data-scope]');if(scope){captionScope=scope.dataset.scope;renderLibrary();return;}
     const preset=e.target.closest('[data-preset]');if(preset){const [type,key]=preset.dataset.preset.split(':');if(type==='g')addGraphic(key);else if(type==='c')applyCaptionPreset(key);else if(type==='sfx')addSound(key).catch(e=>toast(e.message));else applyTransition(key);return;}
     const cap=e.target.closest('[data-select-caption]');if(cap){select('caption',cap.dataset.selectCaption);player.seek(selected().start);return;}
+    const remove=e.target.closest('[data-remove-asset]');
+    if(remove){e.preventDefault();e.stopPropagation();removeAssets([remove.dataset.removeAsset]);return;}
+    if(e.target.closest('#clearAssets')){removeAssets(unusedAssetIds());return;}
     const asset=e.target.closest('[data-asset]');if(asset)select('asset',asset.dataset.asset);
   });
   $('libraryContent').addEventListener('dblclick',e=>{const card=e.target.closest('[data-asset]');if(card&&!e.target.closest('[data-add-asset]'))placeAsset(card.dataset.asset).catch(e=>toast(e.message));});

@@ -375,3 +375,17 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 .timeline-notice[data-tone=info]::before{background:var(--accent)}
 .timeline-notice[data-tone=warn]{color:#f0b9a4;background:#241c19}
 .timeline-notice[data-tone=warn]::before{background:#e8825a}
+
+/* ── 소재 카드 버튼 ────────────────────────────────────────
+   ＋ 는 전각 문자라 버튼 기본 padding 과 겹쳐 21px 상자를 넘쳤습니다. */
+.asset-add,.asset-remove{position:absolute;top:5px;width:21px;height:21px;padding:0;line-height:1;
+  display:grid;place-items:center;border-radius:4px;opacity:0;transition:opacity .12s}
+.asset-add{right:5px;background:#131813de;color:var(--accent);border:1px solid #aee06166;font-size:14px}
+.asset-remove{right:30px;background:#1d1414de;color:#f0a9a9;border:1px solid #e0616166;font-size:15px}
+.asset-remove:hover:not(:disabled){background:#e06161;color:#160c0c}
+.asset-remove:disabled{opacity:0;pointer-events:none}
+.asset-card:hover .asset-add,.asset-add:focus-visible,
+.asset-card:hover .asset-remove:not(:disabled),.asset-remove:focus-visible{opacity:1}
+
+.asset-tools{display:flex;justify-content:flex-end;margin:2px 0 6px}
+.asset-tools .button{font-size:11px;padding:5px 9px;min-height:0}

@@ -10,16 +10,17 @@
   <meta name="twitter:card" content="summary_large_image">
   <meta property="og:title" content="Shorts Studio — 작은 화면, 큰 이야기">
   <meta property="og:description" content="브라우저에서 완성하는 나만의 숏츠 편집실. 원본과 분리된 로컬 실험판입니다.">
-  <title>Shorts Studio · 로컬 실험판</title>
+  <title>Shorts Studio · PC 디자인 미리보기</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;600;700;900&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="studio.css">
   <link rel="stylesheet" href="mobile.css">
+  <link rel="stylesheet" href="desktop.css">
 </head>
 <body>
   <header class="appbar">
-    <a class="brand" href="studio.html" aria-label="숏츠 스튜디오"><span class="brand-mark">S</span><span>SHORTS<span class="brand-light"> STUDIO</span></span></a>
+    <a class="brand" href="studio.html" aria-label="숏츠 스튜디오"><span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 5H9.5C3.5 5 3.5 12 9.5 12h5c6 0 6 7 0 7H7" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="square"/></svg></span><span>Shorts<span class="brand-light"> Studio</span></span></a>
     <span class="lab-tag">LAB</span>
     <div class="project-title"><input id="projectName" aria-label="프로젝트 이름" value="서울의 밤, 짧은 기록"><span id="saveStatus" class="save-status">샘플 프로젝트</span></div>
     <div class="app-actions">
@@ -60,7 +61,7 @@
     </section>
 
     <section class="viewer" aria-label="영상 미리보기">
-      <div class="viewer-heading"><span>프로그램 모니터</span><div><span class="format-chip">9:16</span><span class="muted" id="previewResolution">1080 × 1920</span><button id="expandMonitor" class="icon-button" aria-pressed="false" title="타임라인을 접어 미리보기를 크게 봅니다" aria-label="미리보기 크게 보기">⛶</button><button id="toggleInspector" class="icon-button" aria-label="속성 패널 열기/닫기" title="속성 패널">☷</button></div></div>
+      <div class="viewer-heading"><span>미리보기</span><div><span class="format-chip">9:16</span><span class="muted" id="previewResolution">1080 × 1920</span><button id="expandMonitor" class="icon-button" aria-pressed="false" title="타임라인을 접어 미리보기를 크게 봅니다" aria-label="미리보기 크게 보기">⛶</button><button id="toggleInspector" class="icon-button" aria-label="속성 패널 열기/닫기" title="속성 패널">☷</button></div></div>
       <div class="viewer-stage" id="viewerStage">
         <canvas id="preview" width="1080" height="1920" aria-label="편집 중인 세로 영상"></canvas>
         <div id="monitorOverlay" class="monitor-overlay" hidden><svg id="monitorOutline" aria-hidden="true" focusable="false"></svg></div>

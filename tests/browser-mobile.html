@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="ko">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>모바일 타임라인 DOM 통합 검사</title>
+<link rel="stylesheet" href="/studio.css">
+<link rel="stylesheet" href="/mobile.css">
+<style>
+body.mobile-ui.qa-mobile{display:block;height:auto;min-height:100dvh;min-width:0;overflow:auto;padding:18px;background:#111719}
+#qaMain{width:min(960px,100%);margin:auto}#qaMain h1{font-size:21px;margin-bottom:10px}#qaMain p{line-height:1.7;margin:8px 0;color:#b5c3c8}
+.qa-actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.qa-actions button{padding:10px 12px;min-height:44px;border-radius:5px;background:#2d3b32}
+.qa-actions #runAll{background:#c0ef73;color:#15200c;font-weight:700}
+body.mobile-ui.qa-mobile .timeline-panel{height:320px;width:100%;display:flex;position:relative;grid-column:auto;grid-row:auto;overflow:hidden;border:1px solid #4f645a}
+body.mobile-ui.qa-mobile .timeline-toolbar{display:flex;flex:0 0 48px;height:48px;padding:5px;gap:6px;overflow:hidden}
+body.mobile-ui.qa-mobile .timeline-toolbar .timeline-zoom{display:flex;margin-left:auto;gap:3px}.timeline-zoom input{width:50px}
+body.mobile-ui.qa-mobile .timeline-body{flex:1;min-height:0;overflow:hidden}body.mobile-ui.qa-mobile .timeline-notice{display:block;min-height:24px;max-height:42px;white-space:normal;overflow:hidden;font-size:11px}
+body.mobile-ui.qa-mobile .track-heads{width:88px;flex:0 0 88px}body.mobile-ui.qa-mobile .track,body.mobile-ui.qa-mobile .track-head{height:52px}
+body.mobile-ui.qa-mobile .ruler,body.mobile-ui.qa-mobile .ruler-spacer{height:32px;min-height:32px}
+body.mobile-ui.qa-mobile #timelineCanvas,body.mobile-ui.qa-mobile .timeline-block{touch-action:none}
+.qa-results{padding-left:24px;line-height:1.8;font-size:13px}.qa-results [data-result=pass]{color:#c0ef73}.qa-results [data-result=fail]{color:#ffafa3}
+#result{white-space:pre-wrap;font:12px/1.6 Consolas,monospace;color:#dde9df;background:#1a2521;padding:12px;overflow-wrap:anywhere}
+#qaMode{display:inline-block;border:1px solid #566b44;padding:4px 8px;color:#d8ecb9;font-size:12px}
+</style>
+<body class="mobile-ui qa-mobile">
+<main id="qaMain">
+  <h1>모바일 타임라인 DOM 통합 검사</h1>
+  <span id="qaMode">실제 DOM + 합성 PointerEvent</span>
+  <p>별도 테스트 프로젝트의 이미지 클립만 사용합니다. 편집기 앱·사용자 파일·자동 저장을 불러오지 않습니다.</p>
+  <p>이 검사는 브라우저 레이아웃과 터치 제스처 코드 연결을 확인합니다. 포인터 캡처는 합성 이벤트용으로 모사하며, 실제 휴대전화의 터치 하드웨어·OS 제스처 검증과는 다릅니다.</p>
+  <div class="qa-actions">
+    <button id="runAll" disabled>전체 검사 실행</button>
+    <button data-case="tap" disabled>탭·설정 버튼</button><button data-case="pan" disabled>스와이프</button>
+    <button data-case="hold" disabled>길게 누르기 메뉴</button><button data-case="drag" disabled>길게 누르고 이동</button>
+    <button data-case="trim" disabled>트림</button><button data-case="pinch" disabled>핀치</button>
+    <button data-case="multi" disabled>다중선택</button><button data-case="cancel" disabled>취소·두 번째 손가락</button>
+  </div>
+  <section class="timeline-panel" aria-label="테스트 타임라인">
+    <div class="timeline-toolbar">
+      <span id="sequenceInfo"></span><button id="snap" aria-pressed="false">스냅</button>
+      <div class="timeline-zoom"><span id="totalDuration"></span><button id="zoomOut">−</button><input id="timelineZoom" type="range" min="3" max="720" value="80"><button id="zoomIn">＋</button><button id="fitTimeline">맞춤</button></div>
+    </div>
+    <div class="timeline-body">
+      <div class="track-heads"><div class="ruler-spacer">테스트 트랙</div><div class="track-head-viewport"><div id="trackHeaders"></div></div></div>
+      <div id="timelineScroll" class="timeline-scroll"><div id="timelineCanvas" class="timeline-canvas" tabindex="0"><div id="ruler" class="ruler"></div><div id="timelineRows"></div><div id="playhead" class="playhead"><span></span></div></div></div>
+    </div>
+    <div id="timelineNotice" class="timeline-notice" role="status"></div>
+  </section>
+  <ol id="checks" class="qa-results"></ol>
+  <pre id="result" role="status">테스트 이미지 준비 중…</pre>
+</main>
+<script type="module">
+// 로컬 검사 전용입니다. public/__qa-mobile.html로 복사해 열고 검사 후 복사본을 제거합니다.
+import {Timeline} from '/js/timeline.js';
+import {project,migrateTimeline,clipDuration} from '/js/state.js';
+import {addAsset,makeClip,captureDocument} from '/js/project-store.js';
+
+const $=id=>document.getElementById(id),assert=(condition,message)=>{if(!condition)throw new Error(message);};
+const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
+const active=new Set(),captures=new Map();let nextPointer=1000,fixtureClips,timeline,running=false,lastDown=null;
+const calls={select:0,multi:0,commit:0,copy:0,paste:0,menu:0,errors:[]};
+// dispatchEvent 내부의 리스너 예외는 호출자에게 다시 던져지지 않으므로 별도로 수집합니다.
+addEventListener('error',event=>{if(running)calls.errors.push(event.error?.stack||event.message);});
+
+// 합성 PointerEvent에는 브라우저의 실제 활성 포인터가 없습니다. 이 페이지의 테스트 ID만
+// 캡처 대상을 기억하고 다음 이벤트를 그 DOM으로 보내며 실제 입력 메서드는 그대로 둡니다.
+for(const name of ['setPointerCapture','hasPointerCapture','releasePointerCapture']){
+  const original=Element.prototype[name];
+  Element.prototype[name]=function(id){
+    if(!active.has(id))return original.call(this,id);
+    if(name==='setPointerCapture'){captures.set(id,this);return;}
+    if(name==='hasPointerCapture')return captures.get(id)===this;
+    if(captures.get(id)===this)captures.delete(id);
+  };
+}
+function emit(type,id,at,target){
+  if(type==='pointerdown')active.add(id);
+  const underPointer=document.elementFromPoint(at.x,at.y);
+  // 처음 누른 곳은 실제 hit-test 결과를 사용해 버튼·손잡이가 덮인 경우도 드러냅니다.
+  const destination=captures.get(id)||(type==='pointerdown'?underPointer:null)||target||underPointer||timeline.canvas;
+  const event=new PointerEvent(type,{bubbles:true,cancelable:true,composed:true,pointerId:id,pointerType:'touch',isPrimary:[...active][0]===id,
+    clientX:at.x,clientY:at.y,button:0,buttons:type==='pointerup'||type==='pointercancel'?0:1,width:12,height:12,pressure:type==='pointerup'?0:.5,detail:type==='click'?1:0});
+  destination.dispatchEvent(event);
+  if(type==='pointerdown')lastDown={tag:destination.tagName,classes:destination.className,id:destination.dataset.id||null,mode:timeline.mobileGestures.mode,hidden:document.hidden};
+  if(type==='pointerup'||type==='pointercancel'){captures.delete(id);active.delete(id);}
+}
+const block=id=>timeline.canvas.querySelector('.timeline-block[data-id="'+id+'"]');
+async function point(node,{edge=false}={}){
+  node.scrollIntoView({block:'nearest',inline:'nearest'});await frame();const rect=node.getBoundingClientRect();
+  assert(rect.width>0&&rect.height>0,'대상 DOM에 실제 레이아웃이 없습니다.');
+  return {x:rect.left+(node.classList.contains('timeline-block')?Math.min(30,rect.width/2):rect.width/2),y:edge?rect.top+rect.height/2:rect.bottom-6};
+}
+async function tap(node){const at=await point(node),id=++nextPointer;emit('pointerdown',id,at,node);emit('pointerup',id,at,node);emit('click',id,at,node);await frame();}
+async function waitHeld(){
+  // 비활성 탭의 타이머 제한과 실제 인식 실패를 구분합니다. 제품의 300ms 설정은 바꾸지 않습니다.
+  const deadline=performance.now()+2500;
+  while(timeline.mobileGestures.mode==='pending'&&performance.now()<deadline&&!calls.errors.length)await wait(40);
+  assert(!calls.errors.length,calls.errors.join('\n'));
+  assert(timeline.mobileGestures.mode==='held','롱프레스 대기 실패: '+JSON.stringify({down:lastDown,mode:timeline.mobileGestures.mode,pointers:timeline.mobileGestures.points.size,timer:timeline.mobileGestures.timer!==undefined,hidden:document.hidden,connected:timeline.canvas.isConnected}));
+}
+const first=()=>project.clips.find(clip=>clip.id==='qa-a');
+function clearCalls(){for(const key of Object.keys(calls))calls[key]=key==='errors'?[]:0;}
+async function reset(){
+  timeline.cancelMobileGestures();timeline.cancelPointerDrag?.();timeline.closeMenu();captures.clear();active.clear();
+  project.clips=fixtureClips.map(clip=>({...clip}));project.captions=[];project.overlays=[];project.audio.tracks=[];
+  timeline.mobileMultiSelect=false;timeline.selectMany([],null);timeline.zoom=80;timeline.snapping=false;timeline.time=0;
+  timeline.render();timeline.scroll.scrollLeft=0;timeline.scroll.scrollTop=0;$('timelineZoom').value='80';clearCalls();await frame();
+}
+const tests={
+  async tap(){
+    await tap(block('qa-a'));assert(timeline.selection?.id==='qa-a','탭으로 클립을 선택하지 못했습니다.');assert(calls.select===1,'탭에서 선택 신호가 중복됐습니다.');assert(!timeline.dragging,'탭 이후 이동 상태가 남았습니다.');
+    const copy=block('qa-a').querySelector('[data-clip-setting="copy"]');await tap(copy);assert(calls.copy===1,'설정 복사 버튼이 한 번만 실행되어야 합니다.');assert(calls.commit===0,'탭이 클립을 이동시켰습니다.');
+    return '클립 선택 1회 + 설정 복사 1회, 뒤따르는 클릭 중복 없음';
+  },
+  async pan(){
+    const before=JSON.stringify(captureDocument()),node=block('qa-a'),at=await point(node),id=++nextPointer;
+    emit('pointerdown',id,at,node);emit('pointermove',id,{x:at.x-36,y:at.y-18},node);emit('pointerup',id,{x:at.x-36,y:at.y-18},node);
+    assert(timeline.scroll.scrollLeft>=35,'가로 스크롤이 이동하지 않았습니다.');assert(timeline.scroll.scrollTop>=17,'세로 스크롤이 이동하지 않았습니다.');
+    assert(JSON.stringify(captureDocument())===before,'스와이프가 클립 데이터를 바꿨습니다.');assert(calls.select+calls.multi+calls.commit===0,'스와이프가 선택·편집을 실행했습니다.');
+    return '클립 위 한 손가락 스와이프가 가로·세로 스크롤만 변경';
+  },
+  async hold(){
+    const node=block('qa-a'),at=await point(node),id=++nextPointer;emit('pointerdown',id,at,node);await waitHeld();emit('pointerup',id,at,node);await frame();
+    assert(timeline.menu&&document.querySelector('.timeline-menu'),'길게 누른 뒤 메뉴가 열리지 않았습니다.');assert(calls.select===1,'메뉴 선택 신호가 중복됐습니다.');assert(calls.commit===0&&!timeline.dragging,'메뉴 열기가 클립을 이동시켰습니다.');
+    document.querySelector('.timeline-menu button').click();assert(calls.menu===1&&!timeline.menu,'메뉴 버튼 동작/정리가 잘못됐습니다.');return '제자리 롱프레스 메뉴 + 메뉴 버튼 1회';
+  },
+  async drag(){
+    const node=block('qa-a'),at=await point(node),id=++nextPointer;emit('pointerdown',id,at,node);await waitHeld();
+    emit('pointermove',id,{x:at.x+40,y:at.y},node);assert(timeline.dragging,'길게 누른 뒤 기존 이동 엔진이 시작되지 않았습니다.');
+    emit('pointerup',id,{x:at.x+40,y:at.y},node);await frame();
+    assert(Math.abs(first().start-1.5)<.04,'이동 결과가 0.5초 이동과 일치하지 않습니다: '+first().start);assert(calls.commit===1,'이동을 정확히 한 번 확정해야 합니다.');assert(!timeline.dragging&&!timeline.mobileGestures.points.size,'이동 상태가 남았습니다.');
+    return '기존 DOM 이동 엔진으로 +0.5초 이동, 확정 1회';
+  },
+  async trim(){
+    const handle=block('qa-a').querySelector('[data-edge="end"]'),at=await point(handle,{edge:true}),id=++nextPointer;
+    emit('pointerdown',id,at,handle);assert(timeline.dragging,'손잡이 트림이 즉시 시작되지 않았습니다.');
+    emit('pointermove',id,{x:at.x-32,y:at.y},handle);emit('pointerup',id,{x:at.x-32,y:at.y},handle);await frame();
+    assert(Math.abs(first().start-1)<.001,'트림이 시작 위치를 바꿨습니다.');assert(Math.abs(clipDuration(first())-1.6)<.04,'트림 길이가 맞지 않습니다: '+clipDuration(first()));assert(calls.commit===1,'트림 확정 횟수가 잘못됐습니다.');
+    return '대기 없이 끝 손잡이 트림, 길이 2.0 → 1.6초';
+  },
+  async pinch(){
+    timeline.scroll.scrollLeft=80;await frame();const rect=timeline.scroll.getBoundingClientRect(),a={x:rect.left+60,y:rect.top+64},b={x:rect.left+140,y:rect.top+64};
+    const one=++nextPointer,two=++nextPointer,anchor=(timeline.scroll.scrollLeft+100)/timeline.zoom;
+    emit('pointerdown',one,a,timeline.canvas);emit('pointerdown',two,b,timeline.canvas);emit('pointermove',one,{x:a.x-20,y:a.y},timeline.canvas);emit('pointermove',two,{x:b.x+40,y:b.y},timeline.canvas);
+    assert(Math.abs(timeline.zoom-140)<.01,'핀치 배율이 예상과 다릅니다: '+timeline.zoom);
+    assert(Math.abs((timeline.scroll.scrollLeft+110)/timeline.zoom-anchor)<.02,'핀치 중점의 시각이 이동했습니다.');
+    emit('pointerup',one,a,timeline.canvas);emit('pointerup',two,b,timeline.canvas);assert(!timeline.mobileGestures.points.size,'핀치 후 포인터가 남았습니다.');assert(calls.commit===0&&calls.select===0,'핀치가 클립을 편집·선택했습니다.');
+    return '중점 이동을 포함한 1.75배 핀치, 같은 시각 유지';
+  },
+  async multi(){
+    timeline.mobileMultiSelect=true;await tap(block('qa-a'));await tap(block('qa-b'));
+    assert(timeline.explicit.length===2,'두 클립을 다중선택하지 못했습니다.');await tap(block('qa-a'));
+    assert(timeline.explicit.length===1&&timeline.explicit[0].id==='qa-b','선택된 클립을 다시 탭해 해제하지 못했습니다.');assert(calls.multi===3&&calls.commit===0,'선택모드 신호가 중복됐습니다.');return '두 클립 선택 + 다시 탭하여 해제';
+  },
+  async cancel(){
+    const node=block('qa-a'),at=await point(node),one=++nextPointer;emit('pointerdown',one,at,node);await waitHeld();emit('pointermove',one,{x:at.x+24,y:at.y},node);assert(timeline.dragging,'취소 검사 전 기존 이동 엔진이 시작되지 않았습니다.');
+    const two=++nextPointer;emit('pointerdown',two,{x:at.x+70,y:at.y},timeline.canvas);assert(!timeline.dragging&&timeline.mobileGestures.mode==='pinch','두 번째 손가락이 이동을 취소하지 못했습니다.');
+    emit('pointercancel',two,{x:at.x+70,y:at.y},timeline.canvas);emit('pointercancel',one,at,timeline.canvas);assert(first().start===1&&calls.commit===0,'취소된 이동이 반영됐습니다.');
+    const pending=++nextPointer;emit('pointerdown',pending,at,block('qa-a'));timeline.cancelMobileGestures();emit('pointercancel',pending,at,timeline.canvas);await wait(350);
+    assert(!timeline.menu&&!timeline.mobileGestures.points.size&&!timeline.mobileGestures.listening&&!timeline.dragging,'취소 후 타이머·메뉴·리스너가 남았습니다.');return '이동 → 두 손가락 취소 및 모드 종료 정리';
+  },
+};
+async function run(names){
+  if(running)return;running=true;document.body.dataset.result='running';$('checks').replaceChildren();$('result').textContent='검사 중…';document.querySelectorAll('.qa-actions button').forEach(button=>button.disabled=true);
+  const outcomes=[];
+  try{
+    for(const name of names){
+      const row=document.createElement('li');row.dataset.test=name;$('checks').append(row);
+      try{await reset();const message=await tests[name]();assert(!calls.errors.length,calls.errors.join('\n'));row.dataset.result='pass';row.textContent='PASS · '+message;outcomes.push({name,pass:true,message});}
+      catch(error){row.dataset.result='fail';row.textContent='FAIL · '+name+' · '+error.message;outcomes.push({name,pass:false,error:error.stack});}
+    }
+    document.body.dataset.result=outcomes.every(outcome=>outcome.pass)?'pass':'fail';window.__mobileQaResult=outcomes;
+    $('result').textContent=outcomes.filter(outcome=>!outcome.pass).map(outcome=>outcome.error).join('\n\n')||names.length+' / '+names.length+' PASS — 실제 DOM + 합성 터치 이벤트 검사. 실제 휴대전화 검증은 별도입니다.';
+  }finally{timeline.cancelMobileGestures();timeline.cancelPointerDrag?.();captures.clear();active.clear();running=false;document.querySelectorAll('.qa-actions button').forEach(button=>button.disabled=false);}
+}
+try{
+  const image=document.createElement('canvas');image.width=64;image.height=64;const ctx=image.getContext('2d');ctx.fillStyle='#618949';ctx.fillRect(0,0,64,64);ctx.fillStyle='#d8eeaf';ctx.fillRect(8,8,24,24);
+  const file=new File([await new Promise(resolve=>image.toBlob(resolve,'image/png'))],'qa-fixture.png',{type:'image/png'}),asset=await addAsset(file);
+  fixtureClips=await Promise.all([['qa-a','클립 A',1,2],['qa-b','클립 B',6,2],['qa-tail','끝 클립',18,2]].map(([id,name,start,imgDuration])=>makeClip(asset.id,{id,name,start,imgDuration,trackId:'v1'})));
+  project.clips=fixtureClips.map(clip=>({...clip}));project.audio.tracks=[];project.captions=[];project.overlays=[];
+  project.timelineTracks=[{id:'v3',kind:'visual',role:'caption'},{id:'v2',kind:'visual',role:'graphic'},{id:'v1',kind:'visual',role:'video'},{id:'a1',kind:'audio',role:'audio'},{id:'a2',kind:'audio',role:'voice'}];migrateTimeline();
+  timeline=new Timeline({busy:()=>false,pause(){},select(){calls.select++;},selectMany(){calls.multi++;},seek(time){timeline.tick(time);},commit(){calls.commit++;},error:message=>calls.errors.push(message),
+    copySettings(){calls.copy++;},pasteSettings(){calls.paste++;},canPasteSettings:()=>true,gap(){},transition(){},menuItems:()=>[{id:'qa-menu',label:'테스트 메뉴 실행'}],menuAction(){calls.menu++;}});
+  await reset();$('runAll').onclick=()=>run(Object.keys(tests));document.querySelectorAll('[data-case]').forEach(button=>button.onclick=()=>run([button.dataset.case]));
+  document.querySelectorAll('.qa-actions button').forEach(button=>button.disabled=false);document.body.dataset.result='ready';$('result').textContent='준비 완료. 전체 검사 또는 개별 검사 버튼을 누르세요.';
+}catch(error){document.body.dataset.result='fail';$('result').textContent='FIXTURE FAIL: '+error.stack;}
+addEventListener('pagehide',()=>timeline?.destroyMobileGestures());
+</script>
+</body>
+</html>

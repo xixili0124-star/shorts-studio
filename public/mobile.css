@@ -1,0 +1,343 @@
+.mobile-only{display:none}
+
+/* 모바일 모드에서만 작업 공간을 재배치합니다. PC 규칙은 바꾸지 않습니다. */
+body.mobile-ui{
+  --bg:#111315;--surface:#1a1d20;--surface-2:#23272b;--surface-3:#2b3034;
+  --line:#34393e;--text:#f0f1ed;--muted:#a8aeb1;--faint:#939b9e;
+  --accent:#bbdf7c;--accent-dark:#2a3521;
+  --mobile-safe-top:env(safe-area-inset-top,0px);
+  --mobile-safe-bottom:env(safe-area-inset-bottom,0px);
+  --mobile-header-height:calc(56px + var(--mobile-safe-top));
+  --mobile-dock-height:calc(72px + var(--mobile-safe-bottom));
+  --mobile-timeline-height:min(280px,36dvh);
+  margin:0;min-width:0;width:100%;height:var(--mobile-vh,100dvh);overflow:hidden;
+  background:var(--bg);color:var(--text);font-size:14px;
+  -webkit-text-size-adjust:100%;overscroll-behavior:none;
+}
+body.mobile-ui .mobile-only{display:flex}
+body.mobile-ui:not(.mobile-sheet-open) #mobileBackdrop{display:none}
+body.mobile-ui button,body.mobile-ui a,body.mobile-ui input,body.mobile-ui select,body.mobile-ui textarea{-webkit-tap-highlight-color:transparent}
+body.mobile-ui button{touch-action:manipulation}
+body.mobile-ui .button,body.mobile-ui .icon-button{min-height:44px;border-radius:8px}
+body.mobile-ui .icon-button{width:44px;min-width:44px;height:44px;flex-basis:44px}
+body.mobile-ui .button{padding:10px 14px;font-size:14px}
+body.mobile-ui .button.primary{background:var(--accent);color:#17200e}
+body.mobile-ui .button.secondary{background:#282d30;border-color:#444b50}
+body.mobile-ui .mobile-icon{display:block;flex:0 0 24px;width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
+body.mobile-ui button:focus-visible,body.mobile-ui a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* 헤더는 이름과 주요 작업만 남기고 나머지는 메뉴에서 엽니다. */
+body.mobile-ui .appbar{
+  position:relative;z-index:40;height:var(--mobile-header-height);min-height:var(--mobile-header-height);
+  padding:var(--mobile-safe-top) max(8px,env(safe-area-inset-right,0px)) 0 max(8px,env(safe-area-inset-left,0px));
+  gap:6px;background:#171a1c;border-bottom:1px solid #303539;
+}
+body.mobile-ui .brand{flex:0 0 28px;width:28px;gap:0}
+body.mobile-ui .brand-mark{width:26px;height:28px;border-radius:6px;background:#c0db8a;font-size:20px}
+body.mobile-ui .brand>span:not(.brand-mark),body.mobile-ui .lab-tag,body.mobile-ui .save-status{display:none}
+body.mobile-ui .project-title{flex:1;min-width:0;margin:0;gap:0}
+body.mobile-ui .project-title input{display:block;width:100%;max-width:none;min-width:0;min-height:44px;padding:6px 2px;font-size:16px;text-overflow:ellipsis}
+body.mobile-ui .app-actions{flex:0 0 auto;gap:0}
+body.mobile-ui .app-actions>.divider,body.mobile-ui #saveProject,body.mobile-ui #openProject{display:none}
+body.mobile-ui .app-actions .icon-button{font-size:25px}
+body.mobile-ui #openExport{min-height:44px;padding:9px 12px;margin-left:4px;font-size:12px;font-weight:700;gap:4px}
+body.mobile-ui #openExport>span{display:none}
+body.mobile-ui #mobileTopMore{display:grid;place-items:center;width:44px;min-width:44px;height:44px;padding:0;background:transparent;border:0;color:#dce0db}
+
+/* 세로 화면은 미리보기, 선택 작업, 타임라인 순서로 배치합니다. */
+body.mobile-ui #workbench{
+  height:calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - var(--mobile-dock-height));
+  min-height:0;display:grid;grid-template-columns:minmax(0,1fr);
+  grid-template-rows:minmax(0,1fr) 44px var(--mobile-timeline-height);
+  gap:0;background:var(--bg);overflow:hidden;
+}
+body.mobile-ui .tool-rail{display:none}
+body.mobile-ui .viewer{grid-column:1;grid-row:1;min-width:0;min-height:0;position:relative;background:#0c0e10;overflow:hidden}
+body.mobile-ui .viewer-heading{display:none}
+body.mobile-ui .viewer-stage{
+  flex:1;min-width:0;min-height:0;padding:8px 14px;display:flex;align-items:center;justify-content:center;
+  overflow:hidden;background:#0c0e10;touch-action:none;
+}
+body.mobile-ui .viewer-stage canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;box-shadow:0 0 0 1px #ffffff12}
+body.mobile-ui .viewer-stage:has(.monitor-tools:not([hidden])){padding-top:54px}
+body.mobile-ui .preview-label{display:none}
+body.mobile-ui .transport-bar{height:48px;min-height:48px;flex:0 0 48px;padding:0 8px;margin:0;gap:4px;border-top:1px solid #25292d;background:#141719}
+body.mobile-ui .timecode{font:12px/1.2 Consolas,monospace;letter-spacing:-.35px;min-width:94px}
+body.mobile-ui .timecode span{font-size:11px;color:var(--muted)}
+body.mobile-ui .play-controls{position:static;transform:none;display:flex;justify-content:center;gap:0;margin:0 auto}
+body.mobile-ui .play-controls .icon-button{width:44px;min-width:44px;flex-basis:44px;height:44px}
+body.mobile-ui .play-button{width:44px;height:44px;min-height:44px;display:grid;place-items:center;background:transparent}
+body.mobile-ui .viewer-options{gap:0;margin-left:0}
+body.mobile-ui .viewer-options #loop,body.mobile-ui .zoom-label{display:none}
+body.mobile-ui .monitor-tools{top:5px!important;left:50%!important;transform:translateX(-50%);max-width:calc(100% - 12px);padding:2px;gap:0;border-color:#434c40;border-radius:8px;background:#1b211df2;box-shadow:0 4px 16px #0004}
+body.mobile-ui .monitor-tools button{min-width:44px;min-height:44px;padding:7px 9px;font-size:12px}
+body.mobile-ui .monitor-tools .divider,body.mobile-ui #monitorSelectionCount{display:none}
+body.mobile-ui .monitor-handle:not(.rotate-handle){width:44px;height:44px;border:0;background:transparent;box-shadow:none;outline:none}
+body.mobile-ui .monitor-handle:not(.rotate-handle)::after{content:'';position:absolute;width:10px;height:10px;left:17px;top:17px;border:1px solid #1a2415;background:var(--accent);box-shadow:0 0 0 1px #bbdf7c77;border-radius:1px}
+body.mobile-ui .monitor-handle.crop-handle::after{width:14px;height:14px;left:15px;top:15px;background:#172310dd;border:2px solid var(--accent)}
+body.mobile-ui .monitor-handle:focus-visible::after{outline:2px solid #fff;outline-offset:2px}
+body.mobile-ui .monitor-handle.rotate-handle{width:44px;height:44px;border-width:1px;font-size:22px}
+body.mobile-ui .empty-preview{inset:8px;padding:12px;gap:6px}
+body.mobile-ui .empty-preview>span{font-size:10px;letter-spacing:2px}
+body.mobile-ui .empty-preview h2{font-size:19px}
+body.mobile-ui .empty-preview p{font-size:12px;line-height:1.5}
+body.mobile-ui .empty-preview .button{margin:0;min-height:44px}
+body.mobile-ui #loadDemo{font-size:12px}
+
+/* 선택한 클립의 작업 버튼은 미리보기 바로 아래에 모읍니다. */
+body.mobile-ui #mobileContextBar{
+  grid-column:1;grid-row:2;min-width:0;height:44px;display:flex;align-items:center;gap:2px;padding:0 8px;
+  border-top:1px solid #303539;border-bottom:1px solid #303539;background:#1a1e21;overflow:hidden;
+}
+body.mobile-ui .mobile-selection-name{flex:1;min-width:0;padding:0 6px 0 2px;font-size:12px;line-height:1.3;color:#c3cbc9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.mobile-ui #mobileContextBar button{display:flex;align-items:center;justify-content:center;gap:5px;flex:0 0 44px;min-width:44px;height:44px;padding:0 6px;background:transparent;border-radius:6px;color:#c6cece;font-size:11px}
+body.mobile-ui #mobileContextBar button[aria-pressed=true]{color:var(--accent);background:#2a3524}
+body.mobile-ui #mobileContextBar button:disabled{opacity:.28}
+body.mobile-ui #mobileContextBar .mobile-icon{width:20px;height:20px;flex-basis:20px}
+body.mobile-ui #mobileDelete{color:#d8a49c}
+body.mobile-ui #mobileContextBar button{flex-direction:column;gap:1px}
+body.mobile-ui #mobileContextBar button>span{font-size:9px;white-space:nowrap;line-height:12px}
+body.mobile-ui #mobileCloseMenu>span{display:none}
+
+/* 트랙 이름과 추가 버튼만 남겨 타임라인의 가로 작업 폭을 확보합니다. */
+body.mobile-ui .timeline-panel{grid-column:1;grid-row:3;display:flex;flex-direction:column;position:relative;min-width:0;min-height:0;height:auto;border-top:0;background:#15191c;overflow:hidden}
+body.mobile-ui #timelineResizer,body.mobile-ui .timeline-title,body.mobile-ui .edit-tools,body.mobile-ui .statusbar{display:none}
+body.mobile-ui .timeline-toolbar{height:44px;min-height:44px;flex:0 0 44px;display:flex;justify-content:flex-end;align-items:center;gap:0;padding:0 8px;background:#171b1e;border-bottom:1px solid #30373b}
+body.mobile-ui .timeline-zoom{width:100%;display:flex;align-items:center;justify-content:flex-end;gap:1px}
+body.mobile-ui .timeline-zoom #totalDuration{display:block;flex:1;padding-left:4px;color:#919ba0;font:11px Consolas,monospace}
+body.mobile-ui .timeline-zoom .icon-button{min-width:44px;width:44px;height:44px;flex-basis:44px;font-size:22px}
+body.mobile-ui .timeline-zoom input{display:block;width:88px;max-width:28vw;height:44px;min-height:44px;accent-color:var(--accent)}
+body.mobile-ui #fitTimeline{display:flex;min-width:48px;min-height:44px;padding:7px 9px;font-size:12px;color:#d1d8d5}
+body.mobile-ui .timeline-body{flex:1;min-width:0;min-height:0;display:flex;overflow:hidden}
+body.mobile-ui .track-heads{width:88px;min-width:88px;flex:0 0 88px;min-height:0;border-right:1px solid #373e42;background:#202529}
+body.mobile-ui .ruler-spacer{height:32px;min-height:32px;line-height:32px;padding:0 10px;font-size:11px;color:#9da7aa;border-bottom:1px solid #363d41}
+body.mobile-ui .ruler-spacer small{display:none}
+body.mobile-ui .track-head-viewport{min-height:0;overflow:hidden}
+body.mobile-ui #trackHeaders>.track-head,body.mobile-ui #timelineRows>.track{height:52px;min-height:52px;max-height:52px}
+body.mobile-ui #trackHeaders>.track-head{display:flex;align-items:center;gap:0;padding:0;border-bottom:1px solid #343b40}
+body.mobile-ui .track-head .track-selector{flex:0 0 44px;min-width:44px;max-width:44px;height:52px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;padding:4px 1px;background:transparent;border:0;border-radius:0}
+body.mobile-ui .track-head .track-selector.active{background:#303d29;color:var(--accent)}
+body.mobile-ui .track-selector .track-code{width:23px;min-width:23px;height:20px;padding:0;line-height:18px;font-size:11px;border-radius:4px}
+body.mobile-ui .track-selector strong{max-width:42px;font-size:10px;line-height:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.mobile-ui .track-selector small,body.mobile-ui .track-switches,body.mobile-ui .track-head .remove-track{display:none}
+body.mobile-ui .track-head>button.add-track{flex:0 0 44px;width:44px;min-width:44px;height:52px;min-height:44px;padding:0;background:transparent;color:#9fae9a;font-size:20px}
+body.mobile-ui #timelineScroll{min-width:0;min-height:0;flex:1;overflow:auto;overscroll-behavior:contain;scrollbar-width:none;touch-action:pan-x pan-y}
+body.mobile-ui #timelineScroll::-webkit-scrollbar{display:none}
+body.mobile-ui #timelineCanvas{min-height:100%;touch-action:none;-webkit-user-select:none;user-select:none}
+body.mobile-ui #ruler{height:32px;min-height:32px;background:#1a1f22;touch-action:none}
+body.mobile-ui .ruler-mark{height:11px}
+body.mobile-ui .ruler-mark span{font-size:10px;color:#9ca8ad;top:3px}
+body.mobile-ui #timelineRows>.track{background-color:#171d21;border-bottom:1px solid #2e363b}
+body.mobile-ui .timeline-block{top:5px;bottom:5px;border-radius:5px;touch-action:none;-webkit-touch-callout:none;user-select:none}
+body.mobile-ui .timeline-block.selected{border-color:#c4e28e;outline:1px solid #c4e28e;outline-offset:0;box-shadow:0 0 0 1px #151c12}
+body.mobile-ui .block-label{padding:0 17px;font-size:11px;line-height:40px}
+body.mobile-ui .audio-block .block-label,body.mobile-ui .video-block .block-label{line-height:16px}
+body.mobile-ui .block-grip,body.mobile-ui .short-block .block-grip{width:14px;touch-action:none}
+body.mobile-ui .timeline-block.selected .block-grip{background:#bddf8240}
+body.mobile-ui .clip-settings{display:none}
+body.mobile-ui .timeline-block.selected:not(.short-block) .clip-settings{display:flex;top:-1px;right:14px;height:44px;max-width:calc(100% - 28px);overflow:hidden;background:#172016ed;border-radius:0 4px 4px 0}
+body.mobile-ui .clip-settings button{display:grid;place-items:center;flex:0 0 44px;width:44px;height:44px;min-height:44px;padding:0}
+body.mobile-ui .timeline-gap{touch-action:none}
+body.mobile-ui .timeline-gap span{font-size:10px}
+body.mobile-ui .transition-chip{min-width:44px;width:44px;height:44px;padding:0}
+body.mobile-ui .playhead>span{width:18px;height:20px;left:-8px}
+body.mobile-ui #timelineNotice{min-height:22px;max-height:22px;flex:0 0 22px;padding:0 9px;font-size:10px;line-height:22px;text-overflow:ellipsis;white-space:nowrap}
+body.mobile-ui #timelineCanvas.mobile-touch-hold .timeline-block.selected{outline:2px solid var(--accent);outline-offset:1px}
+body.mobile-ui #timelineCanvas.mobile-touch-pan{cursor:grabbing}
+body.mobile-ui #timelineCanvas.mobile-touch-pinch .timeline-block{pointer-events:none}
+body.mobile-ui .timeline-insert-preview{padding:3px 5px;font-size:10px}
+body.mobile-ui .insertion-label{max-width:calc(100% - 8px);font-size:10px;padding:5px 7px}
+
+/* 하단 도구는 시트를 연 상태에서도 다른 항목으로 전환할 수 있습니다. */
+body.mobile-ui .mobile-dock{
+  position:fixed;z-index:100;left:0;right:0;bottom:var(--mobile-keyboard-inset,0px);height:var(--mobile-dock-height);
+  display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;
+  padding:4px max(6px,env(safe-area-inset-right,0px)) var(--mobile-safe-bottom) max(6px,env(safe-area-inset-left,0px));
+  border-top:1px solid #373d40;background:#1a1e21;
+}
+body.mobile-ui .mobile-nav-button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:0;min-height:56px;padding:5px 2px;border-radius:8px;background:transparent;color:#9ea8ab;font-size:11px;font-weight:500;line-height:1.2}
+body.mobile-ui .mobile-nav-button .mobile-icon{width:23px;height:23px}
+body.mobile-ui .mobile-nav-button[aria-pressed=true],body.mobile-ui .mobile-nav-button.active{color:var(--accent);background:#273124}
+body.mobile-ui .mobile-nav-button[aria-pressed=true]::before{content:'';position:absolute;top:0;width:18px;height:2px;border-radius:1px;background:var(--accent)}
+
+/* 라이브러리와 속성은 같은 하단 시트 위치를 공유합니다. */
+body.mobile-ui #mobileBackdrop{position:fixed;z-index:80;inset:var(--mobile-header-height) 0 calc(var(--mobile-dock-height) + var(--mobile-keyboard-inset,0px));width:auto;height:auto;padding:0;border:0;border-radius:0;background:#0005;backdrop-filter:none;touch-action:manipulation}
+body.mobile-ui #library,body.mobile-ui #inspector,body.mobile-ui #mobileMenu{
+  display:none;position:fixed;z-index:90;left:0;right:0;top:auto;bottom:calc(var(--mobile-dock-height) + var(--mobile-keyboard-inset,0px));width:100%;
+  height:min(58dvh,calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - var(--mobile-dock-height) - 20px));
+  min-height:0;max-height:78dvh;margin:0;padding:0;transform:none;visibility:visible;
+  flex-direction:column;overflow:hidden;border:1px solid #41484c;border-bottom:0;border-radius:18px 18px 0 0;
+  background:#1c2023;box-shadow:0 -16px 48px #0005;
+}
+body.mobile-ui[data-mobile-sheet=library] #library,body.mobile-ui[data-mobile-sheet=inspector] #inspector,body.mobile-ui[data-mobile-sheet=menu] #mobileMenu{display:flex}
+body.mobile-ui #library::before,body.mobile-ui #inspector::before,body.mobile-ui #mobileMenu::before{content:'';position:absolute;z-index:2;top:7px;left:50%;transform:translateX(-50%);width:32px;height:3px;border-radius:2px;background:#5d676b;pointer-events:none}
+body.mobile-ui .section-heading,body.mobile-ui .mobile-sheet-heading{display:flex;align-items:center;gap:8px;flex:0 0 62px;min-height:62px;padding:12px 16px 4px;border-bottom:1px solid #383f43;background:#202529}
+body.mobile-ui .section-heading h1,body.mobile-ui .section-heading h2,body.mobile-ui .mobile-sheet-heading h2{flex:1;min-width:0;font-size:16px;line-height:1.3;font-weight:650;letter-spacing:-.25px}
+body.mobile-ui .section-heading .small-tag{margin-left:auto;font-size:11px;background:#30383d;color:#aab8b5}
+body.mobile-ui .mobile-sheet-close{display:grid;place-items:center;width:44px;min-width:44px;height:44px;padding:0;flex:0 0 44px;border:0;border-radius:8px;background:transparent;color:#b8c1c2;font-size:25px}
+body.mobile-ui .library-content,body.mobile-ui .inspector-content,body.mobile-ui .mobile-menu-content{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:16px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px));-webkit-overflow-scrolling:touch;scroll-padding-top:12px;scroll-padding-bottom:24px}
+body.mobile-ui .library-footer{flex:0 0 auto;padding:10px 16px;font-size:11px;color:#959fa3;border-color:#333b40}
+body.mobile-ui .mobile-menu-section{margin:0 0 22px}
+body.mobile-ui .mobile-menu-section h3,body.mobile-ui .mobile-menu-heading{font-size:11px;line-height:1.4;font-weight:600;letter-spacing:.45px;color:#939fa2;margin:0 0 10px}
+body.mobile-ui .mobile-menu-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+body.mobile-ui .mobile-menu-item{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:10px;min-width:0;min-height:84px;padding:14px 12px;border:1px solid #3b4448;border-radius:10px;background:#252b2f;color:#e1e7e3;font-size:12px;text-align:left}
+body.mobile-ui .mobile-menu-item .mobile-icon{color:#bbccb4}
+body.mobile-ui .mobile-menu-item span{line-height:1.3}
+body.mobile-ui .mobile-menu-item small{font-size:10px;color:#94a0a4;line-height:1.4}
+body.mobile-ui .mobile-menu-list{display:flex;flex-direction:column;gap:5px}
+body.mobile-ui .mobile-menu-list .mobile-menu-item{min-height:52px;flex-direction:row;align-items:center;justify-content:flex-start}
+body.mobile-ui .mobile-track-list{display:flex;flex-direction:column;gap:8px}
+body.mobile-ui .mobile-track-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:9px 10px;margin-bottom:8px;border:1px solid #394247;border-radius:9px;background:#242b2f}
+body.mobile-ui .mobile-track-row strong{flex:1;min-width:50px;font-size:13px;line-height:1.4}
+body.mobile-ui .mobile-track-actions{display:flex;gap:3px;flex-wrap:wrap;max-width:100%}
+body.mobile-ui .mobile-track-actions button{display:grid;place-items:center;min-width:44px;min-height:44px;padding:7px;border:1px solid #424c51;border-radius:7px;background:#2b3338;color:#c9d1d0;font-size:11px}
+body.mobile-ui .mobile-track-actions button[aria-pressed=true]{background:#36432c;color:var(--accent);border-color:#718555}
+
+/* 입력 글씨를 16px로 유지해 모바일 브라우저의 불필요한 확대를 막습니다. */
+body.mobile-ui input:not([type=hidden]):not([type=range]):not([type=checkbox]):not([type=color]),body.mobile-ui select,body.mobile-ui textarea{min-height:44px;font-size:16px!important;line-height:1.4;border-color:#41494e;border-radius:7px;background:#171c20;padding:10px 12px}
+body.mobile-ui textarea{min-height:88px;resize:vertical}
+body.mobile-ui input[type=range]{height:44px;min-height:44px;padding:0;touch-action:pan-y}
+body.mobile-ui input[type=color]{min-width:44px;width:100%;height:44px;min-height:44px;padding:4px}
+body.mobile-ui input[type=checkbox]{width:22px;height:22px;flex:0 0 22px;margin:0}
+body.mobile-ui .field-label{display:block;margin-top:12px;font-size:13px;line-height:1.6;color:#b4c0c2}
+body.mobile-ui .check-label{display:flex;align-items:center;gap:10px;min-height:44px;font-size:13px}
+body.mobile-ui .property-row{display:grid;grid-template-columns:78px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:48px;margin-bottom:8px;font-size:13px}
+body.mobile-ui .property-row>span:first-child{width:auto;min-width:0;font-size:12px;color:#a9b5b8}
+body.mobile-ui .property-row input,body.mobile-ui .property-row select{min-width:0;width:100%}
+body.mobile-ui .property-row output{width:auto;min-width:42px;font:12px Consolas,monospace;text-align:right;color:#d8e1dc}
+body.mobile-ui .property-row select{grid-column:2/-1}
+body.mobile-ui .property-section{padding-bottom:18px;margin-bottom:18px;border-color:#394146}
+body.mobile-ui .property-section h3{font-size:13px;line-height:1.5;margin-bottom:12px;color:#e0e7e2}
+body.mobile-ui .property-section h3>span{font-size:10px;color:#839397}
+body.mobile-ui .field-grid{gap:12px}
+body.mobile-ui .note,body.mobile-ui .inspector-note{font-size:12px;line-height:1.7;color:#9eacaf;overflow-wrap:anywhere}
+body.mobile-ui .keyframe-actions{gap:7px}
+body.mobile-ui .keyframe-actions button{min-height:44px;min-width:44px}
+body.mobile-ui .keyframe-ruler{min-height:44px;margin:12px 0;touch-action:none}
+body.mobile-ui .keyframe-point{min-width:44px;min-height:44px;padding:0;touch-action:none}
+body.mobile-ui .keyframe-row{min-height:48px;gap:8px}
+body.mobile-ui .keyframe-row button{width:44px;min-width:44px;min-height:44px}
+body.mobile-ui .font-trigger{min-height:52px;padding:10px 12px;background:#232b2b}
+body.mobile-ui .font-trigger>span:first-child{font-size:19px}
+body.mobile-ui .font-popup{position:relative;width:100%;max-width:none;padding:8px;border-color:#465446}
+body.mobile-ui .font-search{min-height:44px;font-size:16px!important;padding:10px!important}
+body.mobile-ui .font-filters button{min-height:44px;font-size:12px}
+body.mobile-ui .font-options{max-height:30dvh;overscroll-behavior:contain}
+body.mobile-ui .font-option{min-height:68px}
+body.mobile-ui .font-option-name{font-size:21px}
+
+/* 라이브러리 파일과 프리셋은 손가락으로 선택할 수 있는 크기로 맞춥니다. */
+body.mobile-ui .import-zone{min-height:88px;padding:13px;border-color:#55624e;border-radius:10px;background:#252d23}
+body.mobile-ui .import-zone strong{font-size:14px}
+body.mobile-ui .import-zone .import-plus{font-size:25px;line-height:24px}
+body.mobile-ui .import-zone>span:not(.import-plus),body.mobile-ui .import-zone small{font-size:11px}
+body.mobile-ui .filter-tabs{gap:0;margin:14px 0 12px}
+body.mobile-ui .filter-tabs button{flex:1;min-height:44px;padding:8px 5px;font-size:13px}
+body.mobile-ui .search-box{padding:0 10px;border-radius:8px;margin-bottom:8px}
+body.mobile-ui .search-box input{background:transparent!important;border:0!important;padding-left:4px!important}
+body.mobile-ui .search-box kbd{display:none}
+body.mobile-ui .asset-tools{margin-bottom:12px}
+body.mobile-ui .asset-tools .button{min-height:44px;font-size:12px;padding:8px}
+body.mobile-ui .asset-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:17px 12px}
+body.mobile-ui .asset-image{height:116px;border-radius:8px;background:#2a3135}
+body.mobile-ui .asset-card{cursor:default;touch-action:pan-y;-webkit-touch-callout:none;user-select:none}
+body.mobile-ui .asset-card h3{font-size:12px;font-weight:550;margin-top:8px;line-height:1.5}
+body.mobile-ui .asset-card p{font-size:10px;margin-top:2px}
+body.mobile-ui .asset-actions{top:5px;right:5px;padding:2px;gap:2px;border-radius:7px;opacity:1;pointer-events:auto;transform:none;background:#101517ed}
+body.mobile-ui .asset-actions .asset-add,body.mobile-ui .asset-actions .asset-remove{width:44px;height:44px;min-width:44px;min-height:44px;padding:0;border-color:transparent;border-radius:5px;font-size:22px}
+body.mobile-ui .asset-duration,body.mobile-ui .asset-kind{font-size:10px}
+body.mobile-ui .library-hint{font-size:11px;line-height:1.65;margin-top:18px}
+body.mobile-ui .section-label{margin:18px 0 10px;font-size:12px}
+body.mobile-ui .preset-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 12px}
+body.mobile-ui .preset-art{min-height:110px;border-radius:8px}
+body.mobile-ui .preset-card strong,body.mobile-ui .preset-card h3{font-size:12px;margin-top:8px}
+body.mobile-ui .sound-card{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:10px;min-height:64px;padding:9px 0;border-bottom:1px solid #333d41}
+body.mobile-ui .sound-play,body.mobile-ui .sound-add{width:44px;height:44px;min-height:44px;border-radius:9px}
+body.mobile-ui .sound-card strong{font-size:13px;line-height:1.4}
+body.mobile-ui .sound-card small{font-size:11px}
+body.mobile-ui .sound-card>div{min-width:0}
+body.mobile-ui .sound-card strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+body.mobile-ui .quick-format-summary p{font-size:12px}
+body.mobile-ui .quick-format-toggle{font-size:13px;min-height:44px}
+body.mobile-ui .quick-format-preset{min-height:64px;padding:10px;grid-template-columns:28px minmax(0,1fr)}
+body.mobile-ui .quick-format-preset strong{font-size:12px}
+body.mobile-ui .quick-format-preset small{display:block;font-size:10px;line-height:1.4}
+body.mobile-ui .quick-copy-editor{padding:14px 12px;border-color:#3c4944;background:#202824}
+body.mobile-ui .quick-copy-editor h3{font-size:13px}
+body.mobile-ui .quick-color{font-size:11px;padding:8px 6px}
+body.mobile-ui .quick-video-ratio,body.mobile-ui .quick-video-ratio strong{font-size:11px}
+body.mobile-ui .quick-format-text{font-size:13px}
+body.mobile-ui .smart-card,body.mobile-ui .pc-voice-card{padding:15px;border-radius:10px;background:#242d25;border-color:#465141}
+body.mobile-ui .smart-card h3,body.mobile-ui .voice-panel h3{font-size:14px}
+body.mobile-ui .pc-voice-actions{gap:8px}
+body.mobile-ui .pc-voice-actions .button{min-height:48px;font-size:13px;padding:10px}
+body.mobile-ui .smart-details summary{min-height:44px;display:flex;align-items:center;font-size:13px}
+
+/* 대화상자는 화면 폭에 맞추고 긴 내용은 창 안에서 스크롤합니다. */
+body.mobile-ui dialog{width:calc(100% - 20px);max-width:600px;max-height:calc(var(--mobile-vh,100dvh) - var(--mobile-safe-top) - var(--mobile-safe-bottom) - 24px);padding:0;border:1px solid #475054;border-radius:16px;background:#202629;color:var(--text);overflow:auto;overscroll-behavior:contain}
+body.mobile-ui dialog::backdrop{background:#030506b8;backdrop-filter:blur(3px)}
+body.mobile-ui .modal-heading{position:sticky;top:0;z-index:2;min-height:64px;padding:14px 16px;background:#252c30;border-bottom:1px solid #3b454a;gap:10px}
+body.mobile-ui .modal-heading h2{font-size:17px;line-height:1.4}
+body.mobile-ui .modal-heading .eyebrow{font-size:10px}
+body.mobile-ui .modal-body,body.mobile-ui .smart-body{padding:16px;overflow-wrap:anywhere}
+body.mobile-ui .smart-body .property-row{grid-template-columns:78px minmax(0,1fr) auto;gap:8px}
+body.mobile-ui .smart-body .property-row>span:first-child{width:auto}
+body.mobile-ui .smart-body .property-row output{min-width:42px}
+body.mobile-ui .smart-result-actions{grid-template-columns:1fr;gap:6px}
+body.mobile-ui .smart-caption-review label{grid-template-columns:1fr;gap:4px}
+body.mobile-ui .smart-body video,body.mobile-ui .smart-body canvas,body.mobile-ui .smart-body audio{max-width:100%}
+body.mobile-ui .smart-rect-editor{max-height:36dvh;overflow:hidden}
+body.mobile-ui .timeline-menu{position:fixed;z-index:130;width:240px;max-width:calc(100vw - 24px);min-width:0;padding:7px;border-radius:10px;box-shadow:0 14px 48px #0008}
+body.mobile-ui .timeline-menu button{min-height:44px;padding:10px;font-size:13px}
+body.mobile-ui .timeline-menu button>small{display:none}
+body.mobile-ui .safe-area-panel{position:fixed;z-index:110;top:auto;bottom:calc(var(--mobile-dock-height) + 8px);left:10px;right:10px;width:auto;max-height:65dvh;padding:14px;overflow:auto;border-radius:12px;background:#222b28}
+body.mobile-ui .safe-panel-heading{min-height:44px}
+body.mobile-ui #toast{z-index:150;left:16px;right:16px;bottom:calc(var(--mobile-dock-height) + 12px);width:auto;max-width:none;transform:none;padding:12px 15px;font-size:13px;line-height:1.5;border-radius:10px;white-space:normal}
+body.mobile-ui .drop-overlay{z-index:160;inset:var(--mobile-header-height) 0 calc(var(--mobile-dock-height) + var(--mobile-keyboard-inset,0px));border-radius:0}
+
+/* 가로 화면에서는 좌우로 작업 공간을 나누고 시트 왼쪽에 미리보기를 남깁니다. */
+body.mobile-ui.mobile-landscape{--mobile-dock-height:calc(58px + var(--mobile-safe-bottom));--mobile-header-height:calc(48px + var(--mobile-safe-top))}
+body.mobile-ui.mobile-landscape #workbench{grid-template-columns:minmax(0,42fr) minmax(0,58fr);grid-template-rows:44px minmax(0,1fr)}
+body.mobile-ui.mobile-landscape .viewer{grid-column:1;grid-row:1/3;border-right:1px solid #343c40}
+body.mobile-ui.mobile-landscape #mobileContextBar{grid-column:2;grid-row:1;padding:0 5px}
+body.mobile-ui.mobile-landscape .timeline-panel{grid-column:2;grid-row:2}
+body.mobile-ui.mobile-landscape .viewer-stage{padding:6px 10px}
+body.mobile-ui.mobile-landscape .viewer-stage:has(.monitor-tools:not([hidden])){padding-top:50px}
+body.mobile-ui.mobile-landscape .monitor-tools button{padding:5px 7px;font-size:11px}
+body.mobile-ui.mobile-landscape .transport-bar{padding:0 3px}
+body.mobile-ui.mobile-landscape .timecode{min-width:76px;font-size:10px}
+body.mobile-ui.mobile-landscape .timecode span{font-size:10px}
+body.mobile-ui.mobile-landscape .play-controls .icon-button{width:44px;min-width:44px;flex-basis:44px}
+body.mobile-ui.mobile-landscape .viewer-options .icon-button{width:44px;min-width:44px;flex-basis:44px}
+body.mobile-ui.mobile-landscape .mobile-nav-button{min-height:48px;flex-direction:row;gap:8px;font-size:11px}
+body.mobile-ui.mobile-landscape .mobile-dock{padding-top:3px}
+body.mobile-ui.mobile-landscape #library,body.mobile-ui.mobile-landscape #inspector,body.mobile-ui.mobile-landscape #mobileMenu{left:42%;width:58%;right:0;bottom:calc(var(--mobile-dock-height) + var(--mobile-keyboard-inset,0px));height:calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - var(--mobile-dock-height));max-height:none;border-radius:14px 0 0 0}
+body.mobile-ui.mobile-landscape #mobileBackdrop{left:42%}
+body.mobile-ui.mobile-landscape .section-heading,body.mobile-ui.mobile-landscape .mobile-sheet-heading{flex-basis:54px;min-height:54px;padding-top:9px}
+body.mobile-ui.mobile-landscape .library-content,body.mobile-ui.mobile-landscape .inspector-content,body.mobile-ui.mobile-landscape .mobile-menu-content{padding:12px 14px 20px}
+body.mobile-ui.mobile-landscape .asset-image{height:94px}
+body.mobile-ui.mobile-landscape .mobile-menu-item{min-height:70px;padding:10px}
+body.mobile-ui.mobile-landscape .font-options{max-height:42dvh}
+
+@media(max-width:374px){
+  body.mobile-ui .brand{display:none}
+  body.mobile-ui #openExport{padding:8px;font-size:11px}
+  body.mobile-ui .appbar{gap:3px}
+  body.mobile-ui .timecode{min-width:83px;font-size:11px}
+  body.mobile-ui #mobileContextBar{padding:0 4px;gap:0}
+  body.mobile-ui .mobile-selection-name{font-size:11px}
+  body.mobile-ui .property-row{grid-template-columns:67px minmax(0,1fr) auto;gap:7px}
+  body.mobile-ui .mobile-menu-grid{gap:6px}
+  body.mobile-ui .mobile-menu-item{padding:10px 8px;font-size:11px}
+}
+@media(max-height:650px) and (orientation:portrait){
+  body.mobile-ui{--mobile-timeline-height:min(210px,34dvh);--mobile-dock-height:calc(64px + var(--mobile-safe-bottom))}
+  body.mobile-ui .mobile-nav-button{min-height:52px;gap:4px}
+  body.mobile-ui .empty-preview>span,body.mobile-ui .empty-preview p{display:none}
+}
+@media(max-width:700px) and (orientation:landscape){
+  body.mobile-ui.mobile-landscape .timecode{display:none}
+}
+@media(prefers-reduced-motion:reduce){
+  body.mobile-ui *,body.mobile-ui *::before,body.mobile-ui *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+}

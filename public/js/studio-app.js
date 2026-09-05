@@ -24,6 +24,7 @@ import {MonitorEditor} from './monitor-editor.js';
 import {KeyframeEditor} from './keyframe-editor.js';
 import {insertMediaAsset} from './media-insertion.js';
 import {QUICK_FORMAT_PRESETS,quickFormatState,applyQuickFormatPreset,setQuickFormatMargins,setQuickFormatEnabled,setQuickFormatText,setQuickFormatTextStyle} from './quick-format.js';
+import {MobileStudio} from './mobile-studio.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -31,7 +32,7 @@ const fmt=t=>`${Math.floor(t/60).toString().padStart(2,'0')}:${Math.floor(t%60).
 let selection=null,view='media',mediaFilter='all',search='',isDemo=false,engine=null,exportCtrl=null,importing=false,captionScope='selected',activeTransition='dissolve',draftTimer,toastTimer,dirty=false;
 let smartTools;
 let presetPreviewObserver,presetAnimation;
-let monitor,keyframeEditor,selectedItems=[],settingsClipboard=null;
+let monitor,keyframeEditor,mobileStudio,selectedItems=[],settingsClipboard=null;
 let quickFormatBefore=null;
 let safeConfig=safeAreaConfig('shorts'),safeEnabled=false,soundPreview=null,soundPreviewUrl=null,soundPreviewRequest=null;
 const libraryAssets=()=>[...assets.values()].filter(asset=>asset.libraryHidden!==true);
@@ -115,11 +116,13 @@ function updateToolbar(){
   $('rippleDeleteClip').disabled=!(editable||gap);
   $('copyClipSettings').disabled=!refs.length;$('pasteClipSettings').disabled=!refs.length||!settingsClipboard;
   $('selectionCount').textContent=refs.length>1?refs.length+'개 선택':'';
+  mobileStudio?.syncSelection();
 }
 function select(type,id,options={}){
   selection=type?{type,id,...(options.gap||{})}:null;selectedItems=selectionRefs(selection?[selection]:[]);player.selection=selection;if(options.timeline!==false)timeline.select(type,id);
   renderInspector();player.invalidate();keyframeEditor?.update();if(view==='media')document.querySelectorAll('[data-asset]').forEach(n=>n.classList.toggle('selected',type==='asset'&&n.dataset.asset===id));if(['captions','transitions','mosaic','silence'].includes(view))renderLibrary();
   updateToolbar();if(window.innerWidth<651)$('workbench').classList.remove('show-library');
+  mobileStudio?.onSelection(type);
 }
 function selectMany(refs,primary,options={}){
   selectedItems=selectionRefs(refs);selection=selectedItems.find(ref=>primary&&selectionKey(ref)===selectionKey(primary))||selectedItems.at(-1)||null;
@@ -208,6 +211,8 @@ let expandedFrom=null;
 const workbenchHeight=()=>$('workbench')?.getBoundingClientRect().height||0;
 const currentTimelineHeight=()=>Math.round($('timelineScroll')?.closest('.timeline-panel')?.getBoundingClientRect().height||0);
 function applyTimelineHeight(height,{store=true}={}){
+  // 모바일 화면의 높이는 별도로 배분하며 PC에서 저장한 모니터 크기는 보존합니다.
+  if(mobileStudio?.active||document.body.classList.contains('mobile-ui'))return null;
   const next=clampTimelineHeight(height,workbenchHeight());
   if(next===null)return null;
   document.documentElement.style.setProperty('--timeline-h',next+'px');
@@ -235,7 +240,7 @@ function setupLayout(){
   const bar=$('timelineResizer');
   $('expandMonitor').onclick=()=>setExpanded(!expandedFrom);
   bar.addEventListener('pointerdown',event=>{
-    if(event.button!==0||timeline.dragging)return;
+    if(event.button!==0||timeline.dragging||mobileStudio?.active)return;
     event.preventDefault();
     // 포인터 캡처는 브라우저에 따라 거절될 수 있습니다. 실패해도 끌기는 이어져야 합니다.
     try{bar.setPointerCapture(event.pointerId);}catch{}
@@ -273,6 +278,7 @@ function setView(next){
   view=next;renderLibrary();
   document.querySelectorAll('.rail-item[data-view]').forEach(b=>{b.classList.toggle('active',b.dataset.view===view);b.setAttribute('aria-pressed',b.dataset.view===view);});
   if(window.innerWidth<=650){$('workbench').classList.add('show-library');$('workbench').classList.remove('show-inspector');}
+  mobileStudio?.onViewChange();
 }
 
 function quickFormatMarkup(){
@@ -943,7 +949,7 @@ function wire(){
   $('projectName').onchange=e=>edit('프로젝트 이름 변경',()=>setDocumentName(e.target.value));
   $('openExport').onclick=openExport;$('startExport').onclick=startExport;$('cancelExport').onclick=()=>exportCtrl?.abort();
   $('exportDialog').addEventListener('cancel',e=>{if(exportCtrl)e.preventDefault();});
-  $('helpButton').onclick=()=>smartTools.pcHelp.show();$('toggleInspector').onclick=()=>{$('workbench').classList.toggle('show-inspector');$('workbench').classList.remove('show-library');};
+  $('helpButton').onclick=()=>smartTools.pcHelp.show();$('toggleInspector').onclick=()=>{if(mobileStudio?.active)return mobileStudio.openSheet('inspector');$('workbench').classList.toggle('show-inspector');$('workbench').classList.remove('show-library');};
   $('emptyImport').onclick=pickMedia;$('loadDemo').onclick=()=>loadDemo().then(scheduleDraft).catch(e=>toast(e.message));
   $('resetDemo').onclick=()=>{if(totalDuration()>0&&!confirm('현재 편집을 샘플 프로젝트로 바꿀까요? 필요한 작업은 먼저 저장해 주세요.'))return;$('helpDialog').close();loadDemo().then(scheduleDraft).catch(e=>toast(e.message));};
   $('newProject').onclick=()=>{if(totalDuration()>0&&!confirm('편집 타임라인을 비울까요? 현재 라이브러리는 유지합니다.'))return;edit('빈 프로젝트 시작',()=>{project.clips=[];project.overlays=[];project.captions=[];project.audio.tracks=[];project.timelineTracks=undefined;project.template.mode='none';selectedItems=[];selection=null;setDocumentName('새 프로젝트');isDemo=false;});$('helpDialog').close();};
@@ -1015,7 +1021,15 @@ function wire(){
 }
 
 async function init(){
-  wire();setupLayout();
+  wire();
+  mobileStudio=new MobileStudio({timeline,setView,view:()=>view,pause:()=>player.pause(),
+    busy:()=>!!(exportCtrl||importing||smartTools.busy||monitor?.dragging||keyframeEditor?.dragging),
+    selection:()=>{const item=selected(),refs=editingSelection();return {count:refs.length,editable:!!item&&!['asset','gap'].includes(selection?.type),name:selection?.type==='gap'?'빈 공간':item?.name||item?.text||assets.get(item?.assetId)?.name||({clip:'영상',caption:'자막',graphic:'그래픽',audio:'오디오',transition:'장면 전환'}[selection?.type])};},
+    tracks:()=>timelineTracks().map(track=>({...track,label:trackLabel(track.id),active:timeline.activeHeaderId===track.id})),
+    trackAction:(id,action)=>{if(action==='select')timeline.activateTrack(id);else if(action==='add')addTrackByRole(null,id);else if(action==='remove')edit('빈 트랙 삭제',()=>removeTimelineTrack(id));else toggleTrackSwitch(id,action);},
+    layout:mobile=>{if(!mobile){let saved=null;try{saved=localStorage.getItem(STORAGE_KEY);}catch{}const height=readStoredHeight(saved,workbenchHeight());if(height)applyTimelineHeight(height,{store:false});}if(!timeline.dragging&&!monitor?.dragging){timeline.render();player.invalidate();}},
+  });
+  setupLayout();
   engine=await detectEngine();$('engineLabel').textContent=engine.label;
   try{if(new URLSearchParams(location.search).has('empty')){setDocumentName('새 프로젝트');refresh();}else if(await loadDraft()){selectedItems=[];selection=null;refresh();$('saveStatus').textContent='저장된 작업 복구';}else await loadDemo();}
   catch(e){console.warn('초기 프로젝트 로딩 실패',e);try{await loadDemo();}catch{refresh();toast('샘플을 불러오지 못했어요. 파일 가져오기로 시작해 주세요.');}}

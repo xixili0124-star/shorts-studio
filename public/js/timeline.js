@@ -8,6 +8,7 @@ import { clamp } from './util.js';
 import { selectionKey, selectionRefs, combineSelection, marqueeHits, planBatchMove, applyBatchMove } from './batch-edits.js';
 import { expandLinked, linkedRefs, activeLinkIds } from './link-groups.js';
 import { uncertainMosaicRanges } from './mosaic.js';
+import { MobileTimelineGestures } from './mobile-timeline-gestures.js';
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -38,13 +39,15 @@ export class Timeline {
     this.activeRoleTracks=Object.fromEntries(TRACK_ROLES.map(role=>[role.id,timelineTracks().find(t=>t.role===role.id)?.id]));
     this.activeHeaderId='v1';
     this.scroll=$('timelineScroll');this.canvas=$('timelineCanvas');this.external=null;this.preview=null;
+    this.mobileMultiSelect=false;this.mobileGestures=new MobileTimelineGestures(this);
     $('timelineZoom').oninput=e=>this.setZoom(Number(e.target.value));
     $('zoomIn').onclick=()=>this.setZoom(this.zoom*1.25);
     $('zoomOut').onclick=()=>this.setZoom(this.zoom/1.25);
     $('fitTimeline').onclick=()=>this.fit();$('snap').onclick=()=>this.toggleSnap();
     this.canvas.addEventListener('pointerdown',e=>this.pointerDown(e));
-    this.canvas.addEventListener('contextmenu',e=>this.openMenu(e));
+    this.canvas.addEventListener('contextmenu',e=>{if(this.mobileGestures.consumeContextMenu(e)){e.preventDefault();return;}this.openMenu(e);});
     this.canvas.addEventListener('click',e=>{
+      if(this.mobileGestures.consumeClick(e)){e.preventDefault();e.stopPropagation();return;}
       const warn=e.target.closest('[data-mosaic-warn]');
       if(warn){
         e.preventDefault();e.stopPropagation();
@@ -416,13 +419,15 @@ export class Timeline {
     const move=e=>{if(e.pointerId!==pointer)return;last=e;update();this.trackScroll(e,update);};
     const finish=cancel=>{
       if(done)return;done=true;node.removeEventListener('pointermove',move);node.removeEventListener('pointerup',up);node.removeEventListener('pointercancel',cancelPointer);node.removeEventListener('lostpointercapture',cancelPointer);window.removeEventListener('keydown',escape);window.removeEventListener('blur',abort);
+      if(this.cancelPointerDrag===abort){this.cancelPointerDrag=null;this.movePointerDrag=null;}
       this.stopScroll();this.clearPreview();this.dragging=false;this.canvas.classList.remove('is-dragging');
       if(node.hasPointerCapture(pointer))node.releasePointerCapture(pointer);
       try{if(!cancel&&changed&&pending){if(applyBatchMove(pending))this.callbacks.commit(before,linkedMove?'연결 클립 함께 이동':'선택 클립 함께 이동');}}
       catch(error){this.callbacks.error?.(error.message);}
-      this.render();
+      if(this.canvas.isConnected!==false)this.render();
     };
     const up=e=>{if(e.pointerId===pointer)finish(false);},cancelPointer=e=>{if(e.pointerId===pointer)finish(true);},abort=()=>finish(true),escape=e=>{if(e.key==='Escape'){e.preventDefault();finish(true);}};
+    this.cancelPointerDrag=abort;this.movePointerDrag=move;
     node.addEventListener('pointermove',move);node.addEventListener('pointerup',up);node.addEventListener('pointercancel',cancelPointer);node.addEventListener('lostpointercapture',cancelPointer);window.addEventListener('keydown',escape);window.addEventListener('blur',abort);
   }
   /**
@@ -492,7 +497,47 @@ export class Timeline {
     this.menu=state;buttons()[0]?.focus({preventScroll:true});
   }
   closeMenu(){this.menu?.close(false);}
-  pointerDown(event){
+  cancelMobileGestures(){this.mobileGestures?.reset();}
+  destroyMobileGestures(){this.mobileGestures?.destroy();}
+  /** 눌렀던 클립이 다시 그려져도 현재 DOM에서 같은 항목과 손잡이를 찾습니다. */
+  mobileTouchEvent(event){
+    const hit=event.target.closest('.timeline-block,.timeline-gap,.transition-chip');
+    let target=event.target;
+    if(hit){
+      target=[...this.canvas.querySelectorAll('.timeline-block,.timeline-gap,.transition-chip')].find(node=>node.dataset.type===hit.dataset.type&&node.dataset.id===hit.dataset.id&&node.dataset.right===hit.dataset.right);
+      if(!target)return null;
+      for(const [selector,key] of [['[data-edge]','edge'],['[data-clip-setting]','clipSetting'],['[data-mosaic-warn]','mosaicWarn']]){
+        const child=event.target.closest(selector);
+        if(child){target=[...target.querySelectorAll(selector)].find(node=>node.dataset[key]===child.dataset[key])||target;break;}
+      }
+    }else if(target.isConnected===false)target=this.canvas;
+    return {target,button:0,isPrimary:true,pointerType:'touch',pointerId:event.pointerId,clientX:event.clientX,clientY:event.clientY,
+      ctrlKey:false,metaKey:false,shiftKey:false,preventDefault:()=>event.preventDefault(),stopPropagation:()=>event.stopPropagation()};
+  }
+  mobileTap(event){
+    if(this.callbacks.busy?.()||this.dragging)return;
+    if(/INPUT|TEXTAREA|SELECT/.test(document.activeElement?.tagName))document.activeElement.blur();
+    event=this.mobileTouchEvent(event);if(!event)return;
+    const action=event.target.closest('[data-clip-setting],[data-mosaic-warn]');
+    if(action){action.click();return;}
+    const hit=event.target.closest('.timeline-block,.timeline-gap,.transition-chip');
+    if(hit?.dataset.type==='transition'){this.callbacks.transition(hit.dataset.id,hit.dataset.right);return;}
+    if(hit?.dataset.type==='gap'){this.chooseGap(hit.dataset.id);return;}
+    this.callbacks.pause();
+    if(!hit){
+      const row=event.target.closest('.track');if(row)this.activateTrack(row.dataset.track);
+      if(!this.mobileMultiSelect){this.selectMany([],null);this.callbacks.selectMany?.([],null);}
+      this.callbacks.seek(frameTime(this.xTime(event.clientX)));return;
+    }
+    const ref={type:hit.dataset.type,id:hit.dataset.id},range=itemRange(ref.type,ref.id);
+    if(!range||this.refuseLocked(range.trackId))return;
+    if(this.mobileMultiSelect){this.selectMany(combineSelection(this.selections,[ref],'toggle'),ref);this.callbacks.selectMany?.(this.explicit,this.selection);}
+    else{this.select(ref.type,ref.id);this.callbacks.select(ref.type,ref.id);}
+  }
+  pointerDown(event,mobileHandoff=false){
+    if(!mobileHandoff&&this.mobileGestures?.pointerDown(event))return;
+    // 모바일의 명시적 선택 모드는 연결한 마우스나 펜으로도 같은 동작을 합니다.
+    if(!mobileHandoff&&this.mobileMultiSelect&&document.body.classList.contains('mobile-ui')&&event.button===0&&event.target.closest('.timeline-block')&&!event.target.closest('[data-edge],[data-clip-setting],[data-mosaic-warn]')){event.preventDefault();this.mobileTap(event);return;}
     if(event.button!==0||this.dragging||this.callbacks.busy?.()||event.isPrimary===false)return;
     if(event.target.closest('[data-clip-setting],[data-mosaic-warn]'))return;
     const hit=event.target.closest('.timeline-block,.timeline-gap,.transition-chip');
@@ -557,6 +602,7 @@ export class Timeline {
     const finish=cancel=>{
       if(done)return;done=true;
       node.removeEventListener('pointermove',move);node.removeEventListener('pointerup',up);node.removeEventListener('pointercancel',cancelPointer);node.removeEventListener('lostpointercapture',cancelPointer);window.removeEventListener('keydown',escape);window.removeEventListener('blur',abort);
+      if(this.cancelPointerDrag===abort){this.cancelPointerDrag=null;this.movePointerDrag=null;}
       this.stopScroll();this.clearPreview();this.dragging=false;this.canvas.classList.remove('is-dragging');
       if(node.hasPointerCapture(event.pointerId))node.releasePointerCapture(event.pointerId);
       if(!cancel&&changed&&pending&&!pending.noop){
@@ -567,9 +613,10 @@ export class Timeline {
           syncAnchoredItems();this.callbacks.commit(before,edge?(pending.linked?'연결 클립 구간 조절':'클립 구간 조절'):pending.swap?'클립 자리 교환':'클립 위치 이동');
           this.reveal({type,id,trackId:pending.trackId,start:pending.start,end:pending.end,mode:pending.mode});
         }catch(error){this.callbacks.error?.(error.message);this.render();}
-      }else this.render();
+      }else if(this.canvas.isConnected!==false)this.render();
     };
     const up=e=>{if(e.pointerId===event.pointerId)finish(false);},cancelPointer=e=>{if(e.pointerId===event.pointerId)finish(true);},abort=()=>finish(true),escape=e=>{if(e.key==='Escape'){e.preventDefault();finish(true);}};
+    this.cancelPointerDrag=abort;this.movePointerDrag=move;
     node.addEventListener('pointermove',move);node.addEventListener('pointerup',up);node.addEventListener('pointercancel',cancelPointer);node.addEventListener('lostpointercapture',cancelPointer);window.addEventListener('keydown',escape);window.addEventListener('blur',abort);
   }
 }

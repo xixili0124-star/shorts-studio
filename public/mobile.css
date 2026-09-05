@@ -6,7 +6,7 @@ body.mobile-ui{
   --bg:#101112;--surface:#17191b;--surface-2:#1e2023;--surface-3:#282b2f;--line:#2b2e31;
   --text:#eceeed;--muted:#92989b;--faint:#666d72;--accent:#b8ee63;--accent-dark:#23341b;
   --violet:#baadf7;--blue:#9fc5ff;--mint:#78cdb7;--orange:#f3c995;
-  --mobile-header-height:56px;--mobile-deck-height:232px;--mobile-dock-height:88px;
+  --mobile-header-height:56px;--mobile-deck-height:328px;--mobile-track-height:48px;--mobile-dock-height:88px;
   --mobile-panel-height:min(62dvh,calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - 12px));
   color-scheme:dark;min-width:0;width:100%;height:var(--mobile-vh,100dvh);overflow:hidden;
   background:var(--bg);color:var(--text);font-size:14px;overscroll-behavior:none;
@@ -14,11 +14,9 @@ body.mobile-ui{
 body.mobile-ui .appbar,body.mobile-ui #workbench{display:none}
 body.mobile-ui #mobileStudioShell{
   display:grid;grid-template-columns:minmax(0,1fr);
-  grid-template-rows:calc(var(--mobile-header-height) + env(safe-area-inset-top,0px)) minmax(140px,1fr) var(--mobile-deck-height) calc(var(--mobile-dock-height) + env(safe-area-inset-bottom,0px));
+  grid-template-rows:calc(var(--mobile-header-height) + env(safe-area-inset-top,0px)) minmax(0,1fr) var(--mobile-deck-height) calc(var(--mobile-dock-height) + env(safe-area-inset-bottom,0px));
   width:100%;height:var(--mobile-vh,100dvh);min-width:0;overflow:hidden;background:var(--bg);
 }
-body.mobile-ui[data-mobile-timeline="all"]{--mobile-deck-height:320px}
-body.mobile-ui #mobileStudioShell:has(.timeline-panel[data-mobile-track-view="all"]){--mobile-deck-height:320px}
 body.mobile-ui .mobile-icon{display:block;width:24px;height:24px;flex:0 0 24px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 body.mobile-ui button{touch-action:manipulation}
 body.mobile-ui button:focus-visible,body.mobile-ui a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
@@ -64,39 +62,30 @@ body.mobile-ui .monitor-handle.rotate-handle{width:44px;height:44px;border:8px s
 body.mobile-ui .monitor-handle:hover,body.mobile-ui .monitor-handle:focus-visible{background-color:#efffd9;outline:0}
 body.mobile-ui .monitor-handle:focus-visible::after{content:'';position:absolute;inset:-3px;border:2px solid #fff;border-radius:3px;pointer-events:none}
 
-/* 트랙 탭 하나와 크게 보이는 필름 한 줄이 기본 편집 화면입니다. */
+/* 기본 다섯 트랙을 한눈에 보고 추가한 트랙은 두 손가락으로 스크롤합니다. */
 body.mobile-ui #mobileEditDeck{grid-column:1;grid-row:3;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:var(--bg);border-top:1px solid #3c4243}
 body.mobile-ui .mobile-edit-heading{display:flex;align-items:center;flex:0 0 44px;min-width:0;gap:2px;padding:0 8px 0 16px}
 body.mobile-ui .mobile-edit-heading>strong,body.mobile-ui .mobile-edit-heading>span,body.mobile-ui .mobile-edit-heading>h2{font-size:13px;font-weight:700;white-space:nowrap;margin-right:auto}
 body.mobile-ui .mobile-history{display:flex;align-items:center;flex:0 0 auto}
-body.mobile-ui #mobileOverview{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:44px;padding:0 10px;background:transparent;color:var(--muted);font-size:12px;font-weight:500;white-space:nowrap;border-radius:6px}
-body.mobile-ui #mobileOverview .mobile-icon{width:18px;height:18px;flex-basis:18px}
-body.mobile-ui #mobileOverview[aria-pressed="true"]{color:var(--accent)}
 body.mobile-ui #mobileUndo,body.mobile-ui #mobileRedo{color:var(--muted)}
 body.mobile-ui #mobileUndo .mobile-icon,body.mobile-ui #mobileRedo .mobile-icon{width:20px;height:20px}
-body.mobile-ui #mobileLayerBar{display:flex;align-items:center;gap:6px;flex:0 0 44px;min-width:0;padding:0 12px 4px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain}
-body.mobile-ui #mobileLayerBar::-webkit-scrollbar{display:none}
-body.mobile-ui .mobile-layer-chip{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;min-height:40px;padding:0 14px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--muted);font-size:12px;font-weight:550;white-space:nowrap}
-body.mobile-ui .mobile-layer-chip .mobile-icon{width:17px;height:17px;flex-basis:17px}
-body.mobile-ui .mobile-layer-chip[aria-pressed="true"],body.mobile-ui .mobile-layer-chip.active{border-color:#3c4243;background:var(--surface);color:var(--text);box-shadow:0 1px 2px #0004}
-body.mobile-ui .mobile-layer-chip small{font-size:11px;color:var(--faint)}
 body.mobile-ui #mobileTrackManager{display:flex;align-items:center;justify-content:center;flex:0 0 44px;min-width:44px;min-height:44px;padding:0;background:transparent;color:var(--muted);border:0;border-radius:6px}
 body.mobile-ui #mobileTimelineHost{display:flex;flex:1;min-width:0;min-height:0;overflow:hidden}
 body.mobile-ui #mobileEditDeck .timeline-panel{position:relative;grid-area:auto;display:flex;flex:1;min-height:0;min-width:0;overflow:hidden;background:var(--bg);border:0}
 body.mobile-ui #mobileEditDeck .timeline-toolbar,body.mobile-ui #mobileEditDeck .statusbar,body.mobile-ui #mobileEditDeck .timeline-resizer{display:none}
 body.mobile-ui #mobileEditDeck .timeline-body{flex:1;min-height:0;min-width:0;overflow:hidden;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-body.mobile-ui #mobileEditDeck .timeline-scroll{flex:1;min-width:0;min-height:0;background:#141618;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#42494d transparent;touch-action:pan-x pan-y}
+body.mobile-ui #mobileEditDeck .timeline-scroll{flex:1;min-width:0;min-height:0;background:#141618;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#42494d transparent;touch-action:none}
 body.mobile-ui #mobileEditDeck .timeline-canvas{min-height:100%;background:#141618;touch-action:none;outline-offset:-2px}
 body.mobile-ui #mobileEditDeck .ruler,body.mobile-ui #mobileEditDeck .ruler-spacer{height:26px;min-height:26px;flex:0 0 26px;background:var(--bg);border-bottom:1px solid #3c4243}
 body.mobile-ui #mobileEditDeck .ruler-mark{background:#33383a}
 body.mobile-ui #mobileEditDeck .ruler-mark>span{top:6px;left:7px;font:10px Consolas,monospace;color:var(--muted)}
 body.mobile-ui #mobileEditDeck .ruler-mark.minor{height:4px;top:21px;background:#3d4245}
-body.mobile-ui #mobileEditDeck .track-heads{width:44px;flex:0 0 44px;min-height:0;background:var(--bg);border-right:1px solid #3c4243}
+body.mobile-ui #mobileEditDeck .track-heads{width:60px;flex:0 0 60px;min-height:0;background:var(--bg);border-right:1px solid #3c4243}
 body.mobile-ui #mobileEditDeck .ruler-spacer{font-size:0;padding:0}
 body.mobile-ui #mobileEditDeck .ruler-spacer small{display:none}
-body.mobile-ui #mobileEditDeck #trackHeaders>.track-head,body.mobile-ui #mobileEditDeck #timelineRows>.track{height:52px;min-height:52px;border-bottom:1px solid #3c4243;background:transparent;padding:0}
+body.mobile-ui #mobileEditDeck #trackHeaders>.track-head,body.mobile-ui #mobileEditDeck #timelineRows>.track{height:var(--mobile-track-height);min-height:var(--mobile-track-height);border-bottom:1px solid #3c4243;background:transparent;padding:0}
 body.mobile-ui #mobileEditDeck .track-head{gap:0;justify-content:center}
-body.mobile-ui #mobileEditDeck .track-selector{height:100%;min-height:44px;min-width:0;width:44px;flex:1;justify-content:center;padding:0;gap:0;color:var(--muted);background:transparent}
+body.mobile-ui #mobileEditDeck .track-selector{height:100%;min-height:0;min-width:0;width:60px;flex:1;justify-content:center;padding:0;gap:0;color:var(--muted);background:transparent}
 body.mobile-ui #mobileEditDeck .track-code{display:grid;place-items:center;width:30px;height:30px;min-width:0;padding:0;border:0;border-radius:5px;color:var(--muted);background:transparent;font:600 10px Consolas,monospace}
 body.mobile-ui #mobileEditDeck .track-head.active .track-code,body.mobile-ui #mobileEditDeck .track-selector[aria-pressed="true"] .track-code{background:var(--surface);color:var(--text)}
 body.mobile-ui #mobileEditDeck .graphic-head .track-code{color:var(--violet)}
@@ -104,11 +93,7 @@ body.mobile-ui #mobileEditDeck .caption-head .track-code{color:var(--orange)}
 body.mobile-ui #mobileEditDeck .video-head .track-code{color:var(--blue)}
 body.mobile-ui #mobileEditDeck .audio-head .track-code{color:var(--mint)}
 body.mobile-ui #mobileEditDeck .voice-head .track-code{color:#9fd5e1}
-body.mobile-ui #mobileEditDeck .track-selector strong,body.mobile-ui #mobileEditDeck .track-selector small,body.mobile-ui #mobileEditDeck .track-switches,body.mobile-ui #mobileEditDeck .add-track,body.mobile-ui #mobileEditDeck .remove-track,body.mobile-ui #mobileEditDeck .track-count{display:none}
-body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] .track-heads{display:none}
-body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] .timeline-canvas{display:flex;flex-direction:column;height:100%;min-height:100%}
-body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] #timelineRows{flex:1;min-height:78px}
-body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] #timelineRows>.track{height:100%;min-height:78px}
+body.mobile-ui #mobileEditDeck .track-selector small,body.mobile-ui #mobileEditDeck .track-switches,body.mobile-ui #mobileEditDeck .add-track,body.mobile-ui #mobileEditDeck .remove-track,body.mobile-ui #mobileEditDeck .track-count{display:none}
 body.mobile-ui #mobileEditDeck .track[data-mobile-visible="false"],body.mobile-ui #mobileEditDeck .track-head[data-mobile-visible="false"]{display:none}
 body.mobile-ui #mobileEditDeck .timeline-block{top:5px;height:calc(100% - 10px);border:1px solid #635b7c;border-radius:5px;background:#3d3656;color:#d9cef4;min-width:12px;box-shadow:none;touch-action:none}
 body.mobile-ui #mobileEditDeck .timeline-block.timeline-overview-block{min-width:0;border-radius:1px}
@@ -124,13 +109,13 @@ body.mobile-ui #mobileEditDeck .timeline-block.selected{outline:2px solid var(--
 body.mobile-ui #mobileEditDeck .waveform i{background:#81b8a3;opacity:.7}
 body.mobile-ui #mobileEditDeck .voice-track .waveform i{background:#96c8d4}
 body.mobile-ui #mobileEditDeck .clip-settings,body.mobile-ui #mobileEditDeck .timeline-block .clip-actions{display:none}
-body.mobile-ui #mobileEditDeck .block-grip{width:14px;background:#b8ee634d;opacity:0;touch-action:none}
-body.mobile-ui #mobileEditDeck .timeline-block.selected .block-grip{opacity:1}
-body.mobile-ui #mobileEditDeck .block-grip::after{content:'';position:absolute;left:6px;top:calc(50% - 9px);width:2px;height:18px;background:#e8efdf;border-radius:1px}
+body.mobile-ui #mobileEditDeck .block-grip{pointer-events:none;width:18px;background:#b8ee634d;opacity:0;touch-action:none}
+body.mobile-ui #mobileEditDeck .timeline-block.selected .block-grip{opacity:1;pointer-events:auto}
+body.mobile-ui #mobileEditDeck .block-grip::after{content:'';position:absolute;left:8px;top:calc(50% - 9px);width:2px;height:18px;background:#e8efdf;border-radius:1px}
 body.mobile-ui #mobileEditDeck .timeline-overview-block .block-grip{display:none}
 body.mobile-ui #mobileEditDeck .playhead{width:1px;background:#e8efdf;box-shadow:none}
 body.mobile-ui #mobileEditDeck .playhead>span{width:10px;height:13px;left:-4px;background:var(--accent)}
-body.mobile-ui #mobileEditDeck .transition-chip{min-width:28px;width:28px;height:34px;top:calc(50% - 17px);background:#252b2ef2;color:var(--muted);border:1px solid #3c4243;border-radius:5px;font-size:15px}
+body.mobile-ui #mobileEditDeck .transition-chip{min-width:28px;width:28px;height:34px;top:50%;background:#252b2ef2;color:var(--muted);border:1px solid #3c4243;border-radius:5px;font-size:15px}
 body.mobile-ui #mobileEditDeck .transition-chip.selected{border-color:var(--accent);outline:2px solid var(--accent);color:var(--accent)}
 body.mobile-ui #mobileEditDeck .track.drop-target{background:#b8ee6312;box-shadow:inset 0 0 0 1px #b8ee6377}
 body.mobile-ui #mobileEditDeck .timeline-gap:hover{border-color:#3c4243;color:var(--muted);background:#d5e8eb06}
@@ -144,11 +129,12 @@ body.mobile-ui #mobileEditDeck #timelineCanvas.mobile-touch-pan,body.mobile-ui #
 
 /* 도구는 한 줄만 두고 클립을 고르면 같은 줄에서 편집 동작을 고릅니다. */
 body.mobile-ui #mobileActionDock{grid-column:1;grid-row:4;display:flex;align-items:stretch;gap:0;min-width:0;min-height:0;padding:7px max(8px,env(safe-area-inset-right,0px)) calc(9px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));background:var(--surface);border-top:1px solid var(--line);overflow:hidden}
-body.mobile-ui #mobileActionDock>button,body.mobile-ui #mobileActionDock .mobile-action-button{display:flex;flex:1 1 0;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:6px 3px;border-radius:8px;background:transparent;color:var(--text);font-size:12px;font-weight:500;line-height:1.2;white-space:nowrap}
+body.mobile-ui #mobileActionDock>button,body.mobile-ui #mobileActionDock .mobile-action-button{display:flex;flex:1 1 0;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:6px 3px;border-radius:0;background:transparent;color:var(--text);font-size:12px;font-weight:500;line-height:1.2;white-space:nowrap}
 body.mobile-ui #mobileActionDock .mobile-action-button[aria-pressed="true"]{color:var(--accent);background:var(--accent-dark)}
-body.mobile-ui #mobileActionDock .mobile-action-scroll{display:flex;flex:1;min-width:0;gap:3px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain}
+body.mobile-ui #mobileActionDock .mobile-action-scroll{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);flex:1;min-width:0;gap:0;overflow-x:hidden;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain}
 body.mobile-ui #mobileActionDock .mobile-action-scroll::-webkit-scrollbar{display:none}
-body.mobile-ui #mobileActionDock .mobile-action-scroll .mobile-action-button{flex:0 0 68px;min-width:68px}
+body.mobile-ui #mobileActionDock .mobile-action-scroll .mobile-action-button{min-width:0;width:100%;border:0}
+body.mobile-ui #mobileActionDock .mobile-action-button+.mobile-action-button{border-left:1px solid var(--line)}
 body.mobile-ui #mobileActionDock .mobile-action-back{flex:0 0 44px;min-width:44px;margin-right:5px;border-right:1px solid var(--line);border-radius:0}
 body.mobile-ui #mobileActionDock .mobile-action-back .mobile-icon{width:21px;height:21px}
 body.mobile-ui[data-mobile-sheet] #mobileActionDock{visibility:hidden;pointer-events:none}
@@ -359,7 +345,7 @@ body.mobile-ui ::-webkit-scrollbar-thumb{background:#42494d;border-radius:8px}
 body.mobile-ui ::-webkit-scrollbar-track{background:transparent}
 
 /* 가로 화면에서는 영상과 편집대를 나란히 둡니다. */
-body.mobile-ui.mobile-landscape{--mobile-header-height:48px;--mobile-dock-height:74px;--mobile-deck-height:232px;--mobile-panel-height:min(82dvh,calc(var(--mobile-vh,100dvh) - 12px))}
+body.mobile-ui.mobile-landscape{--mobile-header-height:48px;--mobile-dock-height:74px;--mobile-track-height:clamp(30px,calc((var(--mobile-vh,100dvh) - 210px - env(safe-area-inset-top,0px) - env(safe-area-inset-bottom,0px)) / 5),48px);--mobile-panel-height:min(82dvh,calc(var(--mobile-vh,100dvh) - 12px))}
 body.mobile-ui.mobile-landscape #mobileStudioShell{grid-template-columns:minmax(0,46fr) minmax(0,54fr);grid-template-rows:calc(var(--mobile-header-height) + env(safe-area-inset-top,0px)) minmax(0,1fr) calc(var(--mobile-dock-height) + env(safe-area-inset-bottom,0px))}
 body.mobile-ui.mobile-landscape .mobile-header{grid-column:1/3;grid-row:1}
 body.mobile-ui.mobile-landscape #mobileViewerHost{grid-column:1;grid-row:2/4;border-right:1px solid #3c4243;padding-left:env(safe-area-inset-left,0px)}
@@ -367,8 +353,6 @@ body.mobile-ui.mobile-landscape #mobileEditDeck{grid-column:2;grid-row:2;border-
 body.mobile-ui.mobile-landscape #mobileActionDock{grid-column:2;grid-row:3;padding-top:3px;padding-bottom:calc(5px + env(safe-area-inset-bottom,0px));border-left:1px solid var(--line)}
 body.mobile-ui.mobile-landscape #mobileActionDock>button,body.mobile-ui.mobile-landscape #mobileActionDock .mobile-action-button{min-height:60px;gap:5px}
 body.mobile-ui.mobile-landscape #mobileViewerHost .transport-bar{flex-basis:46px;height:46px}
-body.mobile-ui.mobile-landscape #mobileLayerBar{flex-basis:40px;padding-bottom:0}
-body.mobile-ui.mobile-landscape .mobile-layer-chip{min-height:36px;padding-inline:12px}
 body.mobile-ui.mobile-landscape .mobile-edit-heading{flex-basis:42px}
 body.mobile-ui.mobile-landscape[data-mobile-sheet] #mobilePanel{left:46%;border-radius:14px 0 0 0}
 body.mobile-ui.mobile-landscape #mobilePanelBody{padding:14px 16px max(20px,env(safe-area-inset-bottom,0px))}
@@ -380,19 +364,26 @@ body.mobile-ui.mobile-landscape .mobile-panel-header{flex-basis:56px;padding-blo
   body.mobile-ui #mobileExport{min-width:57px;padding-inline:12px}
   body.mobile-ui #mobileViewerHost .timecode{font-size:10px}
   body.mobile-ui .mobile-edit-heading{padding-left:12px}
-  body.mobile-ui #mobileOverview{padding-inline:7px}
   body.mobile-ui #mobilePanelBody{padding-left:14px;padding-right:14px}
   body.mobile-ui .monitor-tools button{padding-inline:7px}
   body.mobile-ui .quick-format-presets{grid-template-columns:minmax(0,1fr)}
 }
 @media(max-height:700px){
-  body.mobile-ui:not(.mobile-landscape){--mobile-deck-height:220px;--mobile-dock-height:80px}
-  body.mobile-ui:not(.mobile-landscape)[data-mobile-timeline="all"]{--mobile-deck-height:278px}
-  body.mobile-ui:not(.mobile-landscape) #mobileStudioShell:has(.timeline-panel[data-mobile-track-view="all"]){--mobile-deck-height:278px}
+  body.mobile-ui:not(.mobile-landscape){--mobile-deck-height:314px;--mobile-track-height:46px;--mobile-dock-height:80px}
   body.mobile-ui:not(.mobile-landscape) #mobileActionDock{padding-top:4px;padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
-  body.mobile-ui:not(.mobile-landscape) #mobileLayerBar{flex-basis:40px;padding-bottom:0}
   body.mobile-ui:not(.mobile-landscape) .mobile-edit-heading{flex-basis:40px}
 }
 @media(prefers-reduced-motion:reduce){
-  body.mobile-ui #mobileStudioShell,body.mobile-ui #mobilePanel,body.mobile-ui #mobileActionDock,body.mobile-ui .mobile-layer-chip{scroll-behavior:auto;transition:none}
+  body.mobile-ui #mobileStudioShell,body.mobile-ui #mobilePanel,body.mobile-ui #mobileActionDock{scroll-behavior:auto;transition:none}
 }
+
+/* 이름과 실제 선택 손잡이만 남겨 작은 화면에서도 작업 대상을 구분합니다. */
+body.mobile-ui #mobileEditDeck .track-code{display:none}
+body.mobile-ui #mobileEditDeck .track-selector strong{display:block;min-width:0;padding:0 3px;font-size:11px;line-height:1.2;text-align:center;font-weight:600;color:inherit}
+body.mobile-ui #mobileEditDeck .track-head.active .track-selector{color:var(--accent)}
+body.mobile-ui #mobileTrackManager .mobile-icon{width:20px;height:20px}
+body.mobile-ui #mobileActionDock .mobile-action-button span{text-align:center;width:100%}
+
+/* 자막 입력을 스타일 목록보다 먼저 제시하며 그리드 자체는 그대로 유지합니다. */
+body.mobile-ui #libraryContent:has(> .preset-grid [data-caption-preview]){display:flex;flex-direction:column}
+body.mobile-ui #libraryContent>[data-action="add-caption"]{order:-1;margin-bottom:16px;flex-shrink:0}

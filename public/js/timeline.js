@@ -130,10 +130,10 @@ export class Timeline {
     });
   }
   /** 모바일의 행 표시는 편집 문서의 숨김·음소거와 별개로 관리합니다. */
-  setMobileTrackView({all=this.mobileTrackView?.all??false,trackId=this.mobileTrackView?.trackId}={}){
+  setMobileTrackView({trackId=this.mobileTrackView?.trackId}={}){
     if(!document.body?.classList.contains('mobile-ui')){this.restoreMobileTrackView();return null;}
-    const next=this.resolveMobileTrackView({all:all===true,trackId}),previous=this.mobileTrackView;
-    const changed=!previous||previous.all!==next.all||(!next.all&&previous.trackId!==next.trackId);
+    const next=this.resolveMobileTrackView({trackId}),previous=this.mobileTrackView;
+    const changed=!previous||previous.all!==true;
     if(changed){
       this.cancelMobileGestures();this.cancelPointerDrag?.();this.closeMenu();this.clearPreview();this.stopScroll();
     }
@@ -141,10 +141,10 @@ export class Timeline {
     if(changed){this.scroll.scrollTop=0;const headers=$('trackHeaders');if(headers)headers.style.transform='translateY(0px)';}
     return {...this.mobileTrackView};
   }
-  resolveMobileTrackView(view){
+  resolveMobileTrackView(view={}){
     const tracks=timelineTracks(),video=id=>tracks.find(track=>track.id===id&&track.role==='video');
     const selected=tracks.find(track=>track.id===view.trackId)||video(this.activeRoleTracks?.video)||video(this.activeTrackId)||tracks.find(track=>track.role==='video')||tracks[0];
-    return {all:view.all===true,trackId:selected?.id||null};
+    return {all:true,trackId:selected?.id||null};
   }
   applyMobileTrackView(){
     const headers=$('trackHeaders'),panel=this.canvas.closest?.('.timeline-panel');
@@ -156,11 +156,9 @@ export class Timeline {
       return null;
     }
     this.mobileTrackView=this.resolveMobileTrackView(this.mobileTrackView);
-    const {all,trackId}=this.mobileTrackView;
-    if(panel)panel.dataset.mobileTrackView=all?'all':'focus';
+    if(panel)panel.dataset.mobileTrackView='all';
     for(const node of nodes){
-      const id=node.dataset.track||node.querySelector('[data-track-select]')?.dataset.trackSelect;
-      const visible=String(all||id===trackId);if(node.dataset.mobileVisible!==visible)node.dataset.mobileVisible=visible;
+      if(node.dataset.mobileVisible!=='true')node.dataset.mobileVisible='true';
     }
     return {...this.mobileTrackView};
   }
@@ -170,7 +168,8 @@ export class Timeline {
     this.applyMobileTrackView();
   }
   isMobileTrackVisible(id){
-    return !document.body?.classList.contains('mobile-ui')||!this.mobileTrackView||this.mobileTrackView.all||id===this.mobileTrackView.trackId;
+    // 구형 단일 트랙 설정이 남아 있더라도 모바일 타임라인의 행을 가리지 않습니다.
+    return true;
   }
   isMobileTargetVisible(target){
     const row=target?.closest?.('.track');return !row||this.isMobileTrackVisible(row.dataset.track);
@@ -549,6 +548,19 @@ export class Timeline {
   closeMenu(){this.menu?.close(false);}
   cancelMobileGestures(){this.mobileGestures?.reset();}
   destroyMobileGestures(){this.mobileGestures?.destroy();}
+  /** 이미 선택한 클립에서 시작한 다음 터치만 이동·트림 엔진에 넘깁니다. */
+  mobileCanEditTouch(event){
+    const hit=event.target.closest('.timeline-block');
+    if(!hit||event.target.closest('[data-clip-setting],[data-mosaic-warn]'))return false;
+    const ref={type:hit.dataset.type,id:hit.dataset.id},range=itemRange(ref.type,ref.id),key=selectionKey(ref);
+    const selected=(this.selections||[]).some(item=>selectionKey(item)===key)||!!(this.selection&&selectionKey(this.selection)===key);
+    return !!range&&!isTrackLocked(range.trackId)&&selected;
+  }
+  /** 기본 한 손가락 이동은 선택과 스크롤을 바꾸지 않고 재생 시각만 옮깁니다. */
+  mobileSeek(event){
+    if(this.callbacks.busy?.()||this.dragging)return;
+    this.callbacks.pause();const time=frameTime(this.xTime(event.clientX));this.ensureWidth(time);this.callbacks.seek(time);
+  }
   /** 눌렀던 클립이 다시 그려져도 현재 DOM에서 같은 항목과 손잡이를 찾습니다. */
   mobileTouchEvent(event){
     const hit=event.target.closest('.timeline-block,.timeline-gap,.transition-chip');
@@ -558,7 +570,7 @@ export class Timeline {
       if(!target)return null;
       for(const [selector,key] of [['[data-edge]','edge'],['[data-clip-setting]','clipSetting'],['[data-mosaic-warn]','mosaicWarn']]){
         const child=event.target.closest(selector);
-        if(child){target=[...target.querySelectorAll(selector)].find(node=>node.dataset[key]===child.dataset[key])||target;break;}
+        if(child){if(key!=='edge'||this.mobileCanEditTouch(event))target=[...target.querySelectorAll(selector)].find(node=>node.dataset[key]===child.dataset[key])||target;break;}
       }
     }else if(target.isConnected===false)target=this.canvas;
     if(!this.isMobileTargetVisible(target))return null;
@@ -588,6 +600,7 @@ export class Timeline {
   pointerDown(event,mobileHandoff=false){
     if(!this.isMobileTargetVisible(event.target)){event.preventDefault();return;}
     if(!mobileHandoff&&this.mobileGestures?.pointerDown(event))return;
+    if(mobileHandoff&&!this.mobileCanEditTouch(event)){event.preventDefault();return;}
     // 모바일의 명시적 선택 모드는 연결한 마우스나 펜으로도 같은 동작을 합니다.
     if(!mobileHandoff&&this.mobileMultiSelect&&document.body.classList.contains('mobile-ui')&&event.button===0&&event.target.closest('.timeline-block')&&!event.target.closest('[data-edge],[data-clip-setting],[data-mosaic-warn]')){event.preventDefault();this.mobileTap(event);return;}
     if(event.button!==0||this.dragging||this.callbacks.busy?.()||event.isPrimary===false)return;

@@ -13,11 +13,11 @@ class Events {
 }
 const classes=()=>{const values=new Set();return {contains:name=>values.has(name),toggle(name,on){if(on)values.add(name);else values.delete(name);},add:name=>values.add(name),remove:name=>values.delete(name)};};
 function fixture(){
-  const window=new Events(),document=new Events(),captured=new Set(),timers=new Map(),calls={tap:[],menu:[],drag:[],move:[],cancel:0,zoom:[]};let clock=0,nextTimer=0;
+  const window=new Events(),document=new Events(),captured=new Set(),timers=new Map(),calls={tap:[],menu:[],drag:[],move:[],seek:[],cancel:0,zoom:[]};let clock=0,nextTimer=0;
   document.body={classList:classes()};document.body.classList.add('mobile-ui');
   const canvas={isConnected:true,classList:classes(),setPointerCapture:id=>captured.add(id),hasPointerCapture:id=>captured.has(id),releasePointerCapture:id=>captured.delete(id)};
-  const owner={canvas,zoom:100,dragging:false,scroll:{scrollLeft:100,scrollTop:80,getBoundingClientRect:()=>({left:10,width:400})},callbacks:{busy:()=>false},closeMenu(){},
-    mobileTouchEvent:event=>event,mobileTap:event=>calls.tap.push(event),openMenu:event=>calls.menu.push(event),
+  const owner={canvas,zoom:100,dragging:false,selected:false,scroll:{scrollLeft:100,scrollTop:80,getBoundingClientRect:()=>({left:10,width:400})},callbacks:{busy:()=>false},closeMenu(){},
+    mobileTouchEvent:event=>event,mobileCanEditTouch(event){return this.selected&&!!event.target.closest('.timeline-block');},mobileSeek:event=>calls.seek.push(event),mobileTap(event){calls.tap.push(event);if(event.target.closest('.timeline-block'))this.selected=true;},openMenu:event=>calls.menu.push(event),
     pointerDown(event,bypass){assert.equal(bypass,true);calls.drag.push(event);this.dragging=true;this.movePointerDrag=value=>calls.move.push(value);this.cancelPointerDrag=()=>{calls.cancel++;this.dragging=false;this.cancelPointerDrag=null;this.movePointerDrag=null;};},
     setZoom(value,anchor){this.zoom=Math.max(3,Math.min(720,value));calls.zoom.push({value:this.zoom,anchor});},
   };
@@ -46,12 +46,12 @@ test('touch gate leaves desktop and mouse handling alone',()=>{
 });
 
 test('default browser timers retain the host receiver when stored on the gesture object',t=>{
-  const f=fixture();let scheduled=0,cleared=0;
-  t.mock.method(globalThis,'setTimeout',function(callback,delay){assert.equal(this,globalThis);assert.equal(typeof callback,'function');assert.equal(delay,300);scheduled++;return 43;});
-  t.mock.method(globalThis,'clearTimeout',function(id){assert.equal(this,globalThis);assert.equal(id,43);cleared++;});
+  const f=fixture(),scheduled=[],cleared=[];
+  t.mock.method(globalThis,'setTimeout',function(callback,delay){assert.equal(this,globalThis);assert.equal(typeof callback,'function');scheduled.push(delay);return delay;});
+  t.mock.method(globalThis,'clearTimeout',function(id){assert.equal(this,globalThis);cleared.push(id);});
   const gestures=new MobileTimelineGestures(f.owner,{window:f.window,document:f.document});
   gestures.pointerDown(pointer(1,100));gestures.pointerUp(pointer(1,100));
-  assert.equal(scheduled,1);assert.equal(cleared,1);assert.equal(f.calls.tap.length,1);
+  assert.deepEqual(scheduled,[120,300]);assert.deepEqual(cleared.sort((a,b)=>a-b),[120,300]);assert.equal(f.calls.tap.length,1);
 });
 
 test('a clip tap selects once and suppresses only the following physical touch click',()=>{
@@ -62,10 +62,12 @@ test('a clip tap selects once and suppresses only the following physical touch c
   assert.equal(f.window.count+f.document.count,0);assert.equal(f.captured.size,0);assert.equal(f.timers.size,0);
 });
 
-test('swiping a clip or empty area pans both axes without moving or selecting clips',()=>{
+test('one-finger swipes wait 120ms then seek without scrolling, selecting or editing clips',()=>{
   for(const kind of ['clip','empty']){
-    const f=fixture(),hit=target(kind);f.gestures.pointerDown(pointer(1,150,150,hit));f.window.emit('pointermove',pointer(1,110,120,hit));f.advance(500);
-    assert.equal(f.owner.scroll.scrollLeft,140);assert.equal(f.owner.scroll.scrollTop,110);assert.equal(f.gestures.mode,'pan');
+    const f=fixture(),hit=target(kind);f.owner.selected=true;f.gestures.pointerDown(pointer(1,150,150,hit));f.window.emit('pointermove',pointer(1,110,120,hit));f.advance(119);
+    assert.equal(f.calls.seek.length,0);assert.equal(f.gestures.mode,'pending');f.advance(1);
+    assert.equal(f.owner.scroll.scrollLeft,100);assert.equal(f.owner.scroll.scrollTop,80);assert.equal(f.gestures.mode,'seek');assert.equal(f.calls.seek.at(-1).clientX,110);
+    f.window.emit('pointermove',pointer(1,90,100,hit));assert.equal(f.calls.seek.at(-1).clientX,90);
     f.window.emit('pointerup',pointer(1,110,120,hit));assert.equal(f.calls.tap.length+f.calls.menu.length+f.calls.drag.length,0);assert.equal(f.window.count,0);
   }
 });
@@ -73,16 +75,17 @@ test('swiping a clip or empty area pans both axes without moving or selecting cl
 test('holding stationary opens the menu once while holding then moving enters the existing drag once',()=>{
   const f=fixture(),hit=target();f.gestures.pointerDown(pointer(1,100,100,hit));f.advance(301);assert.equal(f.gestures.mode,'held');
   f.window.emit('pointerup',pointer(1,101,100,hit));assert.equal(f.calls.menu.length,1);assert.equal(f.calls.tap.length+f.calls.drag.length,0);
-  f.gestures.pointerDown(pointer(1,100,100,hit));f.advance(301);const move=pointer(1,125,100,hit);f.window.emit('pointermove',move);
+  f.owner.selected=true;f.gestures.pointerDown(pointer(1,100,100,hit));f.advance(301);const move=pointer(1,125,100,hit);f.window.emit('pointermove',move);
   assert.equal(f.calls.drag.length,1);assert.equal(f.calls.move.length,1);assert.equal(move.stopped,true);assert.equal(f.gestures.mode,'edit');
   const up=pointer(1,125,100,hit);f.window.emit('pointerup',up);
   assert.equal(up.stopped,false,'기존 클립 pointerup까지 전파해 한 번만 확정합니다');assert.equal(f.calls.cancel,0);assert.equal(f.calls.menu.length,1);assert.equal(f.calls.tap.length,0);
 });
 
-test('trim handles enter the existing editor immediately and a second finger cancels the edit before pinch',()=>{
-  const f=fixture(),hit=target('trim');f.gestures.pointerDown(pointer(1,100,100,hit));
-  assert.equal(f.calls.drag.length,1);assert.equal(f.timers.size,0);
-  f.gestures.pointerDown(pointer(2,200,100));assert.equal(f.calls.cancel,1);assert.equal(f.owner.dragging,false);assert.equal(f.gestures.mode,'pinch');
+test('selected trim waits for a second finger and movement, then cancels safely if a finger joins the edit',()=>{
+  const f=fixture(),hit=target('trim');f.owner.selected=true;f.gestures.pointerDown(pointer(1,100,100,hit));
+  assert.equal(f.calls.drag.length,0);f.advance(120);assert.equal(f.calls.drag.length,0,'정지한 손잡이는 트림을 시작하지 않습니다');
+  f.window.emit('pointermove',pointer(1,125,100,hit));assert.equal(f.calls.drag.length,1);assert.equal(f.timers.size,0);
+  f.owner.callbacks.busy=()=>f.owner.dragging;f.gestures.pointerDown(pointer(2,200,100));assert.equal(f.calls.cancel,1);assert.equal(f.owner.dragging,false);assert.equal(f.gestures.mode,'pinch');
   f.window.emit('pointercancel',pointer(2,200));assert.equal(f.gestures.points.size,0);assert.equal(f.window.count+f.document.count,0);assert.equal(f.captured.size,0);
 });
 
@@ -92,8 +95,33 @@ test('pinch keeps the original midpoint time anchored while its center moves and
   f.window.emit('pointermove',pointer(2,300));assert.equal(f.owner.zoom,200);assert.equal(f.owner.scroll.scrollLeft,290);
   f.window.emit('pointermove',pointer(1,120));assert.equal(f.owner.zoom,180);
   assert.ok(Math.abs((f.owner.scroll.scrollLeft+210-10)/f.owner.zoom-anchor)<1e-9);
-  f.window.emit('pointerup',pointer(1,120));const left=f.owner.scroll.scrollLeft;f.window.emit('pointermove',pointer(2,280));assert.equal(f.owner.scroll.scrollLeft,left+20);
+  f.window.emit('pointerup',pointer(1,120));const left=f.owner.scroll.scrollLeft;assert.equal(f.gestures.mode,'blocked');f.window.emit('pointermove',pointer(2,280));assert.equal(f.owner.scroll.scrollLeft,left);
   f.window.emit('pointerup',pointer(2,280));assert.equal(f.calls.tap.length+f.calls.menu.length+f.calls.drag.length,0);assert.equal(f.timers.size,0);
+});
+
+test('an unselected edge never trims; only a tap selects it for a later gesture',()=>{
+  const f=fixture(),hit=target('trim');
+  f.gestures.pointerDown(pointer(1,100,100,hit));f.window.emit('pointermove',pointer(1,125,100,hit));f.advance(500);
+  assert.equal(f.gestures.mode,'seek');assert.equal(f.calls.drag.length,0);f.window.emit('pointerup',pointer(1,125,100,hit));assert.equal(f.calls.tap.length,0);assert.equal(f.owner.selected,false);
+  f.gestures.pointerDown(pointer(1,100,100,hit));f.advance(40);f.window.emit('pointerup',pointer(1,100,100,hit));assert.equal(f.owner.selected,true);assert.equal(f.calls.tap.length,1);
+  f.gestures.pointerDown(pointer(1,100,100,hit));f.window.emit('pointermove',pointer(1,120,100,hit));f.advance(119);assert.equal(f.calls.drag.length,0);
+  f.advance(1);assert.equal(f.calls.drag.length,1);assert.equal(f.calls.move.at(-1).clientX,120);f.gestures.reset();
+});
+
+test('two fingers during the decision delay pan both axes without a false seek or edit',()=>{
+  const f=fixture(),hit=target('trim');f.owner.selected=true;
+  f.gestures.pointerDown(pointer(1,100,100,hit));f.window.emit('pointermove',pointer(1,115,100,hit));f.advance(100);f.gestures.pointerDown(pointer(2,215,100));
+  f.advance(500);assert.equal(f.calls.seek.length+f.calls.drag.length,0);assert.equal(f.gestures.mode,'pinch');
+  f.window.emit('pointermove',pointer(1,95,70,hit));f.window.emit('pointermove',pointer(2,195,70));
+  assert.equal(f.owner.zoom,100);assert.ok(Math.abs(f.owner.scroll.scrollLeft-120)<1e-9);assert.equal(f.owner.scroll.scrollTop,110);
+  f.window.emit('pointerup',pointer(2,195,70));f.advance(500);f.window.emit('pointermove',pointer(1,150,70,hit));assert.equal(f.gestures.mode,'blocked');assert.equal(f.calls.seek.length+f.calls.drag.length,0);
+  f.window.emit('pointerup',pointer(1,150,70,hit));assert.equal(f.calls.tap.length,0);assert.equal(f.timers.size,0);
+});
+
+test('short swipes and long drags of an unselected clip never turn into a selection or move',()=>{
+  const f=fixture(),hit=target();f.gestures.pointerDown(pointer(1,100,100,hit));f.advance(30);f.window.emit('pointerup',pointer(1,130,100,hit));
+  assert.equal(f.calls.seek.length,1);assert.equal(f.calls.tap.length,0);
+  f.gestures.pointerDown(pointer(1,100,100,hit));f.advance(301);f.window.emit('pointermove',pointer(1,130,100,hit));assert.equal(f.gestures.mode,'seek');f.window.emit('pointerup',pointer(1,130,100,hit));assert.equal(f.calls.drag.length+f.calls.menu.length+f.calls.tap.length,0);
 });
 
 test('cancellation, hidden pages, mode changes and disposal remove pending timers and listeners',()=>{
@@ -113,6 +141,34 @@ test('mobile multi-select taps toggle a clip without starting a desktop drag',()
     owner.mobileTap(pointer(1,100,100,hit));assert.deepEqual(selections[0],[{type:'caption',id:'caption'}]);
     owner.mobileTap(pointer(1,100,100,hit));assert.deepEqual(selections[1],[]);assert.equal(owner.dragging,false);
   }finally{globalThis.document=saved.document;project.captions=saved.captions;}
+});
+
+test('the Timeline integration strips unselected trim hits and accepts only a later selected gesture',()=>{
+  const saved={document:globalThis.document,captions:project.captions,tracks:project.timelineTracks};
+  project.captions=[{id:'caption',start:0,end:2,trackId:'v3',text:'자막'}];project.timelineTracks=[{id:'v3',kind:'visual',role:'caption'}];
+  const block={dataset:{type:'caption',id:'caption'},isConnected:true},edge={dataset:{edge:'end'},isConnected:true},body={classList:classes()};body.classList.add('mobile-ui');
+  block.closest=selector=>['.timeline-block','.timeline-block,.timeline-gap,.transition-chip'].includes(selector)?block:null;
+  edge.closest=selector=>selector==='[data-edge]'?edge:block.closest(selector);block.querySelectorAll=selector=>selector==='[data-edge]'?[edge]:[];
+  const selections=[],owner=Object.assign(Object.create(Timeline.prototype),{canvas:{querySelectorAll:()=>[block]},selections:[],selection:null,dragging:false,
+    callbacks:{busy:()=>false,pause(){},select:(type,id)=>selections.push({type,id})},refuseLocked:()=>false,
+    select(type,id){this.selection={type,id};this.selections=[this.selection];}});
+  globalThis.document={body,activeElement:null};
+  try{
+    const event=pointer(1,100,100,edge);assert.equal(owner.mobileCanEditTouch(event),false);assert.equal(owner.mobileTouchEvent(event).target,block);
+    owner.pointerDown(event,true);assert.equal(event.prevented,true);assert.equal(owner.dragging,false);assert.equal(selections.length,0);
+    owner.mobileTap(event);assert.deepEqual(selections,[{type:'caption',id:'caption'}]);assert.equal(owner.mobileCanEditTouch(event),true);assert.equal(owner.mobileTouchEvent(event).target,edge);
+    project.timelineTracks.find(track=>track.id==='v3').locked=true;assert.equal(owner.mobileCanEditTouch(event),false);assert.equal(owner.mobileTouchEvent(event).target,block);
+  }finally{globalThis.document=saved.document;project.captions=saved.captions;project.timelineTracks=saved.tracks;}
+});
+
+test('mobile seek uses the real frame clock without clearing selection or scrolling',()=>{
+  const savedFps=project.fps;project.fps=30;let paused=0,busy=false;const seeks=[],widths=[],selection={type:'caption',id:'kept'};
+  const owner=Object.assign(Object.create(Timeline.prototype),{zoom:80,canvas:{getBoundingClientRect:()=>({left:-70})},scroll:{scrollLeft:100,scrollTop:80},selection,dragging:false,
+    callbacks:{busy:()=>busy,pause:()=>paused++,seek:time=>seeks.push(time)},ensureWidth:time=>widths.push(time)});
+  try{
+    owner.mobileSeek(pointer(1,155));assert.deepEqual(seeks,[2.8]);assert.deepEqual(widths,[2.8]);assert.equal(paused,1);assert.equal(owner.selection,selection);assert.deepEqual(owner.scroll,{scrollLeft:100,scrollTop:80});
+    busy=true;owner.mobileSeek(pointer(1,175));busy=false;owner.dragging=true;owner.mobileSeek(pointer(1,175));assert.deepEqual(seeks,[2.8]);
+  }finally{project.fps=savedFps;}
 });
 
 function trackViewFixture(run){
@@ -150,26 +206,25 @@ test('모바일은 일반 선택 안내를 토스트로 옮기지 않고 편집 
   }finally{globalThis.document=saved;}
 });
 
-test('mobile focus filters matching rows and heads without changing document visibility or rendering again',()=>trackViewFixture(({owner,rows,heads,panel,effects})=>{
+test('mobile always shows every row and header without changing document visibility or rendering again',()=>trackViewFixture(({owner,rows,heads,panel,effects})=>{
   const before=JSON.stringify(project),originalRows=rows.slice();
-  assert.deepEqual(owner.setMobileTrackView({all:false}),{all:false,trackId:'v4'});
-  assert.equal(panel.dataset.mobileTrackView,'focus');
-  assert.deepEqual(rows.filter(node=>node.dataset.mobileVisible==='true').map(node=>node.dataset.track),['v4']);
-  assert.equal(heads.filter(node=>node.dataset.mobileVisible==='true').length,1);
-  assert.equal(heads.find(node=>node.dataset.mobileVisible==='true').querySelector().dataset.trackSelect,'v4');
+  assert.deepEqual(owner.setMobileTrackView({all:false}),{all:true,trackId:'v4'});
+  assert.equal(panel.dataset.mobileTrackView,'all');
+  assert.deepEqual(rows.filter(node=>node.dataset.mobileVisible==='true').map(node=>node.dataset.track),['v2','v4','v1','a1']);
+  assert.equal(heads.filter(node=>node.dataset.mobileVisible==='true').length,4);
   assert.deepEqual(rows,originalRows,'행 DOM을 다시 만들지 않습니다');assert.equal(owner.scroll.scrollLeft,120);assert.equal(owner.scroll.scrollTop,0);
   owner.setMobileTrackView({all:false,trackId:'v4'});assert.equal(effects.cancel,1,'같은 트랙 동기화가 진행 중 제스처를 취소하지 않습니다');
   owner.setMobileTrackView({all:true,trackId:'v4'});assert.ok([...rows,...heads].every(node=>node.dataset.mobileVisible==='true'));
   owner.scroll.scrollTop=26;owner.setMobileTrackView({all:true,trackId:'a1'});
-  assert.equal(effects.cancel,2,'전체 보기에서 다른 행 선택은 이동을 취소하지 않습니다');assert.equal(owner.scroll.scrollTop,26);
+  assert.equal(effects.cancel,1,'전체 보기에서 다른 행 선택은 이동을 취소하지 않습니다');assert.equal(owner.scroll.scrollTop,26);
   assert.equal(JSON.stringify(project),before,'미리보기·내보내기에 쓰는 문서의 hidden/muted와 클립 데이터를 바꾸지 않습니다');
 }));
 
-test('mobile focus survives render, recovers a removed track and restores every row on desktop',()=>trackViewFixture(({owner,rows,heads,panel,body})=>{
+test('all-track mobile view survives render, repairs legacy focus state and restores every row on desktop',()=>trackViewFixture(({owner,rows,heads,panel,body})=>{
   owner.setMobileTrackView({all:false,trackId:'v2'});const oldRows=rows.slice();owner.render();
   assert.notEqual(rows[0],oldRows[0]);assert.equal(rows.find(node=>node.dataset.track==='v2').dataset.mobileVisible,'true');
-  project.timelineTracks=project.timelineTracks.filter(track=>track.id!=='v2');owner.render();
-  assert.deepEqual(owner.mobileTrackView,{all:false,trackId:'v4'});assert.equal(rows.find(node=>node.dataset.track==='v4').dataset.mobileVisible,'true');
+  owner.mobileTrackView.all=false;project.timelineTracks=project.timelineTracks.filter(track=>track.id!=='v2');owner.render();
+  assert.deepEqual(owner.mobileTrackView,{all:true,trackId:'v4'});assert.ok([...rows,...heads].every(node=>node.dataset.mobileVisible==='true'));
   owner.restoreMobileTrackView();assert.equal(owner.mobileTrackView,null);assert.equal(panel.dataset.mobileTrackView,undefined);
   assert.ok([...rows,...heads].every(node=>node.dataset.mobileVisible===undefined));
   owner.setMobileTrackView({all:false,trackId:'a1'});body.classList.remove('mobile-ui');owner.render();
@@ -177,14 +232,13 @@ test('mobile focus survives render, recovers a removed track and restores every 
   assert.equal(owner.setMobileTrackView({all:false,trackId:'v1'}),null,'PC에서는 표시 필터를 켜지 않습니다');
 }));
 
-test('a filtered mobile row cannot become a stale touch, menu or external drop target',()=>trackViewFixture(({owner,rows,body})=>{
+test('legacy single-track requests no longer exclude other empty rows from touch or external placement',()=>trackViewFixture(({owner,rows,body})=>{
   owner.setMobileTrackView({all:false,trackId:'v4'});
   const hidden=rows.find(node=>node.dataset.track==='v1'),shown=rows.find(node=>node.dataset.track==='v4');
   const target=row=>({isConnected:true,closest:selector=>selector==='.track'?row:null});
-  assert.equal(owner.isMobileTargetVisible(target(hidden)),false);assert.equal(owner.isMobileTargetVisible(target(shown)),true);
-  assert.equal(owner.mobileTouchEvent(pointer(1,100,100,target(hidden))),null);
-  const event=pointer(1,100,100,target(hidden));owner.pointerDown(event);assert.equal(event.prevented,true);assert.equal(owner.dragging,false);
+  assert.equal(owner.isMobileTargetVisible(target(hidden)),true);assert.equal(owner.isMobileTargetVisible(target(shown)),true);
+  assert.ok(owner.mobileTouchEvent(pointer(1,100,100,target(hidden))));
   owner.external={kind:'preset',id:'g:qa'};owner.snapTime=t=>t;owner.xTime=()=>1;
-  assert.equal(owner.externalPlan(100,'v1'),null);assert.equal(owner.externalPlan(100,'v4')?.lane,'v4');
+  assert.equal(owner.externalPlan(100,'v1')?.lane,'v1');assert.equal(owner.externalPlan(100,'v4')?.lane,'v4');assert.equal(owner.externalPlan(100,'removed'),null);
   body.classList.remove('mobile-ui');assert.equal(owner.isMobileTargetVisible(target(hidden)),true);assert.equal(owner.externalPlan(100,'v1')?.lane,'v1');
 }));

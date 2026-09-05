@@ -1,5 +1,6 @@
-// 모바일의 스크롤·선택·길게 누르기를 구분한 뒤 기존 편집 엔진에 이동을 맡깁니다.
+// 한 손가락은 시각 이동, 두 손가락은 화면 이동·확대에 사용하고 선택한 클립만 편집합니다.
 const SLOP = 8;
+const DECIDE_MS = 120;
 const HOLD_MS = 300;
 const position = event => ({x:event.clientX,y:event.clientY});
 const distance = (a,b) => Math.hypot(a.x-b.x,a.y-b.y);
@@ -38,28 +39,40 @@ export class MobileTimelineGestures {
     try{if(this.owner.canvas.hasPointerCapture(id))this.owner.canvas.releasePointerCapture(id);}catch{}
   }
   clearHold(){if(this.timer!==undefined)this.clearTimer(this.timer);this.timer=undefined;}
+  clearDecision(){if(this.decisionTimer!==undefined)this.clearTimer(this.decisionTimer);this.decisionTimer=undefined;}
+  clearTimers(){this.clearHold();this.clearDecision();}
   setMode(mode){
     this.mode=mode;
-    for(const [name,value] of [['mobile-touch-pan','pan'],['mobile-touch-hold','held'],['mobile-touch-pinch','pinch']])this.owner.canvas.classList.toggle(name,mode===value);
+    for(const [name,value] of [['mobile-touch-seek','seek'],['mobile-touch-pan','pan'],['mobile-touch-hold','held'],['mobile-touch-pinch','pinch']])this.owner.canvas.classList.toggle(name,mode===value);
   }
   pointerDown(event){
     if(event.pointerType!=='touch')return false;
     if(!this.enabled()){this.reset();return false;}
     event.preventDefault();
-    if(this.owner.callbacks.busy?.()||(!this.points.size&&this.owner.dragging))return true;
+    if(!this.points.size&&(this.owner.callbacks.busy?.()||this.owner.dragging))return true;
+    if(this.points.has(event.pointerId))return true;
     this.suppressUntil=this.now()+700;this.owner.closeMenu();
     this.points.set(event.pointerId,{...position(event),event});this.listen();
     if(this.points.size>1){
-      this.clearHold();this.owner.cancelPointerDrag?.();
+      // 편집 취소가 포인터 캡처 해제 이벤트를 보내도 제스처 전체가 초기화되지 않게 먼저 전환합니다.
+      this.clearTimers();this.setMode('pinch');this.owner.cancelPointerDrag?.();
       for(const id of this.points.keys())this.capture(id);
       this.beginPinch();return true;
     }
-    this.origin={...position(event),left:this.owner.scroll.scrollLeft,top:this.owner.scroll.scrollTop,event};
+    this.origin={...position(event),event};this.moved=false;this.decided=false;
+    this.editable=this.owner.mobileCanEditTouch?.(event)===true;
+    this.edge=!!event.target.closest('[data-edge]');
     this.setMode('pending');
-    if(event.target.closest('[data-edge]')){this.handoff(event,event);return true;}
     this.capture(event.pointerId);
+    this.decisionTimer=this.setTimer(()=>{
+      this.decisionTimer=undefined;
+      if(this.mode!=='pending')return;
+      if(!this.enabled()||this.owner.canvas.isConnected===false){this.reset();return;}
+      this.decided=true;
+      if(this.moved)this.resolveMove([...this.points.values()][0]?.event||event);
+    },DECIDE_MS);
     const clip=event.target.closest('.timeline-block');
-    if(clip&&!event.target.closest('[data-clip-setting],[data-mosaic-warn]'))this.timer=this.setTimer(()=>{
+    if(clip&&!this.edge&&!event.target.closest('[data-clip-setting],[data-mosaic-warn]'))this.timer=this.setTimer(()=>{
       this.timer=undefined;
       if(this.mode!=='pending')return;
       if(!this.enabled()||this.owner.canvas.isConnected===false){this.reset();return;}
@@ -67,8 +80,16 @@ export class MobileTimelineGestures {
     },HOLD_MS);
     return true;
   }
+  resolveMove(event){
+    if(this.mode==='pending'&&!this.decided)return;
+    const edit=this.editable&&((this.mode==='held')||(this.mode==='pending'&&this.edge));
+    if(edit){this.handoff(this.origin.event,event);return;}
+    this.clearTimers();this.setMode('seek');this.owner.mobileSeek?.(event);
+  }
   handoff(start,current){
-    this.clearHold();this.setMode('edit');this.release(start.pointerId);
+    this.clearTimers();
+    if(!this.editable||this.owner.mobileCanEditTouch?.(start)!==true){this.setMode('seek');this.owner.mobileSeek?.(current);return;}
+    this.setMode('edit');this.release(start.pointerId);
     const event=this.owner.mobileTouchEvent(start);
     if(!event){this.setMode('blocked');return;}
     this.owner.pointerDown(event,true);
@@ -86,7 +107,7 @@ export class MobileTimelineGestures {
   pointerMove(event){
     if(!this.points.has(event.pointerId))return;
     if(!this.enabled()||this.owner.canvas.isConnected===false){this.reset();return;}
-    this.points.set(event.pointerId,{...this.points.get(event.pointerId),...position(event)});
+    this.points.set(event.pointerId,{...position(event),event});
     if(this.mode==='edit')return; // 잡은 클립의 기존 pointermove가 편집을 처리합니다.
     event.preventDefault();event.stopPropagation();
     if(this.mode==='pinch'){
@@ -97,25 +118,22 @@ export class MobileTimelineGestures {
       this.owner.scroll.scrollLeft=Math.max(0,this.pinch.time*this.owner.zoom-(center.x-rect.left));
       this.owner.scroll.scrollTop=Math.max(0,this.pinch.top-(center.y-this.pinch.center.y));return;
     }
+    if(this.mode==='blocked')return;
     const delta=distance(position(event),this.origin);
-    if(this.mode==='held'&&delta>SLOP){this.handoff(this.origin.event,event);return;}
-    if(this.mode==='pending'&&delta>SLOP){this.clearHold();this.setMode('pan');}
-    if(this.mode==='pan'){
-      this.owner.scroll.scrollLeft=Math.max(0,this.origin.left-(event.clientX-this.origin.x));
-      this.owner.scroll.scrollTop=Math.max(0,this.origin.top-(event.clientY-this.origin.y));
-    }
+    if(delta>SLOP){this.moved=true;this.clearHold();}
+    if((this.mode==='pending'||this.mode==='held')&&this.moved){this.resolveMove(event);return;}
+    if(this.mode==='seek')this.owner.mobileSeek?.(event);
   }
   pointerUp(event){
     if(!this.points.has(event.pointerId))return;
     event.preventDefault();this.suppressUntil=this.now()+700;
     const mode=this.mode,initial=this.origin?.event;
-    this.points.delete(event.pointerId);this.release(event.pointerId);this.clearHold();
+    if((mode==='pending'||mode==='held')&&this.origin&&distance(position(event),this.origin)>SLOP)this.moved=true;
+    this.points.delete(event.pointerId);this.release(event.pointerId);this.clearTimers();
     if(this.points.size){
+      event.stopPropagation();
       if(this.points.size>1)this.beginPinch();
-      else{
-        const point=[...this.points.values()][0];
-        this.origin={...point,left:this.owner.scroll.scrollLeft,top:this.owner.scroll.scrollTop};this.setMode('pan');
-      }
+      else this.setMode('blocked');
       return;
     }
     this.unlisten();this.setMode(null);this.origin=null;this.pinch=null;
@@ -123,6 +141,7 @@ export class MobileTimelineGestures {
     if(mode==='edit')return;
     event.stopPropagation();
     if(!this.enabled()||this.owner.canvas.isConnected===false||this.owner.callbacks.busy?.())return;
+    if(mode==='seek'||(mode==='pending'||mode==='held')&&this.moved){this.owner.mobileSeek?.(event);return;}
     const resolved=initial&&this.owner.mobileTouchEvent(initial);if(!resolved)return;
     if(mode==='held')this.owner.openMenu(resolved);
     else if(mode==='pending')this.owner.mobileTap(resolved);
@@ -133,11 +152,11 @@ export class MobileTimelineGestures {
   }
   consumeContextMenu(event){return this.enabled()&&(this.points.size>0||event.pointerType==='touch'&&this.now()<(this.suppressUntil||0));}
   reset(){
-    this.clearHold();this.points.clear();
+    this.clearTimers();this.points.clear();
     try{if(this.mode==='edit')this.owner.cancelPointerDrag?.();}
     finally{
       for(const id of [...this.captured])this.release(id);
-      this.unlisten();this.setMode(null);this.origin=null;this.pinch=null;
+      this.unlisten();this.setMode(null);this.origin=null;this.pinch=null;this.editable=false;this.edge=false;this.moved=false;this.decided=false;
     }
   }
   destroy(){this.reset();this.disposed=true;}

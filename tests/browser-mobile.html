@@ -19,20 +19,22 @@ body.mobile-ui.qa-mobile #timelineCanvas,body.mobile-ui.qa-mobile .timeline-bloc
 .qa-results{padding-left:24px;line-height:1.8;font-size:13px}.qa-results [data-result=pass]{color:#c0ef73}.qa-results [data-result=fail]{color:#ffafa3}
 #result{white-space:pre-wrap;font:12px/1.6 Consolas,monospace;color:#dde9df;background:#1a2521;padding:12px;overflow-wrap:anywhere}
 #qaMode{display:inline-block;border:1px solid #566b44;padding:4px 8px;color:#d8ecb9;font-size:12px}
+#appFrame{display:block;width:390px;height:844px;max-width:none;border:0;outline:1px solid #4f645a;background:#101112;margin-top:16px}
 </style>
 <body class="mobile-ui qa-mobile">
 <main id="qaMain">
   <h1>모바일 타임라인 DOM 통합 검사</h1>
   <span id="qaMode">실제 DOM + 합성 PointerEvent</span>
-  <p>별도 테스트 프로젝트의 이미지와 테스트 자막만 사용합니다. 편집기 앱·사용자 파일·자동 저장을 불러오지 않습니다.</p>
+  <p>독립 제스처 프로젝트와 빈 편집기 iframe을 사용합니다. 사용자 파일·기존 자동 저장은 불러오지 않으며 AI 처리나 모델 다운로드를 실행하지 않습니다.</p>
   <p>이 검사는 브라우저 레이아웃과 터치 제스처 코드 연결을 확인합니다. 포인터 캡처는 합성 이벤트용으로 모사하며, 실제 휴대전화의 터치 하드웨어·OS 제스처 검증과는 다릅니다.</p>
   <div class="qa-actions">
     <button id="runAll" disabled>전체 검사 실행</button>
-    <button data-case="tap" disabled>탭·중복 방지</button><button data-case="pan" disabled>스와이프</button>
+    <button data-case="tap" disabled>탭·중복 방지</button><button data-case="seek" disabled>한 손가락 탐색</button><button data-case="pan" disabled>두 손가락 이동</button>
     <button data-case="hold" disabled>길게 누르기 메뉴</button><button data-case="drag" disabled>길게 누르고 이동</button>
-    <button data-case="trim" disabled>트림</button><button data-case="pinch" disabled>핀치</button>
+    <button data-case="trim" disabled>선택 후 트림</button><button data-case="pinch" disabled>핀치</button>
     <button data-case="multi" disabled>다중선택</button><button data-case="cancel" disabled>취소·두 번째 손가락</button>
-    <button data-case="focus" disabled>트랙 집중·숨은 행</button><button data-case="empty" disabled>빈 트랙·전체 보기</button><button data-case="restore" disabled>재렌더·PC 복귀</button>
+    <button data-case="allTracks" disabled>항상 전체 트랙</button><button data-case="empty" disabled>빈 트랙</button><button data-case="restore" disabled>재렌더·PC 복귀</button>
+    <button data-case="mobileLayout" disabled>390·360px 전체 화면</button><button data-case="mobileFlows" disabled>모바일 메뉴 연결</button>
   </div>
   <section id="mobileEditDeck" aria-label="독립 타임라인 검사 영역">
   <section class="timeline-panel" aria-label="테스트 타임라인">
@@ -49,6 +51,7 @@ body.mobile-ui.qa-mobile #timelineCanvas,body.mobile-ui.qa-mobile .timeline-bloc
   </section>
   <ol id="checks" class="qa-results"></ol>
   <pre id="result" role="status">테스트 이미지 준비 중…</pre>
+  <iframe id="appFrame" title="빈 프로젝트 모바일 편집기 검사" src="about:blank"></iframe>
 </main>
 <script type="module">
 // 로컬 검사 전용입니다. public/__qa-mobile.html로 복사해 열고 검사 후 복사본을 제거합니다.
@@ -60,7 +63,7 @@ const $=id=>document.getElementById(id),assert=(condition,message)=>{if(!conditi
 const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 const active=new Set(),captures=new Map();let nextPointer=1000,fixtureClips,fixtureTracks,timeline,running=false,lastDown=null;
-const calls={select:0,multi:0,commit:0,copy:0,paste:0,menu:0,errors:[]};
+const calls={select:0,multi:0,commit:0,copy:0,paste:0,menu:0,seek:0,errors:[]};
 // dispatchEvent 내부의 리스너 예외는 호출자에게 다시 던져지지 않으므로 별도로 수집합니다.
 addEventListener('error',event=>{if(running)calls.errors.push(event.error?.stack||event.message);});
 
@@ -109,25 +112,67 @@ async function reset(){
   timeline.mobileMultiSelect=false;timeline.selectMany([],null);timeline.zoom=80;timeline.snapping=false;timeline.time=0;
   timeline.render();timeline.setMobileTrackView({all:true,trackId:'v1'});timeline.scroll.scrollLeft=0;timeline.scroll.scrollTop=0;$('timelineZoom').value='80';clearCalls();await frame();
 }
+async function scrollFixture(){
+  project.timelineTracks.push(...Array.from({length:5},(_,index)=>({id:'qa-extra-'+index,kind:'audio',role:'audio'})));timeline.render();timeline.setMobileTrackView({all:true});
+  timeline.scroll.scrollIntoView({block:'center',inline:'nearest'});await frame();
+  timeline.scroll.scrollLeft=80;timeline.scroll.scrollTop=40;await frame();
+  assert(timeline.scroll.scrollHeight>timeline.scroll.clientHeight+60,'두 손가락 세로 이동을 검사할 트랙 공간이 부족합니다.');
+  const rect=timeline.scroll.getBoundingClientRect();return{a:{x:rect.left+60,y:rect.top+64},b:{x:rect.left+140,y:rect.top+64}};
+}
+let appDoc,appWin;
+const appQ=selector=>{const node=appDoc.querySelector(selector);assert(node,'모바일 앱 요소 없음: '+selector);return node;};
+const appVisible=node=>!!node?.isConnected&&node.getClientRects().length>0&&appWin.getComputedStyle(node).visibility!=='hidden';
+const near=(a,b,label,tolerance=1.5)=>assert(Math.abs(a-b)<=tolerance,label+' ('+a.toFixed(2)+' / '+b.toFixed(2)+')');
+async function until(check,message,timeout=4000){const end=performance.now()+timeout;while(performance.now()<end){if(check())return;await wait(40);}throw new Error(message);}
+async function appReady(){
+  const iframe=$('appFrame');
+  if(!appDoc){
+    iframe.src='/studio.html?empty&ui=mobile';
+    await until(()=>iframe.contentDocument?.documentElement.dataset.studioReady==='true','빈 모바일 편집기가 20초 안에 준비되지 않았습니다.',20000);
+    appDoc=iframe.contentDocument;appWin=iframe.contentWindow;
+    appWin.addEventListener('error',event=>{if(running)calls.errors.push(event.error?.stack||event.message);});
+    appWin.addEventListener('unhandledrejection',event=>{if(running)calls.errors.push(event.reason?.stack||String(event.reason));});
+  }
+  if(appDoc.body.dataset.mobileSheet)await appClick('#mobilePanelDone');
+  assert(appDoc.body.classList.contains('mobile-ui'),'빈 편집기의 모바일 셸이 활성화되지 않았습니다.');await frame();
+}
+async function appClick(selector){const node=typeof selector==='string'?appQ(selector):selector;assert(appVisible(node)&&!node.disabled,'모바일 앱 버튼을 누를 수 없습니다: '+(node.id||node.textContent));node.click();await wait(60);await frame();}
+async function appSize(width,height){$('appFrame').style.width=width+'px';$('appFrame').style.height=height+'px';await until(()=>appWin.innerWidth===width&&appWin.innerHeight===height,'모바일 검사 창 크기가 바뀌지 않았습니다.');await wait(60);await frame();}
 const tests={
   async tap(){
     await tap(block('qa-a'));assert(timeline.selection?.id==='qa-a','탭으로 클립을 선택하지 못했습니다.');assert(calls.select===1,'탭에서 선택 신호가 중복됐습니다.');assert(!timeline.dragging,'탭 이후 이동 상태가 남았습니다.');
     const copy=block('qa-a').querySelector('[data-clip-setting="copy"]');assert(!copy.getClientRects().length,'모바일에서 사용하지 않는 클립 상단 설정 버튼이 계속 표시됩니다.');assert(calls.copy===0&&calls.commit===0,'탭이 숨겨진 버튼이나 이동을 실행했습니다.');
     return '클립 선택 1회, 숨긴 설정 버튼 오작동·뒤따르는 클릭 중복 없음';
   },
-  async pan(){
+  async seek(){
     const before=JSON.stringify(captureDocument()),node=block('qa-a'),at=await point(node),id=++nextPointer;
-    emit('pointerdown',id,at,node);emit('pointermove',id,{x:at.x-36,y:at.y-18},node);emit('pointerup',id,{x:at.x-36,y:at.y-18},node);
-    assert(timeline.scroll.scrollLeft>=35,'가로 스크롤이 이동하지 않았습니다.');assert(timeline.scroll.scrollTop>=17,'세로 스크롤이 이동하지 않았습니다.');
-    assert(JSON.stringify(captureDocument())===before,'스와이프가 클립 데이터를 바꿨습니다.');assert(calls.select+calls.multi+calls.commit===0,'스와이프가 선택·편집을 실행했습니다.');
-    return '클립 위 한 손가락 스와이프가 가로·세로 스크롤만 변경';
+    const left=timeline.scroll.scrollLeft,top=timeline.scroll.scrollTop,to={x:at.x+36,y:at.y-18},expected=timeline.xTime(to.x);
+    emit('pointerdown',id,at,node);await wait(170);emit('pointermove',id,to,node);
+    assert(calls.seek>0&&Math.abs(timeline.time-expected)<.04,'손가락을 누른 채 움직이는 동안 재생 위치가 갱신되지 않습니다.');emit('pointerup',id,to,node);await frame();
+    assert(calls.seek>0&&Math.abs(timeline.time-expected)<.04,'한 손가락 드래그가 손가락 위치의 시각으로 이동하지 않았습니다: '+timeline.time+' / '+expected);
+    near(timeline.scroll.scrollLeft,left,'한 손가락 탐색이 가로 스크롤을 바꿨습니다');near(timeline.scroll.scrollTop,top,'한 손가락 탐색이 세로 스크롤을 바꿨습니다');
+    assert(JSON.stringify(captureDocument())===before,'한 손가락 탐색이 클립 데이터를 바꿨습니다.');assert(calls.select+calls.multi+calls.commit===0,'한 손가락 탐색이 선택·편집을 실행했습니다.');
+    assert(!timeline.mobileGestures.points.size&&!timeline.dragging,'한 손가락 탐색 이후 제스처 상태가 남았습니다.');
+    return '한 손가락 드래그는 재생 위치만 탐색 · 트랙 스크롤/클립/선택 불변';
+  },
+  async pan(){
+    const {a,b}=await scrollFixture(),before=JSON.stringify(captureDocument()),one=++nextPointer,two=++nextPointer,left=timeline.scroll.scrollLeft,top=timeline.scroll.scrollTop,zoom=timeline.zoom;
+    const movedA={x:a.x-36,y:a.y-18},movedB={x:b.x-36,y:b.y-18};
+    emit('pointerdown',one,a,timeline.canvas);emit('pointerdown',two,b,timeline.canvas);emit('pointermove',one,movedA,timeline.canvas);emit('pointermove',two,movedB,timeline.canvas);
+    near(timeline.zoom,zoom,'손가락 간격이 같은 두 손가락 이동이 배율을 바꿨습니다',.05);near(timeline.scroll.scrollLeft,left+36,'두 손가락의 가로 이동을 따라 스크롤하지 않습니다');near(timeline.scroll.scrollTop,top+18,'두 손가락의 세로 이동을 따라 스크롤하지 않습니다');
+    emit('pointerup',one,movedA,timeline.canvas);emit('pointerup',two,movedB,timeline.canvas);
+    assert(JSON.stringify(captureDocument())===before&&calls.select+calls.multi+calls.commit===0,'두 손가락 이동이 문서나 선택을 바꿨습니다.');
+    assert(!timeline.mobileGestures.points.size&&!timeline.mobileGestures.listening,'두 손가락 이동 이후 리스너나 포인터가 남았습니다.');
+    return '두 손가락 평행 이동은 X/Y 스크롤만 변경 · 배율/문서/선택 불변';
   },
   async hold(){
+    await tap(block('qa-a'));clearCalls();
     const node=block('qa-a'),at=await point(node),id=++nextPointer;emit('pointerdown',id,at,node);await waitHeld();emit('pointerup',id,at,node);await frame();
-    assert(timeline.menu&&document.querySelector('.timeline-menu'),'길게 누른 뒤 메뉴가 열리지 않았습니다.');assert(calls.select===1,'메뉴 선택 신호가 중복됐습니다.');assert(calls.commit===0&&!timeline.dragging,'메뉴 열기가 클립을 이동시켰습니다.');
+    assert(timeline.menu&&document.querySelector('.timeline-menu'),'길게 누른 뒤 메뉴가 열리지 않았습니다.');assert(calls.select+calls.multi===1,'메뉴 선택 신호가 중복됐습니다.');assert(calls.commit===0&&!timeline.dragging,'메뉴 열기가 클립을 이동시켰습니다.');
     document.querySelector('.timeline-menu button').click();assert(calls.menu===1&&!timeline.menu,'메뉴 버튼 동작/정리가 잘못됐습니다.');return '제자리 롱프레스 메뉴 + 메뉴 버튼 1회';
   },
   async drag(){
+    await tap(block('qa-a'));clearCalls();
     const node=block('qa-a'),at=await point(node),id=++nextPointer;emit('pointerdown',id,at,node);await waitHeld();
     emit('pointermove',id,{x:at.x+40,y:at.y},node);assert(timeline.dragging,'길게 누른 뒤 기존 이동 엔진이 시작되지 않았습니다.');
     emit('pointerup',id,{x:at.x+40,y:at.y},node);await frame();
@@ -135,11 +180,17 @@ const tests={
     return '기존 DOM 이동 엔진으로 +0.5초 이동, 확정 1회';
   },
   async trim(){
+    const untouched=JSON.stringify(captureDocument()),unselectedHandle=block('qa-a').querySelector('[data-edge="end"]'),unselectedAt=await point(unselectedHandle,{edge:true}),firstPointer=++nextPointer;
+    emit('pointerdown',firstPointer,unselectedAt,unselectedHandle);assert(!timeline.dragging,'선택하지 않은 클립의 끝을 누르자 트림이 시작됐습니다.');await wait(170);
+    emit('pointermove',firstPointer,{x:unselectedAt.x-32,y:unselectedAt.y},unselectedHandle);emit('pointerup',firstPointer,{x:unselectedAt.x-32,y:unselectedAt.y},unselectedHandle);await frame();
+    assert(JSON.stringify(captureDocument())===untouched&&calls.commit===0&&!timeline.selection,'선택 전 끝부분 드래그가 클립을 자르거나 선택했습니다.');
+    await tap(block('qa-a'));assert(timeline.selection?.id==='qa-a','트림 전 첫 탭으로 클립을 선택하지 못했습니다.');clearCalls();
     const handle=block('qa-a').querySelector('[data-edge="end"]'),at=await point(handle,{edge:true}),id=++nextPointer;
-    emit('pointerdown',id,at,handle);assert(timeline.dragging,'손잡이 트림이 즉시 시작되지 않았습니다.');
+    emit('pointerdown',id,at,handle);assert(!timeline.dragging,'선택된 끝부분도 손가락 판별 전에 트림이 시작됐습니다.');
+    await wait(170);assert(!timeline.dragging,'선택된 손잡이를 누르고만 있어도 트림이 시작됩니다.');
     emit('pointermove',id,{x:at.x-32,y:at.y},handle);emit('pointerup',id,{x:at.x-32,y:at.y},handle);await frame();
     assert(Math.abs(first().start-1)<.001,'트림이 시작 위치를 바꿨습니다.');assert(Math.abs(clipDuration(first())-1.6)<.04,'트림 길이가 맞지 않습니다: '+clipDuration(first()));assert(calls.commit===1,'트림 확정 횟수가 잘못됐습니다.');
-    return '대기 없이 끝 손잡이 트림, 길이 2.0 → 1.6초';
+    return '선택 전 끝 드래그는 탐색만 · 첫 탭 선택 후 다음 손잡이 드래그로 길이 2.0 → 1.6초';
   },
   async pinch(){
     timeline.scroll.scrollLeft=80;await frame();const rect=timeline.scroll.getBoundingClientRect(),a={x:rect.left+60,y:rect.top+64},b={x:rect.left+140,y:rect.top+64};
@@ -147,8 +198,10 @@ const tests={
     emit('pointerdown',one,a,timeline.canvas);emit('pointerdown',two,b,timeline.canvas);emit('pointermove',one,{x:a.x-20,y:a.y},timeline.canvas);emit('pointermove',two,{x:b.x+40,y:b.y},timeline.canvas);
     assert(Math.abs(timeline.zoom-140)<.01,'핀치 배율이 예상과 다릅니다: '+timeline.zoom);
     assert(Math.abs((timeline.scroll.scrollLeft+110)/timeline.zoom-anchor)<.02,'핀치 중점의 시각이 이동했습니다.');
-    emit('pointerup',one,a,timeline.canvas);emit('pointerup',two,b,timeline.canvas);assert(!timeline.mobileGestures.points.size,'핀치 후 포인터가 남았습니다.');assert(calls.commit===0&&calls.select===0,'핀치가 클립을 편집·선택했습니다.');
-    return '중점 이동을 포함한 1.75배 핀치, 같은 시각 유지';
+    emit('pointerup',one,a,timeline.canvas);const after={zoom:timeline.zoom,left:timeline.scroll.scrollLeft,top:timeline.scroll.scrollTop,time:timeline.time};
+    emit('pointermove',two,{x:b.x+60,y:b.y-20},timeline.canvas);near(timeline.zoom,after.zoom,'핀치 후 남은 한 손가락이 배율을 바꿨습니다');near(timeline.scroll.scrollLeft,after.left,'핀치 후 남은 한 손가락이 가로 스크롤을 바꿨습니다');near(timeline.scroll.scrollTop,after.top,'핀치 후 남은 한 손가락이 세로 스크롤을 바꿨습니다');near(timeline.time,after.time,'핀치 후 남은 한 손가락이 새 탐색을 시작했습니다');
+    emit('pointerup',two,b,timeline.canvas);assert(!timeline.mobileGestures.points.size,'핀치 후 포인터가 남았습니다.');assert(calls.commit===0&&calls.select===0,'핀치가 클립을 편집·선택했습니다.');
+    return '중점 이동을 포함한 1.75배 핀치 · 같은 시각 유지 · 남은 한 손가락으로 편집/탐색 시작하지 않음';
   },
   async multi(){
     timeline.mobileMultiSelect=true;await tap(block('qa-a'));await tap(block('qa-b'));
@@ -156,49 +209,45 @@ const tests={
     assert(timeline.explicit.length===1&&timeline.explicit[0].id==='qa-b','선택된 클립을 다시 탭해 해제하지 못했습니다.');assert(calls.multi===3&&calls.commit===0,'선택모드 신호가 중복됐습니다.');return '두 클립 선택 + 다시 탭하여 해제';
   },
   async cancel(){
+    await tap(block('qa-a'));clearCalls();
     const node=block('qa-a'),at=await point(node),one=++nextPointer;emit('pointerdown',one,at,node);await waitHeld();emit('pointermove',one,{x:at.x+24,y:at.y},node);assert(timeline.dragging,'취소 검사 전 기존 이동 엔진이 시작되지 않았습니다.');
     const two=++nextPointer;emit('pointerdown',two,{x:at.x+70,y:at.y},timeline.canvas);assert(!timeline.dragging&&timeline.mobileGestures.mode==='pinch','두 번째 손가락이 이동을 취소하지 못했습니다.');
     emit('pointercancel',two,{x:at.x+70,y:at.y},timeline.canvas);emit('pointercancel',one,at,timeline.canvas);assert(first().start===1&&calls.commit===0,'취소된 이동이 반영됐습니다.');
     const pending=++nextPointer;emit('pointerdown',pending,at,block('qa-a'));timeline.cancelMobileGestures();emit('pointercancel',pending,at,timeline.canvas);await wait(350);
     assert(!timeline.menu&&!timeline.mobileGestures.points.size&&!timeline.mobileGestures.listening&&!timeline.dragging,'취소 후 타이머·메뉴·리스너가 남았습니다.');return '이동 → 두 손가락 취소 및 모드 종료 정리';
   },
-  async focus(){
-    project.captions=[{id:'qa-hidden-caption',text:'가려진 트랙의 테스트 자막',start:1,end:3,trackId:'v3'}];timeline.render();
+  async allTracks(){
+    project.captions=[{id:'qa-visible-caption',text:'항상 보이는 자막 트랙',start:1,end:3,trackId:'v3'}];timeline.render();
     const before=JSON.stringify(captureDocument());timeline.setMobileTrackView({all:false,trackId:'v1'});await frame();
-    const rows=[...timeline.canvas.querySelectorAll('.track')],visible=rows.filter(row=>row.getClientRects().length),caption=block('qa-hidden-caption');
-    assert(visible.length===1&&visible[0].dataset.track==='v1','집중 보기에서 영상 한 행만 표시되어야 합니다.');
-    assert(rows.filter(row=>row.dataset.mobileVisible==='false').every(row=>getComputedStyle(row).display==='none'),'표시 속성만 있고 숨은 행이 실제 레이아웃에 남아 있습니다.');
-    assert(caption&&!caption.getClientRects().length,'집중 보기에서 다른 트랙의 자막이 화면에 남았습니다.');
-    const headers=document.querySelector('.track-heads');assert(!headers.getClientRects().length,'집중 보기에서 PC 트랙 헤더 공간이 남았습니다.');
-    const panel=document.querySelector('.timeline-panel').getBoundingClientRect(),scroll=timeline.scroll.getBoundingClientRect();
-    assert(Math.abs(scroll.left-panel.left)<4,'집중 트랙이 왼쪽 끝부터 가로 공간을 사용하지 않습니다.');
-    const available=timeline.scroll.clientHeight-$('ruler').offsetHeight,rowHeight=visible[0].getBoundingClientRect().height;
-    assert(available>78&&Math.abs(rowHeight-available)<=4,'집중 행이 안내·버튼을 뺀 실제 콘텐츠 높이를 채우지 못했습니다: '+JSON.stringify({available,rowHeight,scroll:timeline.scroll.clientHeight,ruler:$('ruler').offsetHeight}));
+    const rows=[...timeline.canvas.querySelectorAll('.track')],visible=rows.filter(row=>row.getClientRects().length),caption=block('qa-visible-caption');
+    assert(visible.length===fixtureTracks.length&&timeline.mobileTrackView.all===true,'이전 집중 보기 요청이 들어오면 모든 행 표시가 깨집니다.');
+    assert(!document.querySelector('[data-mobile-visible="false"]'),'숨겨진 행 표시 상태가 남았습니다.');
+    assert(caption&&caption.getClientRects().length>0,'영상 트랙을 활성화하자 자막 트랙이 숨겨졌습니다.');
+    const headers=document.querySelector('.track-heads');assert(headers.getClientRects().length>0,'모든 트랙을 구분할 헤더가 없습니다.');
+    const headerRows=[...$('trackHeaders').querySelectorAll('.track-head')];assert(headerRows.length===rows.length,'트랙 헤더와 실제 행 수가 다릅니다.');
+    for(const row of rows){const header=headerRows.find(node=>node.querySelector('[data-track-select]')?.dataset.trackSelect===row.dataset.track);assert(header,'행에 대응하는 헤더가 없습니다: '+row.dataset.track);near(header.getBoundingClientRect().height,row.getBoundingClientRect().height,'헤더와 트랙 행 높이가 다릅니다');}
     timeline.notice('검사용 일반 안내');assert(!$('timelineNotice').getClientRects().length,'모바일에서 삭제한 하단 안내 공간이 다시 표시됩니다.');
     const at=await point(block('qa-a'));assert(document.elementFromPoint(at.x,at.y)?.closest('.timeline-block')?.dataset.id==='qa-a','보이는 클립의 실제 hit-test가 틀립니다.');
-    for(let y=scroll.top+8;y<scroll.bottom-4;y+=16){const row=document.elementFromPoint(scroll.left+30,y)?.closest('.track');assert(!row||row.dataset.mobileVisible!=='false','보이지 않는 트랙이 터치 hit-test에 잡혔습니다.');}
-    const hiddenEvent=new PointerEvent('pointerdown',{pointerId:++nextPointer,pointerType:'touch',bubbles:true,cancelable:true});caption.dispatchEvent(hiddenEvent);
-    assert(hiddenEvent.defaultPrevented&&!timeline.mobileGestures.points.size,'숨겨진 클립의 오래된 이벤트를 거절하지 못했습니다.');
-    assert(JSON.stringify(captureDocument())===before,'집중 보기가 문서의 클립이나 숨김 설정을 바꿨습니다.');
-    return '영상 한 행·전체 가로폭·가용 높이 채움, 안내 공간 제거와 숨은 행 입력 차단';
+    assert(JSON.stringify(captureDocument())===before,'전체 트랙 표시가 문서의 클립이나 숨김 설정을 바꿨습니다.');
+    return '이전 집중 보기 요청도 항상 전체 행 표시 · 자막/빈 행/헤더 유지 · 불필요한 안내 공간 없음';
   },
   async empty(){
     const before=JSON.stringify(captureDocument());timeline.setMobileTrackView({all:false,trackId:'v2'});await frame();
     const empty=$('track-v2'),rect=empty.getBoundingClientRect(),visible=[...timeline.canvas.querySelectorAll('.track')].filter(row=>row.getClientRects().length);
-    assert(visible.length===1&&visible[0]===empty&&rect.height>=44,'빈 트랙도 집중할 수 있는 행으로 표시되어야 합니다.');
-    assert(!empty.querySelector('.timeline-block')&&[...timeline.canvas.querySelectorAll('.timeline-block')].every(node=>!node.getClientRects().length),'빈 트랙 집중 중 다른 트랙 클립이 보입니다.');
+    assert(visible.length===fixtureTracks.length&&visible.includes(empty)&&rect.height>=40,'빈 트랙도 다른 트랙과 함께 표시되어야 합니다.');
+    assert(!empty.querySelector('.timeline-block')&&block('qa-a').getClientRects().length>0,'빈 트랙 활성화가 기존 영상 클립을 숨겼습니다.');
     const at={x:rect.left+80,y:rect.top+rect.height/2},id=++nextPointer;emit('pointerdown',id,at,empty);emit('pointerup',id,at,empty);
     assert(timeline.activeHeaderId==='v2'&&timeline.time>0,'빈 트랙을 눌러 작업 행·재생 위치를 선택하지 못했습니다.');
     timeline.setMobileTrackView({all:true,trackId:'v2'});await frame();
     assert([...timeline.canvas.querySelectorAll('.track')].filter(row=>row.getClientRects().length).length===fixtureTracks.length,'전체 보기에서 빈 행을 포함한 모든 트랙이 복원되지 않았습니다.');
     assert(document.querySelector('.track-heads').getClientRects().length>0,'전체 트랙 보기에서 헤더가 돌아오지 않았습니다.');
-    assert(JSON.stringify(captureDocument())===before,'빈 트랙/전체 보기 전환이 문서를 바꿨습니다.');return '빈 그래픽 행 집중·탭, 전체 트랙 및 헤더 복원';
+    assert(JSON.stringify(captureDocument())===before,'빈 트랙 활성화가 문서를 바꿨습니다.');return '빈 그래픽 행도 항상 표시 · 빈 행 탭으로 작업 위치 선택 · 다른 트랙 유지';
   },
   async restore(){
     const before=JSON.stringify(captureDocument());timeline.setMobileTrackView({all:false,trackId:'v2'});timeline.render();await frame();
-    assert($('track-v2').getClientRects().length>0&&!$('track-v1').getClientRects().length,'재렌더 후 집중 행이 유지되지 않았습니다.');
+    assert([...timeline.canvas.querySelectorAll('.track')].every(row=>row.getClientRects().length>0),'재렌더 후 일부 트랙이 숨겨졌습니다.');
     project.timelineTracks=project.timelineTracks.filter(track=>track.id!=='v2');timeline.render();await frame();
-    assert(timeline.mobileTrackView.trackId==='v1'&&$('track-v1').getClientRects().length>0,'집중한 트랙 삭제 후 영상 행으로 복귀하지 못했습니다.');
+    assert(timeline.mobileTrackView.all===true&&$('track-v1').getClientRects().length>0&&timeline.canvas.querySelectorAll('.track').length===fixtureTracks.length-1,'활성 트랙 삭제 후 나머지 트랙 표시가 잘못됐습니다.');
     project.timelineTracks=fixtureTracks.map(track=>({...track}));timeline.render();
     document.body.classList.remove('mobile-ui');timeline.restoreMobileTrackView();timeline.render();await frame();
     assert(timeline.mobileTrackView===null&&!document.querySelector('.timeline-panel').hasAttribute('data-mobile-track-view'),'PC 복귀 후 모바일 집중 상태가 남았습니다.');
@@ -206,7 +255,83 @@ const tests={
     assert([...timeline.canvas.querySelectorAll('.track')].every(row=>row.getClientRects().length>0),'PC 복귀 후 숨겨진 트랙이 남았습니다.');
     timeline.notice('검사용 PC 안내');assert($('timelineNotice').getClientRects().length>0,'PC 복귀 후 기존 타임라인 안내도 숨겨졌습니다.');
     assert(JSON.stringify(captureDocument())===before,'트랙 복원 검사 후 원래 문서가 달라졌습니다.');
-    document.body.classList.add('mobile-ui');return '집중 보기 재렌더 유지·삭제 트랙 대체·PC 복귀 시 모든 표시 속성 제거';
+    document.body.classList.add('mobile-ui');return '재렌더/빈 트랙 삭제 후 전체 행 유지 · PC 복귀 시 모바일 표시 속성 제거';
+  },
+  async mobileLayout(){
+    await appReady();
+    try{
+      for(const [width,height] of [[390,844],[360,740]]){
+        await appSize(width,height);const label=width+'×'+height;
+        assert(!appDoc.querySelector('#mobileOverview,#mobileLayerBar,.mobile-layer-chip'),label+' · 삭제한 한 트랙/전체 전환 또는 트랙 요약 줄이 남았습니다.');
+        const rows=[...appQ('#timelineRows').querySelectorAll(':scope > .track')],scroll=appQ('#timelineScroll'),viewport=scroll.getBoundingClientRect(),headers=[...appQ('#trackHeaders').querySelectorAll('.track-head')];
+        assert(rows.length===5&&headers.length===5,label+' · 기본 다섯 트랙이 아닙니다.');
+        assert(rows.every(appVisible)&&headers.every(appVisible),label+' · 일부 트랙이나 헤더가 숨겨졌습니다.');
+        const names=headers.map(node=>node.querySelector('strong')?.textContent.trim());
+        for(const name of ['자막','그래픽','영상','오디오','보이스'])assert(names.includes(name),label+' · '+name+' 트랙이 없습니다.');
+        const contentTop=viewport.top+scroll.clientTop,contentBottom=contentTop+scroll.clientHeight;
+        assert(rows[0].getBoundingClientRect().top>=contentTop-1&&rows.at(-1).getBoundingClientRect().bottom<=contentBottom+1,label+' · 기본 다섯 트랙이 세로 스크롤 없이 보이지 않거나 마지막 행이 가로 스크롤바에 가립니다.');
+        for(let index=0;index<rows.length;index++){
+          const row=rows[index].getBoundingClientRect(),head=headers[index].getBoundingClientRect(),name=headers[index].querySelector('strong');
+          near(row.top,head.top,label+' · 헤더와 트랙 상단이 어긋납니다');near(row.height,head.height,label+' · 헤더와 트랙 높이가 다릅니다');
+          assert(name.scrollWidth<=name.clientWidth+1,label+' · 트랙 이름이 잘립니다: '+name.textContent);
+        }
+        assert(appVisible(appQ('#mobileTrackManager')),label+' · 트랙 관리 진입이 사라졌습니다.');
+        const dock=appQ('#mobileActionDock'),host=dock.querySelector('.mobile-action-scroll'),buttons=[...host.querySelectorAll('.mobile-action-button')],dockBox=dock.getBoundingClientRect();
+        assert(buttons.map(node=>node.textContent.trim()).join('|')==='추가|자막|소리|그래픽|퀵포맷',label+' · 기본 하단 다섯 작업 이름이나 순서가 다릅니다.');
+        assert(host.scrollWidth<=host.clientWidth+1,label+' · 기본 하단 도구에 가로 스크롤이 필요합니다.');
+        const first=buttons[0].getBoundingClientRect();
+        for(let index=0;index<buttons.length;index++){
+          const button=buttons[index],box=button.getBoundingClientRect(),icon=button.querySelector('svg').getBoundingClientRect(),style=appWin.getComputedStyle(button),text=button.querySelector('span');
+          near(box.width,first.width,label+' · 하단 버튼 폭이 서로 다릅니다');near(icon.left+icon.width/2,box.left+box.width/2,label+' · 하단 아이콘이 중앙에 있지 않습니다');
+          assert(appWin.getComputedStyle(text).textAlign==='center',label+' · 하단 문구가 중앙 정렬이 아닙니다.');
+          assert(box.left>=dockBox.left-1&&box.right<=dockBox.right+1,label+' · 하단 버튼이 화면 밖으로 나갑니다.');
+          if(index){near(box.left,buttons[index-1].getBoundingClientRect().right,label+' · 하단 구분선 사이에 빈 칸이 있습니다');assert(parseFloat(style.borderLeftWidth)>0&&style.borderLeftStyle!=='none',label+' · 하단 항목 사이 구분선이 없습니다.');}
+        }
+        near(dockBox.bottom,appWin.innerHeight,label+' · 하단 도구가 화면 아래에서 잘립니다');
+        assert(appQ('#mobileExport').textContent.trim()==='내보내기',label+' · 내보내기가 다른 이름으로 표시됩니다.');
+        const viewer=appQ('#mobileViewerHost').getBoundingClientRect();assert(viewer.height>=140&&viewer.bottom<=appQ('#mobileEditDeck').getBoundingClientRect().top+1,label+' · 트랙을 펼치면서 미리보기를 가렸습니다.');
+        assert(!appDoc.querySelector('.desktop-only[open]')&&[...appDoc.querySelectorAll('.desktop-only')].every(node=>!appVisible(node)),label+' · 모바일에 PC 전용 메뉴가 새어 나옵니다.');
+      }
+    }finally{await appSize(390,844);}
+    return '실제 앱 390×844·360×740: 기본 5트랙 한눈에 표시 · 요약 줄/토글 제거 · 하단 5개 균등 폭/중앙 정렬/구분선';
+  },
+  async mobileFlows(){
+    await appReady();await appSize(390,844);
+    assert(!appDoc.querySelector('.timeline-block'),'모바일 메뉴 검사는 빈 프로젝트에서 시작해야 합니다.');
+    let importedId=null;
+    const dockAction=action=>appClick('#mobileActionDock [data-mobile-action="'+action+'"]'),menuAction=action=>appClick('#mobileMenu [data-mobile-action="'+action+'"]');
+    const closeSheet=async()=>{if(appDoc.body.dataset.mobileSheet)await appClick('#mobilePanelDone');};
+    try{
+      await dockAction('menu:captions');assert(appVisible(appQ('#mobileMenu [data-mobile-action="new-caption"]')),'자막 메뉴에서 직접 입력에 접근할 수 없습니다.');
+      await menuAction('automatic');assert(appQ('#mobilePanelTitle').textContent==='자동 자막'&&appVisible(appQ('#libraryContent .smart-card')),'자동자막 설정 화면으로 연결되지 않습니다.');assert(!appVisible(appQ('#libraryContent [data-action="add-caption"]')),'자동자막 화면에 직접 추가 버튼이 섞였습니다.');await closeSheet();
+      await dockAction('menu:captions');await menuAction('caption-styles');assert(appQ('#mobilePanelTitle').textContent==='자막','자막 작업 화면 이름이 PC와 다릅니다.');
+      assert(appVisible(appQ('#libraryContent .preset-grid'))&&appVisible(appQ('#libraryContent [data-action="add-caption"]')),'자막 스타일과 현재 위치 자막 추가를 함께 사용할 수 없습니다.');
+      assert(appQ('#libraryContent [data-action="add-caption"]').getBoundingClientRect().bottom<=appQ('#libraryContent .preset-grid').getBoundingClientRect().top+1,'현재 위치 자막 추가 버튼이 스타일 목록 위에 배치되지 않았습니다.');
+      await appClick('#libraryContent [data-action="add-caption"]');await until(()=>!!appDoc.querySelector('.timeline-block[data-type="caption"]'),'직접 추가한 자막이 타임라인에 없습니다.');await closeSheet();
+      await dockAction('inspector:text');assert(appVisible(appQ('#inspectorContent textarea[data-prop="text"]')),'새 자막 문구를 편집할 수 없습니다.');await closeSheet();await dockAction('deselect');
+      await appClick('#mobileExport');assert(appQ('#exportDialog').open,'내보내기 버튼이 기존 내보내기 창에 연결되지 않습니다.');await appClick('#exportDialog [aria-label="닫기"]');
+      await dockAction('menu:sound');assert(appQ('#mobileMenu [data-mobile-action="view:voice"] strong').textContent==='AI TTS','모바일 음성 작업 이름이 AI TTS가 아닙니다.');assert(appVisible(appQ('#mobileMenu [data-mobile-action="view:silence"]')),'소리 메뉴에 무음 컷이 없습니다.');
+      await menuAction('view:voice');assert(appQ('#mobilePanelTitle').textContent==='AI TTS'&&appVisible(appQ('#libraryContent')),'AI TTS 화면에 접근할 수 없습니다.');await closeSheet();
+      await dockAction('menu:sound');await menuAction('view:silence');assert(appQ('#mobilePanelTitle').textContent==='무음 컷'&&appVisible(appQ('#libraryContent .smart-card')),'소리 메뉴에서 무음 컷 화면으로 연결되지 않습니다.');assert(appVisible(appQ('#mobilePanelBack')),'무음 컷에서 소리 메뉴로 돌아갈 버튼이 없습니다.');await closeSheet();
+      await dockAction('view:graphics');assert(appVisible(appQ('#libraryContent .preset-grid')),'그래픽 템플릿에 접근할 수 없습니다.');await closeSheet();
+      await dockAction('view:quick-format');assert(appVisible(appQ('#libraryContent [data-quick-save]')),'모바일에서 퀵포맷 저장 기능에 접근할 수 없습니다.');await closeSheet();
+      // 배포에 포함된 작은 CC0 영상으로 메뉴 연결만 검사합니다. 추적·TTS·자막 실행은 누르지 않습니다.
+      const response=await fetch('/demo/portrait.mp4');assert(response.ok,'메뉴 검사용 동영상 샘플을 읽지 못했습니다.');
+      const file=new appWin.File([await response.arrayBuffer()],'qa-mobile-video.mp4',{type:'video/mp4'}),transfer=new appWin.DataTransfer();transfer.items.add(file);
+      await dockAction('view:media');appQ('#fileInput').files=transfer.files;appQ('#fileInput').dispatchEvent(new appWin.Event('change',{bubbles:true}));
+      await until(()=>[...appDoc.querySelectorAll('[data-asset]')].some(node=>node.querySelector('h3')?.textContent==='qa-mobile-video.mp4'),'검사용 동영상을 라이브러리에 추가하지 못했습니다.',20000);
+      const card=[...appDoc.querySelectorAll('[data-asset]')].find(node=>node.querySelector('h3')?.textContent==='qa-mobile-video.mp4');importedId=card.dataset.asset;await appClick(card.querySelector('.asset-add'));
+      await until(()=>!!appDoc.querySelector('.timeline-block[data-type="clip"]')&&!appQ('#workbench').inert,'검사용 동영상이 타임라인에 준비되지 않았습니다.',20000);await closeSheet();
+      await dockAction('menu:clip');assert(appVisible(appQ('#mobileMenu [data-mobile-action="view:mosaic"]'))&&appVisible(appQ('#mobileMenu [data-mobile-action="view:crop-tracking"]')),'클립 메뉴에서 모자이크와 크롭 트래킹 모두에 접근할 수 없습니다.');
+      await menuAction('view:crop-tracking');assert(appQ('#mobilePanelTitle').textContent==='크롭 트래킹','크롭 트래킹 화면 이름이 올바르지 않습니다.');assert(appVisible(appQ('#libraryContent [data-smart-action="crop-tracking"]'))&&!appQ('#libraryContent [data-smart-action="crop-tracking"]').disabled,'동영상 선택 후 크롭 트래킹 진입 버튼이 비활성입니다.');await closeSheet();
+      await dockAction('menu:clip');await menuAction('view:mosaic');assert(appVisible(appQ('#libraryContent .smart-card')),'모자이크 트래킹 화면을 볼 수 없습니다.');
+    }finally{
+      if(appQ('#exportDialog').open)await appClick('#exportDialog [aria-label="닫기"]');await closeSheet();
+      for(let count=0;appDoc.querySelector('.timeline-block')&&count<8;count++){assert(!appQ('#mobileUndo').disabled,'검사용 미디어/자막을 되돌릴 수 없습니다.');await appClick('#mobileUndo');}
+      assert(!appDoc.querySelector('.timeline-block'),'메뉴 검사 후 테스트 클립이나 자막이 남았습니다.');
+      if(importedId){if(appDoc.querySelector('#mobileActionDock [data-mobile-action="deselect"]'))await dockAction('deselect');await dockAction('view:media');const remove=appDoc.querySelector('[data-remove-asset="'+importedId+'"]');if(remove)await appClick(remove);await closeSheet();}
+    }
+    return '자막 직접 추가/스타일/자동자막 · 내보내기 창 · AI TTS/소리 무음 컷 · 그래픽/퀵포맷 · 동영상 크롭/모자이크 진입 및 테스트 정리';
   },
 };
 async function run(names){
@@ -228,7 +353,7 @@ try{
   fixtureClips=await Promise.all([['qa-a','클립 A',1,2],['qa-b','클립 B',6,2],['qa-tail','끝 클립',18,2]].map(([id,name,start,imgDuration])=>makeClip(asset.id,{id,name,start,imgDuration,trackId:'v1'})));
   project.clips=fixtureClips.map(clip=>({...clip}));project.audio.tracks=[];project.captions=[];project.overlays=[];
   fixtureTracks=[{id:'v3',kind:'visual',role:'caption'},{id:'v2',kind:'visual',role:'graphic'},{id:'v1',kind:'visual',role:'video'},{id:'a1',kind:'audio',role:'audio'},{id:'a2',kind:'audio',role:'voice'}];project.timelineTracks=fixtureTracks.map(track=>({...track}));migrateTimeline();
-  timeline=new Timeline({busy:()=>false,pause(){},select(){calls.select++;},selectMany(){calls.multi++;},seek(time){timeline.tick(time);},commit(){calls.commit++;},error:message=>calls.errors.push(message),
+  timeline=new Timeline({busy:()=>false,pause(){},select(){calls.select++;},selectMany(){calls.multi++;},seek(time){calls.seek++;timeline.tick(time);},commit(){calls.commit++;},error:message=>calls.errors.push(message),
     copySettings(){calls.copy++;},pasteSettings(){calls.paste++;},canPasteSettings:()=>true,gap(){},transition(){},menuItems:()=>[{id:'qa-menu',label:'테스트 메뉴 실행'}],menuAction(){calls.menu++;}});
   await reset();$('runAll').onclick=()=>run(Object.keys(tests));document.querySelectorAll('[data-case]').forEach(button=>button.onclick=()=>run([button.dataset.case]));
   document.querySelectorAll('.qa-actions button').forEach(button=>button.disabled=false);document.body.dataset.result='ready';$('result').textContent='준비 완료. 전체 검사 또는 개별 검사 버튼을 누르세요.';

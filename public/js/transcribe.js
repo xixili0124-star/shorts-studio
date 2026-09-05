@@ -8,7 +8,8 @@
 //   200 -> { segments: [{ start: number(초), end: number(초), text: string }] }
 
 import { uid } from './util.js';
-import { transcriptionCaptions } from './ai-client.js';
+import { transcriptionCaptions, encodeWav as encodePcmWav } from './ai-client.js';
+import { monoPcm } from './silence.js';
 
 // 서버 코드는 stt-worker/ 에 있다. 배포: 그 폴더에서 npx wrangler deploy
 export const ENDPOINT = 'https://shorts-studio-stt.xixili0124.workers.dev';
@@ -86,21 +87,8 @@ export function serverCaptions(result, duration, offset = 0) {
 
 /** AudioBuffer -> 16bit PCM WAV (모노 16kHz, STT 용량 절약) */
 export function encodeWav(buffer, targetRate = 16000) {
-  const src = buffer.getChannelData(0);
-  const ratio = buffer.sampleRate / targetRate;
-  const len = Math.floor(src.length / ratio);
-  const out = new DataView(new ArrayBuffer(44 + len * 2));
-
-  const str = (off, s) => { for (let i = 0; i < s.length; i++) out.setUint8(off + i, s.charCodeAt(i)); };
-  str(0, 'RIFF'); out.setUint32(4, 36 + len * 2, true); str(8, 'WAVE');
-  str(12, 'fmt '); out.setUint32(16, 16, true); out.setUint16(20, 1, true);
-  out.setUint16(22, 1, true); out.setUint32(24, targetRate, true);
-  out.setUint32(28, targetRate * 2, true); out.setUint16(32, 2, true); out.setUint16(34, 16, true);
-  str(36, 'data'); out.setUint32(40, len * 2, true);
-
-  for (let i = 0; i < len; i++) {
-    const v = Math.max(-1, Math.min(1, src[Math.floor(i * ratio)] || 0));
-    out.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
-  }
-  return new Blob([out.buffer], { type: 'audio/wav' });
+  // PC·브라우저 자막과 같은 채널 선택을 사용해 오른쪽 채널의 말소리도 보존합니다.
+  const samples = monoPcm(buffer, targetRate);
+  return encodePcmWav({ sampleRate: targetRate, numberOfChannels: 1,
+    length: samples.length, getChannelData: () => samples });
 }

@@ -96,8 +96,13 @@ class InstallationTests(unittest.TestCase):
         self.assertIn(first['sha256'], command)
         self.assertIn(str(first['size']), command)
         self.assertIn(package.DOWNLOAD_ORIGIN + '/downloads/' + package.ZIP_NAME, command)
+        voice_command = Path(first['voiceInstaller']).read_text(encoding='utf-8')
+        self.assertIn('--components voice --yes --consumer', voice_command)
+        self.assertIn(first['sha256'], voice_command)
+        self.assertNotRegex(voice_command, r'VoxCPM|Whisper|SAM(?: 2|2)')
         self.assertLess(first['assetSizes']['archiveBytes'], package.CLOUDFLARE_MAX_ASSET_BYTES)
         self.assertLess(first['assetSizes']['installerBytes'], package.CLOUDFLARE_MAX_ASSET_BYTES)
+        self.assertLess(first['assetSizes']['voiceInstallerBytes'], package.CLOUDFLARE_MAX_ASSET_BYTES)
 
     def test_public_sources_and_manifest_reject_private_paths_or_static_keys(self):
         target = self.source / 'studio_server.py'
@@ -447,6 +452,32 @@ class InstallationTests(unittest.TestCase):
         self.assertEqual(components.call_args.args[2], [])
         startup.assert_not_called(); prompt.assert_not_called()
 
+    def test_consumer_voice_setup_is_single_purpose_noninteractive_and_quiet(self):
+        with patch.object(installer, 'installation_home', return_value=self.home), patch.object(installer, 'read_registration', return_value={}), patch.object(installer, 'local_data_dir', return_value=self.local), patch.object(installer, 'stop_bridge'), patch.object(installer, 'install_application', return_value=(self.home / 'app', self.local)), patch.object(installer, 'install_components') as components, patch.object(installer, 'write_shortcuts'), patch.object(installer, 'create_start_menu_shortcut'), patch.object(installer, 'configure_startup') as startup, patch.object(installer, 'start_bridge', return_value='started'), patch('builtins.input') as prompt, patch('sys.stdout', new=io.StringIO()) as output:
+            self.assertEqual(installer.main(['--components', 'voice', '--yes', '--consumer', '--source', str(self.source)]), 0)
+        self.assertEqual(components.call_args.args[2], ['voice'])
+        self.assertTrue(components.call_args.kwargs['consumer'])
+        startup.assert_not_called(); prompt.assert_not_called()
+        self.assertNotRegex(output.getvalue(), r'VoxCPM|Whisper|SAM(?: 2|2)')
+        for arguments in (['--consumer', '--yes'], ['--consumer', '--components', 'voice'],
+                          ['--consumer', '--yes', '--components', 'asr']):
+            with self.subTest(arguments=arguments), self.assertRaisesRegex(RuntimeError, '전용 준비 파일'):
+                installer.main(arguments)
+
+    def test_consumer_component_hides_child_output_in_a_private_log(self):
+        def complete(command, **kwargs):
+            self.assertIn('--yes', command)
+            self.assertEqual(kwargs['stderr'], subprocess.STDOUT)
+            self.assertEqual(kwargs['stdin'], subprocess.DEVNULL)
+            kwargs['stdout'].write(b'synthetic internal engine name\n')
+            self.configured('voice')
+        with patch.object(installer.subprocess, 'run', side_effect=complete) as run, patch('sys.stdout', new=io.StringIO()) as output:
+            installer.install_components(self.source, self.local, ['voice'], consumer=True)
+        run.assert_called_once()
+        self.assertNotIn('synthetic internal engine name', output.getvalue())
+        logs = list((self.local / 'logs').glob('voice-setup-*.log'))
+        self.assertEqual(len(logs), 1); self.assertIn(b'synthetic internal engine name', logs[0].read_bytes())
+
     @unittest.skipUnless(os.name == 'nt', 'Windows 시작 메뉴 호출은 모의 객체만 사용합니다.')
     def test_start_menu_shortcut_stays_in_programs_and_passes_paths_as_data(self):
         runtime = self.root / 'runtime & percent%value%!'; runtime.mkdir()
@@ -503,7 +534,8 @@ class InstallationTests(unittest.TestCase):
 
     @unittest.skipUnless(os.name == 'nt', 'Windows PowerShell 구문 검사 전용입니다.')
     def test_generated_bootstrap_parses_without_executing_downloads(self):
-        for name, command in [('local.cmd', package.bootstrap_cmd()), ('download.cmd', package.bootstrap_cmd('a' * 64, 1234))]:
+        for name, command in [('local.cmd', package.bootstrap_cmd()), ('download.cmd', package.bootstrap_cmd('a' * 64, 1234)),
+                              ('voice.cmd', package.bootstrap_cmd('a' * 64, 1234, components=('voice',), consumer=True))]:
             (self.root / name).write_bytes(command.encode('utf-8'))
             self.assertLess(max(map(len, command.splitlines())), 8000)
             self.assertNotIn('ExecutionPolicy', command)
@@ -519,7 +551,7 @@ class InstallationTests(unittest.TestCase):
         (self.root / 'shortcut-script.txt').write_text(create.call_args.args[0][-1], encoding='utf-8')
         script = r'''
 $ErrorActionPreference='Stop'
-foreach($name in @('local.cmd','download.cmd')) {
+foreach($name in @('local.cmd','download.cmd','voice.cmd')) {
   $line=[IO.File]::ReadAllLines((Join-Path $env:STUDIO_PARSE_FIXTURE $name)) | Where-Object {$_.StartsWith('powershell.exe ')}
   $prefix='-Command "'
   $body=$line.Substring($line.IndexOf($prefix)+$prefix.Length)

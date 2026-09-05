@@ -24,12 +24,12 @@ ROOT = Path(__file__).resolve().parent
 BRIDGE_URL = 'http://127.0.0.1:8792'
 BRIDGE_PORT = 8792
 COMPONENTS = {
-    'voice': {'label': 'VoxCPM2 내 목소리', 'script': 'setup_vox_voice.py', 'directory': 'vox-engine',
-              'configs': ('pc-voice-voxcpm2.json', 'pc-voice.json'), 'provider': 'voxcpm2', 'download': '모델 약 5GB + 별도 실행 환경, 여유 15GB 이상'},
-    'asr': {'label': 'Whisper Turbo 자막', 'script': 'setup_pc_asr.py', 'directory': 'asr-engine',
-            'configs': ('pc-asr.json',), 'provider': 'faster-whisper', 'download': '모델 약 1.62GB + 별도 실행 환경, 여유 8GB 이상'},
-    'tracking': {'label': 'SAM 2.1 Small 추적', 'script': 'setup_pc_tracking.py', 'directory': 'tracking-engine',
-                 'configs': ('pc-tracking.json',), 'provider': 'sam2', 'download': '추적 모델과 별도 GPU 실행 환경'},
+    'voice': {'label': '내 목소리', 'script': 'setup_vox_voice.py', 'directory': 'vox-engine',
+              'configs': ('pc-voice-voxcpm2.json', 'pc-voice.json'), 'provider': 'voxcpm2', 'download': '필요 파일 약 5GB + 별도 실행 환경, 여유 15GB 이상'},
+    'asr': {'label': '자동 자막', 'script': 'setup_pc_asr.py', 'directory': 'asr-engine',
+            'configs': ('pc-asr.json',), 'provider': 'faster-whisper', 'download': '필요 파일 약 1.62GB + 별도 실행 환경, 여유 8GB 이상'},
+    'tracking': {'label': '정밀 추적', 'script': 'setup_pc_tracking.py', 'directory': 'tracking-engine',
+                 'configs': ('pc-tracking.json',), 'provider': 'sam2', 'download': '추적에 필요한 파일과 별도 실행 환경'},
 }
 
 
@@ -153,7 +153,7 @@ def component_state(local, name):
     return 'absent'
 
 
-def install_components(app, local, names, *, python=None, uv=None, device='cuda'):
+def install_components(app, local, names, *, python=None, uv=None, device='cuda', consumer=False):
     python = str(python or sys.executable)
     local = _local_directory(local)
     for name in names:
@@ -184,9 +184,22 @@ def install_components(app, local, names, *, python=None, uv=None, device='cuda'
         if uv:
             command.extend(['--uv', str(uv)])
         environment = {**os.environ, 'STUDIO_LOCAL_DIR': str(local), 'PYTHONUTF8': '1'}
-        subprocess.run(command, cwd=app, env=environment, check=True)
+        if consumer:
+            logs = _local_directory(local / 'logs'); logs.mkdir(parents=True, exist_ok=True)
+            log = logs / ('voice-setup-' + time.strftime('%Y%m%d-%H%M%S') + '-' + secrets.token_hex(3) + '.log')
+            print('내 목소리 기능을 준비하고 있습니다. 다운로드 크기에 따라 시간이 걸릴 수 있습니다.', flush=True)
+            try:
+                with log.open('xb') as output:
+                    subprocess.run(command, cwd=app, env=environment, stdin=subprocess.DEVNULL,
+                                   stdout=output, stderr=subprocess.STDOUT, check=True)
+            except subprocess.CalledProcessError as error:
+                raise RuntimeError('내 목소리 기능 준비가 중단됐습니다. 기존 파일과 녹음은 유지했습니다.') from error
+        else:
+            subprocess.run(command, cwd=app, env=environment, stdin=subprocess.DEVNULL, check=True)
         if component_state(local, name) != 'configured':
             raise RuntimeError(spec['label'] + ': 설치가 끝났지만 실행 설정을 확인하지 못했습니다.')
+        if consumer:
+            print('내 목소리 기능에 필요한 파일을 준비했습니다.', flush=True)
 
 
 class NoRedirect(HTTPRedirectHandler):
@@ -407,10 +420,14 @@ def main(argv=None):
     parser.add_argument('--components', nargs='*', choices=COMPONENTS, default=None, help='설치할 기능, 이미 설정된 기능은 재사용')
     parser.add_argument('--device', choices=('cuda', 'cpu'), default='cuda')
     parser.add_argument('--yes', action='store_true', help='Confirm only the explicitly listed components')
+    parser.add_argument('--consumer', action='store_true', help='내 목소리 전용 비대화형 설치에서 일반 안내만 표시')
     startup = parser.add_mutually_exclusive_group()
     startup.add_argument('--enable-startup', action='store_true', help='Windows 로그인 때 연결 서비스 시작에 명시적으로 동의')
     startup.add_argument('--disable-startup', action='store_true', help='이 앱의 Windows 자동 시작 등록만 해제')
     args = parser.parse_args(argv)
+    if args.consumer and (not args.yes or args.components != ['voice'] or args.check or args.start or args.restart
+                          or args.enable_startup or args.disable_startup):
+        raise RuntimeError('내 목소리 전용 준비 파일의 실행 옵션을 확인하지 못했습니다.')
     if os.name != 'nt' or platform.machine().lower() not in ('amd64', 'x86_64'):
         raise RuntimeError('이 설치기는 Windows x64용입니다.')
     home = _canonical_local_path(args.installation_home or installation_home())
@@ -454,14 +471,18 @@ def main(argv=None):
     app, local = install_application(args.source, home=home, local=local, python=sys.executable)
     home = app.parent
     uv = home / 'runtime' / 'uv.exe'
-    install_components(app, local, names, uv=uv if uv.is_file() else None, device=args.device)
+    install_components(app, local, names, uv=uv if uv.is_file() else None, device=args.device, consumer=args.consumer)
     write_shortcuts(home, app, sys.executable)
     create_start_menu_shortcut(app, sys.executable, home=home)
     if enable_startup or args.disable_startup:
         configure_startup(app, sys.executable, enable_startup, home=home)
     print('PC 연결: ' + start_bridge(app, local), flush=True)
-    print('설치가 끝났습니다. 원래 편집기의 도움말 → PC 연결 → 설치 확인을 누르세요. 브라우저는 설치 파일을 자동 실행하지 않습니다.', flush=True)
-    print('다음에는 시작 메뉴의 Shorts Studio PC를 실행하세요. Windows 자동 시작은 명시적으로 동의한 경우에만 등록합니다.', flush=True)
+    if args.consumer:
+        print('내 목소리 기능 준비가 끝났습니다. 편집기로 돌아가 목소리 등록을 다시 눌러 주세요.', flush=True)
+        print('다음 사용 때는 시작 메뉴의 Shorts Studio PC를 실행하면 기존 준비 상태를 자동으로 찾습니다.', flush=True)
+    else:
+        print('설치가 끝났습니다. 원래 편집기의 도움말 → PC 연결 → 설치 확인을 누르세요. 브라우저는 설치 파일을 자동 실행하지 않습니다.', flush=True)
+        print('다음에는 시작 메뉴의 Shorts Studio PC를 실행하세요. Windows 자동 시작은 명시적으로 동의한 경우에만 등록합니다.', flush=True)
     return 0
 
 
@@ -469,5 +490,8 @@ if __name__ == '__main__':
     try:
         raise SystemExit(main())
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
-        print('PC 지원 설치를 마치지 못했습니다: ' + str(error), file=sys.stderr)
+        if '--consumer' in sys.argv:
+            print('내 목소리 기능 준비를 마치지 못했습니다. 기존 파일과 녹음은 유지했습니다.', file=sys.stderr)
+        else:
+            print('PC 지원 설치를 마치지 못했습니다: ' + str(error), file=sys.stderr)
         raise SystemExit(1)

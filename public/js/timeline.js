@@ -13,6 +13,22 @@ const $ = id => document.getElementById(id);
 const esc = s => String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const stamp = t => Math.floor(t/60).toString().padStart(2,'0')+':'+Math.floor(t%60).toString().padStart(2,'0');
 const precise = t => stamp(t)+'.'+Math.floor((t % 1) * 100).toString().padStart(2,'0');
+export const MIN_TIMELINE_ZOOM = 3;
+export const MAX_TIMELINE_ZOOM = 720;
+export const normalizeTimelineZoom = value => clamp(Number(value)||MIN_TIMELINE_ZOOM,MIN_TIMELINE_ZOOM,MAX_TIMELINE_ZOOM);
+export const TIMELINE_OVERVIEW_ZOOM = 18;
+export const isTimelineOverviewZoom = value => normalizeTimelineZoom(value)<TIMELINE_OVERVIEW_ZOOM;
+const RULER_STEPS = [1,2,5,10,20,30,60,120,300,600,1200,3600];
+/** 라벨이 겹치지 않도록 현재 배율에서 약 50px 이상 떨어지는 눈금 간격을 고릅니다. */
+export const timelineRulerIncrement = value => {
+  const zoom=normalizeTimelineZoom(value);
+  return RULER_STEPS.find(step=>step*zoom>=50)||RULER_STEPS.at(-1);
+};
+export const timelineBlockPixelWidth = (duration,value) => {
+  const span=Math.max(0,Number(duration)||0)*normalizeTimelineZoom(value);
+  // 개요 배율에서는 최소 12px를 강제하면 이웃 클립의 클릭 영역까지 덮습니다.
+  return isTimelineOverviewZoom(value)?span-Math.min(2,span*.2):Math.max(12,span-2);
+};
 
 
 export class Timeline {
@@ -72,19 +88,24 @@ export class Timeline {
     this.canvas.addEventListener('drop',e=>this.externalDrop(e));
     document.addEventListener('dragend',()=>this.endExternalDrag());
     this.scroll.addEventListener('wheel',e=>{
-      if(e.ctrlKey||e.metaKey){e.preventDefault();this.setZoom(this.zoom*(e.deltaY<0?1.12:.89));}
+      if(e.ctrlKey||e.metaKey){e.preventDefault();this.setZoom(this.zoom*(e.deltaY<0?1.12:.89),e.clientX);}
     },{passive:false});
   }
-  /**
-   * 타임라인 상태줄에 씁니다. 화면에 보이는 줄이면서 aria-live 영역이기도 합니다.
-   * 예전에는 sr-only 라 드래그 미리보기·거절 사유가 눈에 보이지 않았습니다.
-   */
+  /** 드래그 미리보기와 거절 사유를 눈에 보이는 상태줄에도 전달합니다. */
   notice(text,tone='info'){
     const host=$('timelineNotice');if(!host)return;
     host.textContent=text||'';host.dataset.tone=tone;
   }
-  setZoom(value){if(this.dragging)return;this.zoom=clamp(value,18,180);$('timelineZoom').value=this.zoom;this.render();}
-  fit(){this.setZoom((this.scroll.clientWidth-70)/Math.max(4,totalDuration()));}
+  setZoom(value,anchorClientX=null){
+    if(this.dragging)return;
+    const next=normalizeTimelineZoom(value),previous=this.zoom;
+    const rect=this.scroll.getBoundingClientRect();
+    const anchor=Number.isFinite(anchorClientX)?clamp(anchorClientX-rect.left,0,rect.width):rect.width/2;
+    const time=(this.scroll.scrollLeft+anchor)/Math.max(MIN_TIMELINE_ZOOM,previous);
+    this.zoom=next;$('timelineZoom').value=String(next);this.render();
+    this.scroll.scrollLeft=Math.max(0,time*next-anchor);
+  }
+  fit(){this.setZoom((this.scroll.clientWidth-70)/Math.max(4,totalDuration()),this.scroll.getBoundingClientRect().left);this.scroll.scrollLeft=0;}
   toggleSnap(){this.snapping=!this.snapping;$('snap').classList.toggle('active',this.snapping);$('snap').setAttribute('aria-pressed',this.snapping);}
   xTime(x){return clamp((x-this.canvas.getBoundingClientRect().left)/this.zoom,0,86400);}
   preferredTrack(kind) {
@@ -158,7 +179,7 @@ export class Timeline {
     if(width>this.canvas.offsetWidth){this.canvas.style.width=width+'px';this.renderRuler(width);}
   }
   renderRuler(width){
-    const increment=this.zoom<35?5:this.zoom<65?2:1;let html='';
+    const increment=timelineRulerIncrement(this.zoom);let html='';
     for(let t=0;t<width/this.zoom;t+=increment){
       html+='<div class="ruler-mark" style="left:'+t*this.zoom+'px"><span>'+stamp(t)+'</span></div>';
       for(let k=1;k<4;k++)html+='<div class="ruler-mark minor" style="left:'+(t+increment*k/4)*this.zoom+'px"></div>';
@@ -201,11 +222,13 @@ export class Timeline {
     const name=TRANSITIONS.find(transition=>transition.id===pair.type)?.name||'전환';
     const label=(pair.left.clip.name||'앞 클립')+' ↔ '+(pair.right.clip.name||'뒤 클립')+' · '+name+(pair.duration?' '+pair.duration.toFixed(2)+'초':'');
     const band=pair.duration?'<span class="transition-band" style="left:'+pair.start*this.zoom+'px;width:'+pair.duration*this.zoom+'px"></span>':'';
+    // 25px 버튼이 여러 편집점을 덮는 개요 배율에서는 실제 전환 구간만 남깁니다.
+    if(isTimelineOverviewZoom(this.zoom))return band;
     return band+'<button type="button" class="transition-chip '+(pair.duration?'':'cut-connector')+'" data-type="transition" data-id="'+pair.left.clip.id+'" data-transition="'+pair.left.clip.id+'" data-right="'+pair.right.clip.id+'" aria-label="'+esc(label)+' 전환 편집" aria-pressed="false" style="left:'+pair.center*this.zoom+'px" title="'+esc(label)+' · 클릭하여 편집">'+'<span class="'+(pair.duration?'transition-symbol':'plus-symbol')+'" aria-hidden="true"></span></button>';
   }
   block(type,item,start,duration,visibleStart=start,visibleEnd=start+duration){
     const klass={clip:'video',caption:'caption',graphic:'graphic',audio:'audio'}[type],label=item.name||item.text||'클립';
-    const width=Math.max(12,(visibleEnd-visibleStart)*this.zoom-2);let detail='';
+    const overview=isTimelineOverviewZoom(this.zoom),width=timelineBlockPixelWidth(visibleEnd-visibleStart,this.zoom);let detail='';
     if(type==='clip'&&item.thumb){const n=Math.min(100,Math.ceil(width/46)+1);detail='<div class="thumb-strip">'+Array(n).fill('<img src="'+item.thumb+'" alt="" draggable="false">').join('')+'</div>';}
     if(type==='audio'){
       const a=assets.get(item.assetId),wave=a?.waveform||[],n=Math.min(500,Math.max(10,Math.ceil(width/4)));
@@ -227,7 +250,7 @@ export class Timeline {
     }
     const linkMark=linked?'<span class="link-mark" aria-hidden="true" title="연결된 클립 · 함께 움직입니다">⛓</span>':'';
     const actions='<div class="clip-settings '+(width<84?'compact':'')+'"><button type="button" data-clip-setting="copy" aria-label="'+esc(label)+' 설정 복사" title="설정 복사 · Ctrl+Alt+C"><span class="settings-copy-symbol" aria-hidden="true"></span></button><button type="button" data-clip-setting="paste" aria-label="'+esc(label)+'에 설정 붙여넣기" title="설정 붙여넣기 · 선택 묶음이면 함께 적용 · Ctrl+Alt+V"><span class="settings-paste-symbol" aria-hidden="true"></span></button></div>';
-    return '<div tabindex="0" role="button" aria-pressed="false" aria-label="'+esc(label)+' · '+duration.toFixed(2)+'초'+(linked?' · 연결됨':'')+'" class="timeline-block '+klass+'-block '+(linked?'linked-block ':'')+(width<30?'short-block':'')+'" data-type="'+type+'" data-id="'+item.id+'" data-start="'+start+'" data-end="'+(start+duration)+'" style="left:'+visibleStart*this.zoom+'px;width:'+width+'px" title="'+esc(label)+' · '+start.toFixed(2)+'–'+(start+duration).toFixed(2)+'초"><span class="block-grip start" data-edge="start"></span>'+detail+'<span class="block-label">'+prefix+' '+esc(label)+'</span>'+linkMark+warnings+actions+'<span class="block-grip end" data-edge="end"></span></div>';
+    return '<div tabindex="0" role="button" aria-pressed="false" aria-label="'+esc(label)+' · '+duration.toFixed(2)+'초'+(linked?' · 연결됨':'')+'" class="timeline-block '+klass+'-block '+(linked?'linked-block ':'')+(overview?'timeline-overview-block ':'')+(width<30?'short-block':'')+'" data-type="'+type+'" data-id="'+item.id+'" data-start="'+start+'" data-end="'+(start+duration)+'" style="left:'+visibleStart*this.zoom+'px;width:'+width+'px" title="'+esc(label)+' · '+start.toFixed(2)+'–'+(start+duration).toFixed(2)+'초"><span class="block-grip start" data-edge="start"></span>'+detail+'<span class="block-label">'+prefix+' '+esc(label)+'</span>'+linkMark+warnings+actions+'<span class="block-grip end" data-edge="end"></span></div>';
   }
   beginExternalDrag(kind,id){this.external={kind,id};this.callbacks.pause();}
   endExternalDrag(){this.external=null;this.clearPreview();this.stopScroll();}

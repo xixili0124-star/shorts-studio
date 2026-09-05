@@ -202,7 +202,7 @@ function checkCapacity(refs, doc) {
 }
 function verifySnapshot(doc, signal) {
   if (signal?.aborted) throw new DOMException('편집을 취소했습니다.','AbortError');
-  if (JSON.stringify(captureDocument())!==JSON.stringify(doc)) throw new Error('소재 준비 중 편집 내용이 변경되었습니다. 다시 시도해 주세요.');
+  if (JSON.stringify(captureDocument())!==JSON.stringify(doc)) throw new Error('파일 준비 중 편집 내용이 변경되었습니다. 다시 시도해 주세요.');
 }
 export function planBatchSplit(refs, time, doc = captureDocument()) {
   const entries=selectionRefs(refs,doc).map(ref=>({...ref,check:splitAvailability(ref,time,doc)}));

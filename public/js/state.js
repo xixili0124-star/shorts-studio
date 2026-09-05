@@ -45,6 +45,7 @@ export const project = {
   // 한국 숏츠에서 흔한 "상단 훅 문구 + 영상 + 하단 댓글" 형식이다.
   template: {
     mode: 'none',          // 'none' | 'band'
+    quickFormat: false,    // 새 스튜디오의 단순 상·하단 문구 포맷
     bg: '#000000',
     videoTop: 0.24,        // 영상 밴드가 시작하는 높이 비율
     videoHeight: 0.44,     // 영상 밴드 높이 비율
@@ -56,6 +57,8 @@ export const project = {
       size: 92,
       color: '#ffffff',
       accent: '#ffe14d',   // *별표* 로 감싼 부분에 칠할 색
+      background: '#000000',
+      bandPosition: 0.5,   // 퀵포맷 상단 영역 안에서의 세로 위치
       y: 0.10,             // 문구 블록의 세로 중심
     },
 
@@ -72,8 +75,12 @@ export const project = {
     credit: {
       on: false,
       text: '',
+      font: '"Noto Sans KR"',
       size: 40,
       color: '#9aa3b2',
+      accent: '#9aa3b2',
+      background: '#000000',
+      bandPosition: 0.33,  // 퀵포맷 하단 영역의 위쪽 1/3을 기본값으로 사용
       y: 0.94,
     },
   },

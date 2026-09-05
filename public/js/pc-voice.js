@@ -12,8 +12,8 @@ export function isPcVoiceOrigin(location=globalThis.location){
 
 async function readBounded(response,maximum){
   const announced=Number(response.headers.get('Content-Length')||0);
-  if(announced>maximum)throw new Error('PC 음성 응답이 너무 큽니다. 원고를 나누어 주세요.');
-  if(!response.body?.getReader){const bytes=await response.arrayBuffer();if(bytes.byteLength>maximum)throw new Error('PC 음성 응답이 너무 큽니다.');return new Uint8Array(bytes);}
+  if(announced>maximum)throw new Error('음성 결과가 너무 큽니다. 원고를 나누어 주세요.');
+  if(!response.body?.getReader){const bytes=await response.arrayBuffer();if(bytes.byteLength>maximum)throw new Error('음성 결과가 너무 큽니다.');return new Uint8Array(bytes);}
   const reader=response.body.getReader(),parts=[];let length=0;
   try{while(true){const {value,done}=await reader.read();if(done)break;length+=value.length;if(length>maximum){await reader.cancel();throw new Error('PC 음성 응답이 너무 큽니다.');}parts.push(value);}}
   finally{reader.releaseLock();}
@@ -31,21 +31,21 @@ async function request(path,payload,{signal,timeout=10000,location=globalThis.lo
       headers:{...transport.headers,'X-Studio-PC-Voice':'1',...(payload===undefined?{}:{'Content-Type':'application/json','X-Studio-Consent':'voice-clone-local'})},
       ...(payload===undefined?{}:{body:JSON.stringify(payload)}),signal:ctrl.signal,credentials:'omit',cache:'no-store',redirect:'error'});
     check(signal);
-    if(!response.ok){let message='PC 음성 기능에 연결하지 못했습니다. PC용 편집기를 다시 실행해 주세요.';
+    if(!response.ok){let message='내 목소리 기능을 사용할 수 없습니다. 잠시 후 다시 시도해 주세요.';
       try{const raw=await readBounded(response,65536),error=JSON.parse(new TextDecoder().decode(raw));if(typeof error.error?.message==='string')message=error.error.message;}catch{}
       throw new Error(message);
     }
     const audio=path==='/synthesize',mime=response.headers.get('Content-Type')||'';
-    if(!mime.startsWith(audio?'audio/wav':'application/json'))throw new Error('PC 음성 서버를 찾지 못했습니다. 최신 PC용 편집기로 다시 실행해 주세요.');
+    if(!mime.startsWith(audio?'audio/wav':'application/json'))throw new Error('내 목소리 기능의 응답을 확인하지 못했습니다. 준비 파일을 다시 실행해 주세요.');
     const raw=await readBounded(response,audio?32*1024*1024:65536);check(signal);
     if(!audio){try{return JSON.parse(new TextDecoder().decode(raw));}catch{throw new Error('PC 음성 서버 응답을 읽지 못했습니다.');}}
     const sampleRate=Number(response.headers.get('X-Studio-Audio-Rate')),duration=Number(response.headers.get('X-Studio-Audio-Duration'));
-    if(raw.length<44||new TextDecoder().decode(raw.subarray(0,4))!=='RIFF'||new TextDecoder().decode(raw.subarray(8,12))!=='WAVE'||!Number.isFinite(duration)||duration<=0||duration>300||!Number.isInteger(sampleRate)||sampleRate<16000||sampleRate>96000)throw new Error('PC 엔진에서 정상적인 음성 파일을 받지 못했습니다.');
+    if(raw.length<44||new TextDecoder().decode(raw.subarray(0,4))!=='RIFF'||new TextDecoder().decode(raw.subarray(8,12))!=='WAVE'||!Number.isFinite(duration)||duration<=0||duration>300||!Number.isInteger(sampleRate)||sampleRate<16000||sampleRate>96000)throw new Error('정상적인 음성 결과를 받지 못했습니다.');
     return {wav:new Blob([raw],{type:'audio/wav'}),duration,sampleRate};
   }catch(error){
     if(signal?.aborted)throw abortError();
-    if(expired)throw new Error(path==='/synthesize'?'결과 받기 시간이 초과되었습니다. 엔진 작업이 남아 있을 수 있으니 연결 상태를 확인해 주세요.':'PC 연결을 확인하지 못했습니다. 음성 엔진이 준비된 뒤 다시 확인해 주세요.');
-    if(error instanceof TypeError)throw new Error('PC 음성 연결이 끊겼습니다. 원고는 유지됩니다. PC용 편집기와 음성 엔진을 확인해 주세요.');
+    if(expired)throw new Error(path==='/synthesize'?'음성을 만드는 데 시간이 오래 걸리고 있습니다. 원고를 나눠 다시 시도해 주세요.':'내 목소리 기능을 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.');
+    if(error instanceof TypeError)throw new Error('내 목소리 기능과 연결이 끊겼습니다. 원고는 그대로 유지됩니다.');
     throw error;
   }finally{clearTimeout(timer);signal?.removeEventListener('abort',cancel);}
 }

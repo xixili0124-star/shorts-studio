@@ -1,15 +1,19 @@
-// 외부 네트워크 없이 동봉한 원본 고지·메타데이터·PCM 파일을 검증합니다.
+// 외부 네트워크 없이 동봉한 원본 고지·메타데이터·정적 음원 파일을 검증합니다.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {existsSync,readFileSync,readdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {FONTS,ensureFont,ensureFontPreview} from '../public/js/font-catalog.js';
-import {SOUND_EFFECTS,createSoundEffect} from '../public/js/sound-effects.js';
+import * as soundEffectModule from '../public/js/sound-effects.js';
+import {addDecodedAudioAsset,assets} from '../public/js/project-store.js';
+
+const {SOUND_EFFECTS,createSoundEffect,soundEffectAssetId}=soundEffectModule;
 
 const fontRoot=new URL('../public/licenses/google-fonts/',import.meta.url);
 const soundRoot=new URL('../public/sounds/',import.meta.url);
 const fontSources=JSON.parse(readFileSync(new URL('catalog-sources.json',fontRoot),'utf8'));
 const soundSources=JSON.parse(readFileSync(new URL('manifest.json',soundRoot),'utf8'));
+const credits=readFileSync(new URL('../CREDITS.md',import.meta.url),'utf8');
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fontSource=font=>fontSources.fonts.find(item=>item.family===font.family);
 const soundSource=effect=>soundSources.sounds.find(item=>item.id===effect.id);
@@ -95,49 +99,84 @@ test('unknown and already cancelled font previews make no network request',async
   }finally{globalThis.document=previous;}
 });
 
-test('CC0 sound catalog maps every sample to a real package and retained license',()=>{
-  assert.ok(SOUND_EFFECTS.length>=15&&SOUND_EFFECTS.length<=25);
+test('user sound catalog maps all 37 supplied MP3 files without claiming a license',()=>{
+  assert.equal(SOUND_EFFECTS.length,37);
+  assert.equal(soundSources.version,3);
+  assert.equal(soundSources.origin,'user-supplied');
+  assert.equal(soundSources.license,'not-declared');
+  assert.equal(soundSources.sounds.length,SOUND_EFFECTS.length);
   assert.equal(new Set(SOUND_EFFECTS.map(effect=>effect.id)).size,SOUND_EFFECTS.length);
   assert.equal(new Set(SOUND_EFFECTS.map(effect=>effect.sha256)).size,SOUND_EFFECTS.length);
-  for(const id of ['whoosh','swish','air','riser','rewind','click','tick','switch','shutter','type','ding','chime','success','alert','pop','bubble','thump','impact','boing','sparkle']){
+  for(const id of ['entrance','delivery-ding','dudung-tak','clear-ding','punch','mouse-click','sparkle','explosion','check-chime','eight-bit-rise','ticking','drum-roll','gta-death','energy-whoosh','complete','gunshot','wow']){
     assert.ok(SOUND_EFFECTS.some(effect=>effect.id===id));
   }
-  for(const pack of soundSources.packages){
-    const license=readFileSync(new URL(pack.licenseFile,soundRoot));
-    assert.equal(hash(license),pack.licenseSha256);
-    assert.match(license.toString(),/CC0/);assert.match(license.toString(),/commercial projects/);
-    assert.equal(new URL(pack.downloadUrl).origin,'https://kenney.nl');
-    assert.match(pack.archiveSha256,/^[a-f0-9]{64}$/);
-  }
   for(const effect of SOUND_EFFECTS){
-    const proof=soundSource(effect),pack=soundSources.packages.find(item=>item.id===proof.pack);
-    assert.ok(pack);assert.equal(effect.sourceUrl,pack.sourceUrl);
+    const proof=soundSource(effect);
+    assert.ok(proof,effect.id);
     assert.equal(effect.file,'../sounds/'+proof.file);
-    assert.match(proof.file,/^kenney\/[a-z]+\.wav$/);
-    assert.equal(effect.license,'CC0-1.0');assert.equal(effect.author,'Kenney');
-    assert.match(proof.sourceFile,/^Audio\/.+\.ogg$/);
-    assert.match(proof.sourceSha256,/^[a-f0-9]{64}$/);
+    assert.match(proof.file,/^user\/[a-z0-9-]+\.mp3$/);
+    assert.equal(effect.mime,'audio/mpeg');assert.equal(proof.mime,'audio/mpeg');
+    assert.equal(effect.license,'not-declared');assert.equal(proof.license,'not-declared');
+    assert.match(proof.sourceName,/\.mp3$/i);
+    assert.match(proof.sha256,/^[a-f0-9]{64}$/);
+    assert.ok(Number.isInteger(proof.bytes)&&proof.bytes>0);
+    assert.ok(Number.isFinite(effect.duration)&&effect.duration>0);
+    assert.equal('kind' in effect,false);assert.equal('freq' in effect,false);
+  }
+  const declared=soundSources.sounds.map(item=>item.file.replace(/^user\//,'')).sort();
+  const shipped=readdirSync(new URL('user/',soundRoot)).filter(name=>name.endsWith('.mp3')).sort();
+  assert.deepEqual(shipped,declared);
+  for(const removed of ['cc0/','kenney/','licenses/'])assert.equal(existsSync(new URL(removed,soundRoot)),false);
+  assert.match(soundSources.notice,/권리/);assert.match(credits,/CC0나 무료 상업용 음원으로 표시하지 않습니다/);
+});
+
+test('sound library exposes static files only and has no synthesis fallback',()=>{
+  assert.equal('synthesizeEffect' in soundEffectModule,false);
+  assert.deepEqual(Object.keys(soundEffectModule).sort(),['SOUND_EFFECTS','createSoundEffect','soundEffectAssetId']);
+});
+
+test('replacement sounds cannot reuse a legacy asset with the same catalog name',()=>{
+  const pcm={length:1,sampleRate:48000,numberOfChannels:1,getChannelData:()=>Float32Array.of(.1)};
+  const before=new Map(assets);assets.clear();
+  try{
+    for(const id of ['shutter','sparkle','pop']){
+      const legacy=addDecodedAudioAsset(new File(['old'],id+'.wav',{type:'audio/wav'}),pcm,{id:'builtin-sfx-'+id});
+      const key=soundEffectAssetId(id);
+      const current=addDecodedAudioAsset(new File(['new'],id+'.mp3',{type:'audio/mpeg'}),pcm,{id:key});
+      assert.notEqual(current,legacy);assert.equal(current.file.name,id+'.mp3');
+      assert.equal(assets.get(legacy.id),legacy,'이전 타임라인이 사용하던 원본은 그대로 둡니다');
+      assert.equal(addDecodedAudioAsset(current.file,pcm,{id:key}),current,'새 음원끼리는 자원을 재사용합니다');
+      assert.match(key,/^builtin-sfx-[a-f0-9]{64}$/);assert.ok(key.length<=80);
+    }
+    assert.throws(()=>soundEffectAssetId('missing'),/찾지/);
+  }finally{
+    for(const asset of assets.values())if(asset.url)URL.revokeObjectURL(asset.url);
+    assets.clear();for(const [id,asset] of before)assets.set(id,asset);
   }
 });
 
-test('all shipped WAV samples decode to bounded non-silent mono PCM with exact durations and hashes',()=>{
+function hasMp3Frame(bytes){
+  let start=0;
+  if(bytes[0]===0x49&&bytes[1]===0x44&&bytes[2]===0x33&&bytes.length>=10){
+    const size=((bytes[6]&0x7f)<<21)|((bytes[7]&0x7f)<<14)|((bytes[8]&0x7f)<<7)|(bytes[9]&0x7f);
+    start=Math.min(bytes.length,10+size+((bytes[5]&0x10)?10:0));
+  }
+  const end=Math.min(bytes.length-3,start+65536);
+  for(let offset=start;offset<end;offset+=1){
+    if(bytes[offset]!==0xff||(bytes[offset+1]&0xe0)!==0xe0)continue;
+    const version=(bytes[offset+1]>>3)&3,layer=(bytes[offset+1]>>1)&3,bitrate=(bytes[offset+2]>>4)&15,sampleRate=(bytes[offset+2]>>2)&3;
+    if(version!==1&&layer!==0&&bitrate!==0&&bitrate!==15&&sampleRate!==3)return true;
+  }
+  return false;
+}
+
+test('all supplied MP3 samples have exact sizes, hashes, signatures, and durations',()=>{
   for(const effect of SOUND_EFFECTS){
     const bytes=soundBytes(effect),proof=soundSource(effect);
     assert.equal(bytes.length,effect.bytes);assert.equal(hash(bytes),effect.sha256);
-    assert.equal(bytes.toString('ascii',0,4),'RIFF');assert.equal(bytes.readUInt32LE(4),bytes.length-8);
-    assert.equal(bytes.toString('ascii',8,12),'WAVE');assert.equal(bytes.toString('ascii',12,16),'fmt ');
-    assert.equal(bytes.readUInt32LE(16),16);assert.equal(bytes.readUInt16LE(20),1);
-    assert.equal(bytes.readUInt16LE(22),1);assert.equal(bytes.readUInt32LE(24),48000);
-    assert.equal(bytes.readUInt32LE(28),96000);assert.equal(bytes.readUInt16LE(32),2);assert.equal(bytes.readUInt16LE(34),16);
-    assert.equal(bytes.toString('ascii',36,40),'data');assert.equal(bytes.readUInt32LE(40),bytes.length-44);
-    const frames=(bytes.length-44)/2;
-    assert.equal(frames,proof.frames);assert.equal(effect.duration,frames/48000);
-    assert.ok(effect.duration>=.12&&effect.duration<=3);
-    let peak=0,power=0;
-    for(let offset=44;offset<bytes.length;offset+=2){const value=bytes.readInt16LE(offset)/32768;peak=Math.max(peak,Math.abs(value));power+=value*value;}
-    assert.ok(peak>.05&&peak<.83,effect.id);assert.ok(power/frames>1e-6,effect.id);
-    assert.ok(Math.abs(peak-proof.decodedPeak)<1e-8);
-    assert.ok(Math.abs(Math.sqrt(power/frames)-proof.decodedRms)<1e-8);
+    assert.equal(effect.duration,proof.duration);
+    assert.ok(effect.duration>=.3&&effect.duration<=8.1,effect.id);
+    assert.equal(hasMp3Frame(bytes),true,effect.id);
   }
 });
 
@@ -146,10 +185,10 @@ async function withFetch(fetcher,run){
   try{return await run();}finally{globalThis.fetch=previous;}
 }
 
-test('createSoundEffect returns the shipped File and never regenerates a synthetic substitute',async()=>{
+test('createSoundEffect returns the supplied MP3 and never regenerates a substitute',async()=>{
   const requested=[];
   await withFetch(async(url,options)=>{
-    const effect=SOUND_EFFECTS.find(item=>url.pathname.endsWith('/'+item.id+'.wav'));
+    const effect=SOUND_EFFECTS.find(item=>url.pathname.endsWith('/user/'+item.id+'.mp3'));
     assert.ok(effect);assert.equal(url.searchParams.get('v'),effect.sha256.slice(0,12));
     assert.equal(options.mode,'same-origin');assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');
     requested.push(effect.id);
@@ -157,7 +196,7 @@ test('createSoundEffect returns the shipped File and never regenerates a synthet
   },async()=>{
     for(const effect of SOUND_EFFECTS){
       const file=await createSoundEffect(effect.id);
-      assert.ok(file instanceof File);assert.equal(file.type,'audio/wav');assert.match(file.name,/Kenney SFX\.wav$/);
+      assert.ok(file instanceof File);assert.equal(file.type,'audio/mpeg');assert.equal(file.name,effect.name+'.mp3');
       assert.deepEqual(Buffer.from(await file.arrayBuffer()),soundBytes(effect));
     }
   });
@@ -175,7 +214,7 @@ test('sound loading rejects absent files, oversized bodies, corruption, and canc
   await withFetch(async()=>new Response(original,{headers:{'Content-Length':String(effect.bytes+1)}}),()=>assert.rejects(()=>createSoundEffect(effect.id),/크기/));
   await withFetch(async()=>new Response(Buffer.alloc(effect.bytes+1)),()=>assert.rejects(()=>createSoundEffect(effect.id),/크기/));
   await withFetch(async()=>new Response(original.subarray(0,100)),()=>assert.rejects(()=>createSoundEffect(effect.id),/완전하지/));
-  const wrongHeader=Buffer.from(original);wrongHeader.write('HTML',0);
+  const wrongHeader=Buffer.alloc(effect.bytes);
   await withFetch(async()=>new Response(wrongHeader),()=>assert.rejects(()=>createSoundEffect(effect.id),/형식/));
   if(globalThis.crypto?.subtle){
     const corrupt=Buffer.from(original);corrupt[100]^=1;

@@ -19,7 +19,9 @@ export function setDocumentName(name) { documentName = String(name).trim().slice
 const clipKeys = ['id','assetId','type','name','start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','ken','fit','bg','scale','offX','offY','fadeIn','fadeOut','fadeEnvelope','volume','muted','transitionOut','trackId','transform','crop','mosaics','keyframes','cropTracking','audioSeparated','sourceAudioAssetId','linkId'];
 const audioKeys = ['id','assetId','name','start','trimStart','trimEnd','volume','fadeIn','fadeOut','fadeEnvelope','muted','lane','role','trackId','aiGenerated','keyframes','sourceVideoAudio','sourceVideoAssetId','linkId'];
 const sourceAudioKeys = ['sourceVideoAudio','sourceVideoAssetId'];
+const assetLibraryKeys = ['libraryHidden'];
 const copy = value => JSON.parse(JSON.stringify(value));
+const defaultTemplate = copy(project.template);
 const pick = (object, keys) => Object.fromEntries(keys.filter(k => object[k] !== undefined).map(k => [k, object[k]]));
 
 export function captureDocument() {
@@ -46,7 +48,7 @@ export function restoreDocument(doc) {
   // 필요한 자원이 모두 있는지 먼저 검사해 중간 상태를 남기지 않습니다.
   const clips = doc.clips.map(c => {
     const runtime = clipRuntime.get(c.id);
-    if (!runtime) throw new Error('프로젝트 소재를 먼저 불러와야 합니다.');
+    if (!runtime) throw new Error('프로젝트 파일을 먼저 불러와야 합니다.');
     return { ...runtime, ...copy(pick(c,clipKeys)), start: Number.isFinite(c.start) ? c.start : undefined,
       motionDuration: c.motionDuration, motionOffset: c.motionOffset, fadeEnvelope: c.fadeEnvelope ? copy(c.fadeEnvelope) : undefined,
       trackId: c.trackId, transform: c.transform ? copy(c.transform) : undefined, crop: c.crop ? copy(c.crop) : undefined,
@@ -70,7 +72,7 @@ export function restoreDocument(doc) {
   project.overlays = copy(doc.overlays || []);
   project.captions = copy(doc.captions || []);
   project.captionStyle = copy(doc.captionStyle || project.captionStyle);
-  project.template = copy(doc.template || project.template);
+  project.template = copy(doc.template || defaultTemplate);
   migrateTimeline();
   syncAnchoredItems();
 }
@@ -82,21 +84,31 @@ export class History {
     this.past.push({ doc: before, label });
     if (this.past.length > 60) this.past.shift();
     this.future = [];
+    collectUnusedLibraryAssets([...this.past,...this.future].map(entry=>entry.doc));
     return true;
   }
   undo() {
     const item = this.past.pop();
     if (!item) return null;
     this.future.push({ doc: captureDocument(), label: item.label });
-    restoreDocument(item.doc);this.onRestore();return item.label;
+    restoreDocument(item.doc);collectUnusedLibraryAssets([...this.past,...this.future].map(entry=>entry.doc));this.onRestore();return item.label;
   }
   redo() {
     const item = this.future.pop();
     if (!item) return null;
     this.past.push({ doc: captureDocument(), label: item.label });
-    restoreDocument(item.doc);this.onRestore();return item.label;
+    restoreDocument(item.doc);collectUnusedLibraryAssets([...this.past,...this.future].map(entry=>entry.doc));this.onRestore();return item.label;
   }
-  clear() { this.past = [];this.future = []; }
+  /** 실제로 없앤 라이브러리 파일을 참조하는 과거 상태만 버려 깨진 실행 취소를 막습니다. */
+  forgetAssets(ids) {
+    const removed = new Set(ids || []);
+    if (!removed.size) return;
+    const usable = entry => !documentAssetIds(entry.doc).some(id => removed.has(id));
+    this.past = this.past.filter(usable);
+    this.future = this.future.filter(usable);
+    collectUnusedLibraryAssets([...this.past,...this.future].map(entry=>entry.doc));
+  }
+  clear() { this.past = [];this.future = [];collectUnusedLibraryAssets(); }
 }
 
 function checkedAssetId(file, options) {
@@ -105,7 +117,9 @@ function checkedAssetId(file, options) {
   // 한 조각으로 다룰 수 있는 크기와 .shorts 저장을 고려한 값입니다.
   if (file.size > 2 * 1024 * 1024 * 1024) throw new Error('파일 하나당 2GB까지 지원합니다. 필요한 구간을 잘라서 가져와 주세요.');
   const id = options.id || uid();
-  if (!assets.has(id) && assets.size >= 200) throw new Error('실험판에는 소재를 최대 200개까지 추가할 수 있습니다.');
+  // 숨긴 파일도 실행 취소 상태에서 다시 필요할 수 있습니다. 모든 도달 가능한 상태가
+  // 같은 200개 상한을 지켜야 앱이 저장한 프로젝트를 다시 열 수 있습니다.
+  if (!assets.has(id) && assets.size >= 200) throw new Error('현재 프로젝트와 실행 취소 기록에는 파일을 최대 200개까지 보관할 수 있습니다.');
   return id;
 }
 
@@ -117,9 +131,10 @@ export function addDecodedAudioAsset(file, buffer, options = {}) {
     || buffer.sampleRate <= 0 || !Number.isInteger(buffer.numberOfChannels) || buffer.numberOfChannels < 1
     || buffer.numberOfChannels > 32 || typeof buffer.getChannelData !== 'function') throw new Error('읽은 오디오 정보가 올바르지 않습니다.');
   if (options.sourceVideoAudio === true && (typeof options.sourceVideoAssetId !== 'string'
-    || !/^[a-zA-Z0-9_-]{1,80}$/.test(options.sourceVideoAssetId))) throw new Error('영상 원음의 소재 연결이 올바르지 않습니다.');
+    || !/^[a-zA-Z0-9_-]{1,80}$/.test(options.sourceVideoAssetId))) throw new Error('영상 원음의 파일 연결이 올바르지 않습니다.');
   const asset = { id, kind: 'audio', file, buffer, url: URL.createObjectURL(file), duration: buffer.length / buffer.sampleRate,
     waveform: waveformOf(buffer), aiGenerated: !!options.aiGenerated,
+    libraryHidden: options.libraryHidden === true,
     ...(options.sourceVideoAudio === true ? pick(options, sourceAudioKeys) : {}) };
   assets.set(id, asset);
   return asset;
@@ -135,7 +150,8 @@ export async function addAsset(file, options = {}) {
     return addDecodedAudioAsset(file, buffer, { ...options, id });
   } else {
     const base = await createClip(file, options.onStatus);
-    asset = { id, kind: base.type, file, base, duration: base.type === 'video' ? base.srcDuration : 3, thumb: base.thumb };
+    asset = { id, kind: base.type, file, base, duration: base.type === 'video' ? base.srcDuration : 3, thumb: base.thumb,
+      libraryHidden: options.libraryHidden === true };
   }
   assets.set(id, asset);
   return asset;
@@ -143,7 +159,7 @@ export async function addAsset(file, options = {}) {
 
 export async function makeClip(assetId, overrides = {}) {
   const asset = assets.get(assetId);
-  if (!asset || asset.kind === 'audio') throw new Error('영상 또는 이미지 소재를 선택해 주세요.');
+  if (!asset || asset.kind === 'audio') throw new Error('영상 또는 이미지 파일을 선택해 주세요.');
   let runtime = { ...asset.base };
   const id = overrides.id || uid();
   if (runtime.decoderOnly) runtime = await createClip(asset.file);
@@ -161,7 +177,7 @@ export async function makeClip(assetId, overrides = {}) {
 
 export function makeAudio(assetId, overrides = {}) {
   const asset = assets.get(assetId);
-  if (!asset || asset.kind !== 'audio') throw new Error('오디오 소재를 선택해 주세요.');
+  if (!asset || asset.kind !== 'audio') throw new Error('오디오 파일을 선택해 주세요.');
   const id = overrides.id || uid();
   const el = document.createElement('audio');el.src = asset.url;el.preload = 'auto';
   const track = { id, assetId, name: asset.file.name, file: asset.file, buffer: asset.buffer, el,
@@ -188,8 +204,13 @@ export function waveformOf(buffer, count = 112) {
 }
 
 function disposeResources(assetMap, clipMap, audioMap) {
-  for (const c of clipMap.values()) { c.el?.pause(); if(c.el)c.el.src=''; if(c.decoderOnly)try{c.input?.dispose?.();}catch{} }
-  for (const t of audioMap.values()) { t.el?.pause();if(t.el)t.el.src=''; }
+  const disposeRuntime=item=>{
+    item.el?.pause();if(item.el)item.el.src='';if(item.decoderOnly)try{item.input?.dispose?.();}catch{}
+    const shared=assetMap.get(item.assetId);
+    if(item.url&&item.url!==shared?.url&&item.url!==shared?.base?.url)URL.revokeObjectURL(item.url);
+  };
+  for (const c of clipMap.values()) disposeRuntime(c);
+  for (const t of audioMap.values()) disposeRuntime(t);
   for (const a of assetMap.values()) {
     if (a.base) disposeClip(a.base);
     if (a.url) URL.revokeObjectURL(a.url);
@@ -199,6 +220,91 @@ function disposeResources(assetMap, clipMap, audioMap) {
 export function clearAssets() {
   disposeResources(assets, clipRuntime, audioRuntime);
   assets.clear();clipRuntime.clear();audioRuntime.clear();
+}
+
+function documentAssetIds(doc = project) {
+  const result = new Set();
+  const add = id => { if (typeof id === 'string' && id) result.add(id); };
+  for (const clip of doc?.clips || []) { add(clip?.assetId);add(clip?.sourceAudioAssetId); }
+  const tracks = doc?.tracks || doc?.audio?.tracks || [];
+  for (const track of tracks) { add(track?.assetId);add(track?.sourceVideoAssetId); }
+  return [...result];
+}
+
+function linkedAssetIds(ids) {
+  const retained = new Set(ids), pending = [...retained];
+  while (pending.length) {
+    const sourceId = assets.get(pending.pop())?.sourceVideoAssetId;
+    if (sourceId && !retained.has(sourceId)) { retained.add(sourceId);pending.push(sourceId); }
+  }
+  return retained;
+}
+
+/** 일괄 비우기는 분리 원음에 연결된 원본까지 현재 타임라인의 사용 파일로 봅니다. */
+export function unusedLibraryAssetIds() {
+  const used = linkedAssetIds(documentAssetIds());
+  return [...assets.values()].filter(asset => asset.libraryHidden !== true && !used.has(asset.id)).map(asset => asset.id);
+}
+
+/**
+ * 화면에 남아 있는 라이브러리 파일과 현재 타임라인에서 닿을 수 있는 자원만
+ * 저장 대상으로 봅니다. 분리 원음에서 원본 영상으로 이어지는 관계도 따라갑니다.
+ */
+function retainedAssetIds(documents = []) {
+  const retained = new Set();
+  for(const doc of [project,...documents])for(const id of documentAssetIds(doc))retained.add(id);
+  for (const asset of assets.values()) if (asset.libraryHidden !== true) retained.add(asset.id);
+  return linkedAssetIds(retained);
+}
+
+function portableAssets() {
+  const retained = retainedAssetIds();
+  return [...assets.values()].filter(asset => retained.has(asset.id));
+}
+
+function disposeAssetIds(ids) {
+  const removed = new Set(ids);
+  if (!removed.size) return;
+  const doomedAssets = new Map([...assets].filter(([id]) => removed.has(id)));
+  const doomedClips = new Map([...clipRuntime].filter(([, item]) => removed.has(item?.assetId)));
+  const doomedAudio = new Map([...audioRuntime].filter(([, item]) => removed.has(item?.assetId)));
+  // 같은 영상 인스턴스의 더 오래된 편집 상태는 분리 원음이 생기기 전일 수 있습니다.
+  // 원본 영상 자원까지 없애지 않았다면 런타임은 살리고 사라진 연결 정보만 걷어냅니다.
+  for (const item of clipRuntime.values()) if (!removed.has(item.assetId) && removed.has(item.sourceAudioAssetId)) {
+    delete item.sourceAudioAssetId;delete item.audioSeparated;
+  }
+  for (const item of audioRuntime.values()) if (!removed.has(item.assetId) && removed.has(item.sourceVideoAssetId)) {
+    delete item.sourceVideoAssetId;delete item.sourceVideoAudio;
+  }
+  disposeResources(doomedAssets, doomedClips, doomedAudio);
+  for (const id of doomedAssets.keys()) assets.delete(id);
+  for (const id of doomedClips.keys()) clipRuntime.delete(id);
+  for (const id of doomedAudio.keys()) audioRuntime.delete(id);
+}
+
+/** 현재 문서와 남아 있는 실행 취소 상태 어디에서도 쓰지 않는 숨김 파일을 해제합니다. */
+export function collectUnusedLibraryAssets(documents = []) {
+  const retained=retainedAssetIds(documents);
+  const removedIds=[...assets.values()].filter(item=>item.libraryHidden===true&&!retained.has(item.id)).map(item=>item.id);
+  disposeAssetIds(removedIds);return removedIds;
+}
+
+/** 라이브러리에서 파일을 없앱니다. 현재 타임라인에서 쓰는 자원만 숨겨서 보존합니다. */
+export function removeAssetFromLibrary(id) {
+  const asset = assets.get(id);
+  if (!asset) return { ok:false, reason:'missing', instances:0 };
+  const instances = project.clips.filter(item => item.assetId === id || item.sourceAudioAssetId === id).length
+    + project.audio.tracks.filter(item => item.assetId === id || item.sourceVideoAssetId === id).length;
+  const dependents = [...assets.values()].filter(item => item.sourceVideoAssetId === id).length;
+  asset.libraryHidden = true;
+  // 이전 버전에서 숨김으로만 남은 파일도 함께 정리합니다. 보이는 라이브러리 파일,
+  // 타임라인 클립, 분리 원음의 원본 영상으로부터 도달 가능한 자원은 건드리지 않습니다.
+  const retained = retainedAssetIds();
+  const removedIds = [...assets.values()]
+    .filter(item => item.libraryHidden === true && !retained.has(item.id))
+    .map(item => item.id);
+  disposeAssetIds(removedIds);
+  return { ok:true, hidden:assets.has(id), removed:!assets.has(id), instances, dependents, removedIds };
 }
 
 /** 취소된 비동기 편집에서 새로 만든 인스턴스만 정리합니다. 공유 소재는 유지합니다. */
@@ -228,15 +334,15 @@ async function hydrate(doc, records) {
   try {
     for (const record of records) await addAsset(record.file, record);
     for (const asset of assets.values()) if (asset.sourceVideoAudio === true
-      && (asset.kind !== 'audio' || assets.get(asset.sourceVideoAssetId)?.kind !== 'video')) throw new Error('영상 원음의 소재 연결이 올바르지 않습니다.');
+      && (asset.kind !== 'audio' || assets.get(asset.sourceVideoAssetId)?.kind !== 'video')) throw new Error('영상 원음의 파일 연결이 올바르지 않습니다.');
     for (const clip of doc.clips) {
       const asset=assets.get(clip.assetId);
-      if(asset.kind!==clip.type || (clip.type==='video' && clip.trimEnd>asset.duration+.05)) throw new Error('영상 소재와 편집 구간이 일치하지 않습니다.');
+      if(asset.kind!==clip.type || (clip.type==='video' && clip.trimEnd>asset.duration+.05)) throw new Error('영상 파일과 편집 구간이 일치하지 않습니다.');
       await makeClip(clip.assetId, pick(clip,clipKeys));
     }
     for (const track of doc.tracks || []) {
       const asset=assets.get(track.assetId);
-      if(asset.kind!=='audio' || track.trimEnd>asset.duration+.05) throw new Error('오디오 소재와 편집 구간이 일치하지 않습니다.');
+      if(asset.kind!=='audio' || track.trimEnd>asset.duration+.05) throw new Error('오디오 파일과 편집 구간이 일치하지 않습니다.');
       makeAudio(track.assetId, pick(track,audioKeys));
     }
     restoreDocument(doc);
@@ -307,19 +413,20 @@ export function validateDocument(doc, records) {
     const duration=item.type==='image'?item.imgDuration:item.trimEnd!==undefined?item.trimEnd-item.trimStart:item.end-item.start;
     if(!validateKeyframes(item.keyframes,duration))throw new Error('키프레임 정보가 올바르지 않습니다.');
   }
-  if(records.some(r=>!r || !safeId(r.id)) || new Set(records.map(r=>r.id)).size!==records.length)throw new Error('소재 식별자가 올바르지 않습니다.');
+  if(records.some(r=>!r || !safeId(r.id) || (r.libraryHidden !== undefined && typeof r.libraryHidden !== 'boolean'))
+    || new Set(records.map(r=>r.id)).size!==records.length)throw new Error('파일 식별자가 올바르지 않습니다.');
   const ids = new Set(records.map(r => r.id));
   for (const item of [...records, ...doc.tracks]) {
     if (item.sourceVideoAudio !== undefined && typeof item.sourceVideoAudio !== 'boolean') throw new Error('영상 원음 표시가 올바르지 않습니다.');
     if (item.sourceVideoAssetId !== undefined && (!safeId(item.sourceVideoAssetId) || !ids.has(item.sourceVideoAssetId)
-      || item.sourceVideoAssetId === item.id || item.sourceVideoAudio !== true)) throw new Error('영상 원음의 소재 연결이 올바르지 않습니다.');
-    if (item.sourceVideoAudio === true && !item.sourceVideoAssetId) throw new Error('영상 원음의 소재 연결이 없습니다.');
+      || item.sourceVideoAssetId === item.id || item.sourceVideoAudio !== true)) throw new Error('영상 원음의 파일 연결이 올바르지 않습니다.');
+    if (item.sourceVideoAudio === true && !item.sourceVideoAssetId) throw new Error('영상 원음의 파일 연결이 없습니다.');
   }
   const instanceIds = new Set();
   for(const clip of doc.clips) {
     if (clip?.audioSeparated !== undefined && (typeof clip.audioSeparated !== 'boolean' || clip.type !== 'video')) throw new Error('영상 원음 분리 표시가 올바르지 않습니다.');
     if (clip?.sourceAudioAssetId !== undefined && (!safeId(clip.sourceAudioAssetId) || !ids.has(clip.sourceAudioAssetId)
-      || clip.audioSeparated !== true)) throw new Error('분리된 오디오의 소재 연결이 올바르지 않습니다.');
+      || clip.audioSeparated !== true)) throw new Error('분리된 오디오의 파일 연결이 올바르지 않습니다.');
     if (!validMosaics(clip?.mosaics)) throw new Error('모자이크 추적 정보가 올바르지 않습니다.');
     if(!validCropTracking(clip?.cropTracking,clip?.trimEnd-clip?.trimStart)||(clip.cropTracking&&clip.type!=='video'))throw new Error('크롭 추적 정보가 올바르지 않습니다.');
     if(!clip || !['video','image'].includes(clip.type) || !Number.isFinite(clip.scale) || !Number.isFinite(clip.offX) || !Number.isFinite(clip.offY) || !Number.isFinite(clip.trimStart) || !Number.isFinite(clip.trimEnd) || !Number.isFinite(clip.imgDuration))throw new Error('클립 속성이 올바르지 않습니다.');
@@ -330,7 +437,7 @@ export function validateDocument(doc, records) {
     if(!track || !Number.isFinite(track.start) || !Number.isFinite(track.trimStart) || !Number.isFinite(track.trimEnd) || track.trimEnd<=track.trimStart || !['music','voice'].includes(track.lane))throw new Error('오디오 구간이 올바르지 않습니다.');
   }
   for (const item of [...doc.clips, ...(doc.tracks || [])]) {
-    if (!item || !ids.has(item.assetId) || !safeId(item.id) || instanceIds.has(item.id)) throw new Error('프로젝트 소재 연결이 올바르지 않습니다.');
+    if (!item || !ids.has(item.assetId) || !safeId(item.id) || instanceIds.has(item.id)) throw new Error('프로젝트 파일 연결이 올바르지 않습니다.');
     instanceIds.add(item.id);
     for (const key of ['start','trimStart','trimEnd','imgDuration','motionDuration','motionOffset','scale','offX','offY','volume','fadeIn','fadeOut']) {
       if (item[key] !== undefined && (!Number.isFinite(item[key]) || Math.abs(item[key]) > 86400)) throw new Error('프로젝트 시간 또는 속성 값이 올바르지 않습니다.');
@@ -363,11 +470,12 @@ export function validateDocument(doc, records) {
 }
 
 export function packProject() {
-  const records = [...assets.values()].map(a => ({ id:a.id, name:a.file.name, type:a.file.type, size:a.file.size, lastModified:a.file.lastModified || 0, aiGenerated:!!a.aiGenerated, ...pick(a, sourceAudioKeys) }));
+  const kept = portableAssets();
+  const records = kept.map(a => ({ id:a.id, name:a.file.name, type:a.file.type, size:a.file.size, lastModified:a.file.lastModified || 0, aiGenerated:!!a.aiGenerated, ...pick(a, sourceAudioKeys), ...pick(a, assetLibraryKeys) }));
   const header = new TextEncoder().encode(JSON.stringify({ document:captureDocument(), assets:records }));
   if (header.length > 4 * 1024 * 1024) throw new Error('편집 정보가 너무 큽니다. 추적 클립을 여러 프로젝트로 나눠 저장해 주세요.');
   const length = new Uint8Array(4);new DataView(length.buffer).setUint32(0, header.length, true);
-  return new Blob(['SSLAB01\n',length,header,...[...assets.values()].map(a=>a.file)],{type:'application/octet-stream'});
+  return new Blob(['SSLAB01\n',length,header,...kept.map(a=>a.file)],{type:'application/octet-stream'});
 }
 
 export async function unpackProject(file) {
@@ -378,10 +486,10 @@ export async function unpackProject(file) {
   if (!length || length > 4*1024*1024 || 12+length > file.size) throw new Error('프로젝트 헤더가 손상되었습니다.');
   let header;
   try {header=JSON.parse(await file.slice(12,12+length).text());} catch {throw new Error('프로젝트 정보를 읽지 못했습니다.');}
-  if (!Array.isArray(header.assets)) throw new Error('소재 목록이 없습니다.');
+  if (!Array.isArray(header.assets)) throw new Error('라이브러리 파일 목록이 없습니다.');
   let offset=12+length;
   const records=header.assets.map(a=>{
-    if (!Number.isSafeInteger(a.size) || a.size <= 0 || offset+a.size > file.size) throw new Error('프로젝트 소재가 손상되었습니다.');
+    if (!Number.isSafeInteger(a.size) || a.size <= 0 || offset+a.size > file.size) throw new Error('라이브러리 파일이 손상되었습니다.');
     const record={...a,file:new File([file.slice(offset,offset+a.size)],String(a.name).slice(0,255),{type:a.type,lastModified:a.lastModified})};
     offset+=a.size;return record;
   });
@@ -400,10 +508,11 @@ function openDraftDb() {
 }
 
 export async function saveDraft() {
-  const total=[...assets.values()].reduce((s,a)=>s+a.file.size,0);
+  const kept=portableAssets();
+  const total=kept.reduce((s,a)=>s+a.file.size,0);
   if(total>300*1024*1024)throw new Error('큰 프로젝트는 저장 버튼으로 .shorts 파일을 보관해 주세요.');
   const db=await openDraftDb();
-  const record={document:captureDocument(),assets:[...assets.values()].map(a=>({id:a.id,file:a.file,aiGenerated:!!a.aiGenerated,...pick(a,sourceAudioKeys)})),updated:Date.now()};
+  const record={document:captureDocument(),assets:kept.map(a=>({id:a.id,file:a.file,aiGenerated:!!a.aiGenerated,...pick(a,sourceAudioKeys),...pick(a,assetLibraryKeys)})),updated:Date.now()};
   try { await new Promise((resolve,reject)=>{
     const tx=db.transaction('draft','readwrite');tx.objectStore('draft').put(record,'latest');
     tx.oncomplete=resolve;tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);

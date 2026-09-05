@@ -95,8 +95,8 @@ export async function pcAsrStatus(options) {
   const status = await request('/status', options);
   const knownDevice = validDevice(status.device) && typeof status.computeType === 'string';
   const unconfigured = status.configured === false && status.available === false && status.device === null && status.computeType === null;
-  if (status.localServer !== true || status.provider !== 'faster-whisper' || status.model !== PC_ASR_MODEL || typeof status.configured !== 'boolean' || typeof status.available !== 'boolean' || typeof status.busy !== 'boolean' || (!knownDevice && !unconfigured)) throw new Error('Whisper large-v3-turbo PC 서버의 정보를 확인하지 못했습니다. 최신 PC용 편집기로 실행해 주세요.');
-  return { localServer:true, provider:'faster-whisper', model:PC_ASR_MODEL, modelName:'Whisper large-v3-turbo', configured:status.configured, available:status.available, busy:status.busy, device:status.device, computeType:knownDevice ? status.computeType.slice(0, 80) : null, reason:typeof status.reason === 'string' ? status.reason.slice(0, 1000) : '', setupUrl:PC_ASR_SETUP_URL };
+  if (status.localServer !== true || status.provider !== 'faster-whisper' || status.model !== PC_ASR_MODEL || typeof status.configured !== 'boolean' || typeof status.available !== 'boolean' || typeof status.busy !== 'boolean' || (!knownDevice && !unconfigured)) throw new Error('자동 자막 기능의 준비 상태를 확인하지 못했습니다.');
+  return { localServer:true, provider:'faster-whisper', model:PC_ASR_MODEL, modelName:'자동 자막', configured:status.configured, available:status.available, busy:status.busy, device:status.device, computeType:knownDevice ? status.computeType.slice(0, 80) : null, reason:typeof status.reason === 'string' ? status.reason.slice(0, 1000) : '', setupUrl:PC_ASR_SETUP_URL };
 }
 
 export function pcAsrWav(audio) {
@@ -200,7 +200,7 @@ export async function transcribePcAudio(audio, { signal, onProgress = () => {}, 
       if (typeof created.jobId !== 'string' || !JOB_ID.test(created.jobId)) throw new Error('PC 자막 작업 번호를 확인하지 못했습니다. 연결 상태를 확인해 주세요.');
       jobId = created.jobId;
       if (settled) { cancelRemote();return; }
-      onProgress(null, 'PC에서 Whisper large-v3-turbo로 인식하고 있어요…');poll();
+      onProgress(null, '자동 자막을 만드는 중…');poll();
     }).catch(error => { if (!settled) finish(reject, error, true); });
   });
 }

@@ -14,6 +14,29 @@ const record = value => value !== null && typeof value === 'object' && !Array.is
 const validTime = time => Number.isFinite(time) && time >= 0 && time <= MAX_TIME;
 const easingOf = key => key?.easing === 'hold' ? 'hold' : 'linear';
 
+/**
+ * 키프레임 편집에서 쓰는 시각을 클립 로컬 프레임에 맞춥니다.
+ * 재생 막대, 키 추가와 속성 변경이 모두 이 함수를 써야 같은 프레임에
+ * 서로 다른 소수 시각의 키가 생기지 않습니다.
+ */
+export function quantizeKeyframeTime(localTime, fps, duration = MAX_TIME) {
+  if (!validTime(localTime) || !Number.isFinite(fps) || fps <= 0 || !(duration >= 0)) {
+    throw new Error('키프레임의 시각이나 프레임 속도가 올바르지 않습니다.');
+  }
+  const bounded = Math.min(localTime, duration, MAX_TIME);
+  return Math.min(duration, Math.round(bounded * fps) / fps);
+}
+
+const sameKeyTime = (first, second, fps) => Number.isFinite(fps) && fps > 0
+  ? Math.round(first * fps) === Math.round(second * fps)
+  : Math.abs(first - second) <= EPSILON;
+
+/** 같은 프레임에 있는 키를 찾습니다. 기존 비정규화 프로젝트도 프레임 단위로 다룹니다. */
+export function keyframeAtTime(keys, localTime, fps) {
+  if (!Array.isArray(keys) || !Number.isFinite(localTime)) return undefined;
+  return keys.find(key => Number.isFinite(key?.time) && sameKeyTime(key.time, localTime, fps));
+}
+
 export function validateKeyframes(data, duration = Infinity) {
   if (data === undefined) return true;
   if (!record(data) || data.version !== 1 || !record(data.tracks) || !(duration >= 0)) return false;
@@ -86,44 +109,52 @@ function assertEdit(item, channel, time, value, duration = MAX_TIME) {
   }
 }
 
-export function setKeyframe(item, channel, localTime, value = keyframeValue(item, channel, localTime), options = {}) {
+export function setKeyframe(item, channel, localTime, value, options = {}) {
   assertEdit(item, channel, localTime, value, options.duration);
-  const easing = options.easing ?? item.keyframes?.tracks?.[channel]?.find(key => Math.abs(key.time - localTime) <= EPSILON)?.easing ?? 'linear';
+  const time = options.fps ? quantizeKeyframeTime(localTime, options.fps, options.duration) : localTime;
+  if (value === undefined) value = keyframeValue(item, channel, time);
+  assertEdit(item, channel, time, value, options.duration);
+  const current = item.keyframes?.tracks?.[channel] || [];
+  const existing = keyframeAtTime(current, time, options.fps);
+  const easing = options.easing ?? existing?.easing ?? 'linear';
   if (!['linear', 'hold'].includes(easing)) throw new Error('지원하지 않는 보간 방식입니다.');
-  const tracks = { ...item.keyframes?.tracks }, current = tracks[channel] || [];
-  const key = { time: localTime, value, easing };
-  tracks[channel] = [...current.filter(point => Math.abs(point.time - localTime) > EPSILON), key].sort((a, b) => a.time - b.time);
+  const tracks = { ...item.keyframes?.tracks };
+  const key = { time, value, easing };
+  tracks[channel] = [...current.filter(point => !sameKeyTime(point.time, time, options.fps)), key].sort((a, b) => a.time - b.time);
   const data = { version: 1, tracks };
   if (!validateKeyframes(data)) throw new Error('키프레임이 너무 많습니다. 클립을 나눠 주세요.');
   item.keyframes = data;
   return key;
 }
 
-export function removeKeyframe(item, channel, localTime) {
-  assertEdit(item, channel, localTime);
+export function removeKeyframe(item, channel, localTime, options = {}) {
+  assertEdit(item, channel, localTime, undefined, options.duration);
   const old = item.keyframes?.tracks?.[channel];
-  if (!old?.some(key => Math.abs(key.time - localTime) <= EPSILON)) return false;
-  const tracks = { ...item.keyframes.tracks }, remaining = old.filter(key => Math.abs(key.time - localTime) > EPSILON);
+  const time = options.fps ? quantizeKeyframeTime(localTime, options.fps, options.duration) : localTime;
+  if (!keyframeAtTime(old, time, options.fps)) return false;
+  const tracks = { ...item.keyframes.tracks }, remaining = old.filter(key => !sameKeyTime(key.time, time, options.fps));
   if (remaining.length) tracks[channel] = remaining; else delete tracks[channel];
   if (Object.keys(tracks).length) item.keyframes = { version: 1, tracks }; else delete item.keyframes;
   return true;
 }
 
 export function moveKeyframe(item, channel, from, to, options = {}) {
-  assertEdit(item, channel, from);assertEdit(item, channel, to, undefined, options.duration);
-  const key = item.keyframes?.tracks?.[channel]?.find(point => Math.abs(point.time - from) <= EPSILON);
+  assertEdit(item, channel, from, undefined, options.duration);assertEdit(item, channel, to, undefined, options.duration);
+  const fromTime = options.fps ? quantizeKeyframeTime(from, options.fps, options.duration) : from;
+  const toTime = options.fps ? quantizeKeyframeTime(to, options.fps, options.duration) : to;
+  const key = keyframeAtTime(item.keyframes?.tracks?.[channel], fromTime, options.fps);
   if (!key) return false;
   const tracks = { ...item.keyframes.tracks };
   // 같은 시각에 놓으면 두 값을 겹치지 않고 이동한 키로 교체합니다.
-  tracks[channel] = [...tracks[channel].filter(point => Math.abs(point.time - from) > EPSILON && Math.abs(point.time - to) > EPSILON), { ...key, time: to }].sort((a, b) => a.time - b.time);
+  tracks[channel] = [...tracks[channel].filter(point => !sameKeyTime(point.time, fromTime, options.fps) && !sameKeyTime(point.time, toTime, options.fps)), { ...key, time: toTime }].sort((a, b) => a.time - b.time);
   item.keyframes = { version: 1, tracks };
   return true;
 }
 
 /** 이미 애니메이션인 속성만 현재 시각에 키를 만들고, 정적 속성은 기존처럼 수정합니다. */
-export function setValueAt(item, channel, localTime, value, { autoKey = false, duration } = {}) {
+export function setValueAt(item, channel, localTime, value, { autoKey = false, duration, fps } = {}) {
   assertEdit(item, channel, localTime, value, duration);
-  if (autoKey || hasKeyframes(item, channel)) return setKeyframe(item, channel, localTime, value, { duration });
+  if (autoKey || hasKeyframes(item, channel)) return setKeyframe(item, channel, localTime, value, { duration, fps });
   if (channel === 'volume') item.volume = value;
   else item.transform = { ...item.transform, [channel]: value };
   return value;

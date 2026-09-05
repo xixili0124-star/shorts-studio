@@ -8,7 +8,7 @@ import {legacyEditorMode,setLegacyEditorMode} from '../public/js/state.js';
 import {trackBadge,ensureAutoCaptionTrack} from '../public/js/state.js';
 import {setTrackSwitch,isTrackMuted,isTrackLocked,isTrackAudible,hasAudioSolo,inlineClipAudible} from '../public/js/state.js';
 import {uncertainMosaicRanges,MAX_WARNING_RANGES} from '../public/js/mosaic.js';
-import {serverCaptions} from '../public/js/transcribe.js';
+import {serverCaptions,transcribeRaw,encodeWav as encodeServerWav} from '../public/js/transcribe.js';
 import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight} from '../public/js/layout.js';
 import {keyframeValue} from '../public/js/keyframes.js';
 import {cropTrackingAt} from '../public/js/crop-tracking.js';
@@ -23,7 +23,7 @@ import {Timeline} from '../public/js/timeline.js';
 import {transformOf,visualCorners,alignVisual,withVisualTransform,croppedBounds,transformPoint,inverseTransformPoint,hitVisual,cropFromDrag,resizeFromDrag,snapVisualCenter} from '../public/js/visual-transform.js';
 import {SAFE_AREAS,safeAreaConfig,safeAreaRect} from '../public/js/safe-areas.js';
 import {FONTS,ensureFont} from '../public/js/font-catalog.js';
-import {SOUND_EFFECTS,synthesizeEffect} from '../public/js/sound-effects.js';
+import {SOUND_EFFECTS} from '../public/js/sound-effects.js';
 import {applyFade,mixTimeline,extractClipAudio} from '../public/js/audio.js';
 import {Input,InputAudioTrack,AudioBufferSink} from '../public/vendor/mediabunny.min.js';
 import {exportVideo} from '../public/js/exporter.js';
@@ -643,7 +643,7 @@ test('drag metadata keeps the compatible destination track and exact full-durati
   assert.deepEqual([actual.trackId,actual.start,actual.end],[videoPlan.trackId,videoPlan.start,videoPlan.end]);assert.deepEqual(project.clips.slice(0,2).map(c=>c.start),[0,4]);
   timeline.external={kind:'preset',id:'g:burst'};const graphic=timeline.externalPlan(1800,'v3');near(graphic.end,19);assert.equal(timeline.externalPlan(1800,'a2'),null);
   timeline.external={kind:'preset',id:'c:pill'};assert.equal(timeline.externalPlan(1800,'v1').lane,'v1');
-  timeline.external={kind:'preset',id:'sfx:whoosh'};const sound=timeline.externalPlan(1800,'a2');near(sound.end,18+SOUND_EFFECTS.find(effect=>effect.id==='whoosh').duration);assert.equal(timeline.externalPlan(1800,'v1'),null);
+  timeline.external={kind:'preset',id:'sfx:entrance'};const sound=timeline.externalPlan(1800,'a2');near(sound.end,18+SOUND_EFFECTS.find(effect=>effect.id==='entrance').duration);assert.equal(timeline.externalPlan(1800,'v1'),null);
   timeline.external={kind:'preset',id:'t:dissolve'};assert.equal(timeline.externalPlan(1800,'v1'),null);
   assertValidLayout();
 });
@@ -939,18 +939,6 @@ test('voice transcription follows purpose after movement between numbered audio 
   finally{globalThis.OfflineAudioContext=previous;}
 });
 
-test('synthesized fallback sound effects are deterministic, distinct and bounded',()=>{
-  const signatures=new Set();
-  for(const effect of SOUND_EFFECTS){
-    const samples=synthesizeEffect(effect.id,8000),again=synthesizeEffect(effect.id,8000);
-    assert.equal(samples.length,Math.round(effect.duration*8000));assert.deepEqual(samples,again);
-    let peak=0,power=0;for(const value of samples){assert.ok(Number.isFinite(value));peak=Math.max(peak,Math.abs(value));power+=value*value;}
-    assert.ok(peak>.7&&peak<.83);assert.ok(power>1);near(samples[0],0);
-    signatures.add(Buffer.from(samples.buffer).toString('base64'));
-  }
-  assert.equal(signatures.size,SOUND_EFFECTS.length);assert.throws(()=>synthesizeEffect('missing'));
-});
-
 test('platform guides form bounded editable rectangles and never affect default export frames',{skip:!canvasModule},()=>{
   reset();for(const preset of SAFE_AREAS){
     const r=safeAreaRect(preset,1080,1920);assert.ok(r.x>=0&&r.y>=0&&r.w>0&&r.h>0&&r.x+r.w<=1080&&r.y+r.h<=1920);
@@ -1221,12 +1209,12 @@ test('tracking cards keep separate first-download consent and preserve saved pat
   globalThis.createImageBitmap=async()=>{throw new Error('a missing model cannot decode media');};
   globalThis.fetch=async(url,options)=>{calls.push({url,options});return new Response('',{status:404});};
   try{
-    for(const [task,name,file,megabytes] of [
-      ['mosaic','BlazeFace full-range','blazeface-full-range-f16-v1.tflite','13.3'],
-      ['crop','EfficientDet-Lite2','efficientdet-lite2-f32-v1.tflite','35.3']
+    for(const [task,file,megabytes] of [
+      ['mosaic','blazeface-full-range-f16-v1.tflite','13.3'],
+      ['crop','efficientdet-lite2-f32-v1.tflite','35.3']
     ]){
       ui.select(task);const owner=ui.owner,markup=owner.trackingSettings(task);
-      assert.ok(markup.includes(name));assert.ok(markup.includes('최초 '+megabytes+'MB'));
+      assert.ok(markup.includes('최초 '+megabytes+'MB'));assert.doesNotMatch(markup,/BlazeFace|EfficientDet|SAM/);
       assert.match(markup,/data-smart-input="tracking-download"/);
       assert.doesNotMatch(markup,/data-smart-input="tracking-download" checked|tracking-pc-consent/);
       assert.deepEqual(owner.trackingOptions(task),{engine:'browser',allowModelDownload:false});
@@ -1261,7 +1249,8 @@ test('PC tracking requires explicit consent and retains the old path until the r
   try{
     owner.change({dataset:{smartInput:'tracking-engine'},value:'pc'});
     assert.equal(owner.trackingEngine,'pc');assert.equal(owner.trackingEngineChosen,true);
-    assert.match(owner.trackingSettings('mosaic'),/SAM 2\.1 Small/);
+    assert.match(owner.trackingSettings('mosaic'),/Windows PC · 정밀 추적/);
+    assert.doesNotMatch(owner.trackingSettings('mosaic'),/SAM|BlazeFace|EfficientDet/);
     assert.match(owner.trackingSettings('mosaic'),/tracking-pc-consent/);
     assert.doesNotMatch(owner.trackingSettings('mosaic'),/tracking-download/);
     await assert.rejects(()=>owner.track(),/PC 설치와 연결/);
@@ -1285,7 +1274,7 @@ test('PC tracking requires explicit consent and retains the old path until the r
   }finally{Object.assign(globalThis,saved);reset();}
 });
 
-test('installation instructions stay in Help while feature panels only offer the Help action',async()=>{
+test('voice and caption panels stay task focused while optional setup remains generic',async()=>{
   const saved={document:globalThis.document,fetch:globalThis.fetch,location:globalThis.location};
   const {owner}=await trackingUiFixture(),host=Object.assign(new EventTarget(),{innerHTML:'',scrollIntoView(){}}),panels=[];
   let requests=0,opened=0;
@@ -1294,7 +1283,7 @@ test('installation instructions stay in Help while feature panels only offer the
   globalThis.document={getElementById:id=>id==='pcHelp'?host:id==='helpDialog'?dialog:null};
   globalThis.fetch=async()=>{requests++;throw new Error('opening Help cannot request an unpaired PC');};
   try{
-    owner.pcHelp=new PcHelpController();
+    owner.pcHelp=new PcHelpController({navigatorImpl:{platform:'Win32',userAgent:'Windows'}});
     owner.state=null;owner.audioRange=()=>null;owner.captionScope='selected';
     owner.pcAsr={status:null,checking:false,error:''};owner.pcVoice={status:null,checking:false,error:'',profileId:'',accepted:false};
     owner.voice={engine:'local',text:'원고 보존',voice:'F1',speed:1,steps:5,systemVoice:'',accepted:false};
@@ -1308,12 +1297,18 @@ test('installation instructions stay in Help while feature panels only offer the
     for(const markup of panels){
       assert.doesNotMatch(markup,/pc-install-steps|Windows PC 설치 파일 다운로드|href="[^"]*pc-(?:voice|asr|tracking)-setup\.html|href="[^"]*Shorts-Studio-PC-Setup\.cmd|PC용 로컬 버전|PC 사용 안내/);
     }
-    assert.match(panels[2],/data-smart-action="pc-help"/);
-    assert.match(panels[3],/data-smart-action="pc-help"/);
+    assert.match(panels[2],/data-smart-action="voice-reference"[^>]*>목소리 등록/);
+    assert.match(panels[2],/data-smart-action="delete-voice-reference"[^>]*>목소리 삭제/);
+    assert.match(panels[2],/data-smart-action="voice"[^>]*>내 목소리로 만들기/);
+    assert.doesNotMatch(panels[2],/Vox|GPT-SoVITS|PC 연결|data-smart-action="pc-help"/);
+    assert.match(panels[3],/data-smart-action="captions"[^>]*>자동 자막 만들기/);
+    assert.doesNotMatch(panels[3],/Whisper|Tiny|large-v3|GPU|data-smart-action="pc-help"/);
     assert.match(host.innerHTML,/href="\/downloads\/Shorts-Studio-PC-Setup\.cmd"/);
-    assert.match(host.innerHTML,/class="pc-install-steps"/);
+    assert.doesNotMatch(host.innerHTML,/class="pc-install-steps"|Vox|Whisper|SAM 2\.1/);
     assert.match(host.innerHTML,/data-pc-help="check"/);
-    for(const engine of ['voice','asr','tracking'])assert.ok(host.innerHTML.includes('/pc-'+engine+'-setup.html'));
+    new PcHelpController({navigatorImpl:{platform:'MacIntel',userAgent:'Macintosh'}});
+    assert.doesNotMatch(host.innerHTML,/\.cmd|data-pc-help="check"/);assert.match(host.innerHTML,/기본 기능/);
+    owner.pcHelp.render();
     await owner.action('pc-help');await owner.action('pc-help');
     assert.equal(opened,1);assert.equal(dialog.open,true);assert.equal(requests,0);
     const html=readFileSync(new URL('../public/studio.html',import.meta.url),'utf8');
@@ -2025,7 +2020,7 @@ const referenceBuffer=(duration=4)=>{const data=Float32Array.from({length:Math.r
 test('PC voice only uses the local editor origin and never probes a public/mobile page',async()=>{
   for(const location of [undefined,{protocol:'https:',hostname:'example.com'},{protocol:'http:',hostname:'127.0.0.1.evil.test'},{protocol:'http:',hostname:'192.168.1.2'},{protocol:'file:',hostname:''}]){
     assert.equal(isPcVoiceOrigin(location),false);
-    await assert.rejects(()=>pcVoiceStatus({location,fetchImpl:()=>{throw new Error('must never fetch');}}),/PC 연결/);
+    await assert.rejects(()=>pcVoiceStatus({location,fetchImpl:()=>{throw new Error('must never fetch');}}),/추가 기능.*준비/);
   }
   assert.ok(isPcVoiceOrigin(pcLocation));assert.ok(isPcVoiceOrigin({protocol:'http:',hostname:'localhost'}));
   let call;
@@ -2066,7 +2061,7 @@ test('PC request cancellation discards late audio and timeout is not described a
   const pending=generatePcVoice({text:'x'},{location:pcLocation,signal:controller.signal,fetchImpl:()=>new Promise(resolve=>{release=resolve;})});
   controller.abort();release(new Response('ignored',{headers:{'Content-Type':'audio/wav'}}));await assert.rejects(()=>pending,error=>error.name==='AbortError');
   assert.deepEqual(captureDocument(),before);
-  await assert.rejects(()=>generatePcVoice({text:'x'},{location:pcLocation,timeout:1,fetchImpl:async(url,{signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))))}),/엔진 작업이 남아/);
+  await assert.rejects(()=>generatePcVoice({text:'x'},{location:pcLocation,timeout:1,fetchImpl:async(url,{signal})=>new Promise((resolve,reject)=>signal.addEventListener('abort',()=>reject(new DOMException('aborted','AbortError'))))}),/시간이 오래/);
 });
 
 test('decoding a reference closes its audio context on success, invalid duration and abort',async()=>{
@@ -2090,17 +2085,17 @@ test('microphone recording closes tracks and late permission after cancel never 
   }finally{globalThis.MediaRecorder=oldRecorder;if(oldNavigator)Object.defineProperty(globalThis,'navigator',oldNavigator);else delete globalThis.navigator;}
 });
 
-test('voice mode UI preserves browser voices and exposes PC setup without public-page requests',()=>{
+test('voice mode keeps all choices while hiding implementation and connection details',()=>{
   const oldLocation=globalThis.location;globalThis.location={protocol:'https:',hostname:'example.com'};
   const owner={voice:{engine:'local',text:'원고 유지',voice:'F1',speed:1,steps:5,systemVoice:'',accepted:false},pcVoice:{status:null,error:'',checking:false,profileId:'',accepted:false},pcVoiceMarkup:StudioTools.prototype.pcVoiceMarkup};const host={innerHTML:''};
   try{
-    StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/Supertonic 2/);assert.match(host.innerHTML,/원고 유지/);assert.match(host.innerHTML,/value="device"/);assert.match(host.innerHTML,/value="pc"/);
-    owner.voice.engine='pc';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/data-smart-action="pc-help"/);assert.match(host.innerHTML,/data-smart-action="voice" disabled/);assert.match(host.innerHTML,/원고 유지/);assert.doesNotMatch(host.innerHTML,/http:\/\/127\.0\.0\.1/);
-    assert.match(host.innerHTML,/내 목소리 · VoxCPM2/);
+    StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/기본 음성/);assert.match(host.innerHTML,/원고 유지/);assert.match(host.innerHTML,/value="device"/);assert.match(host.innerHTML,/value="pc"/);assert.doesNotMatch(host.innerHTML,/Supertonic|모델·엔진|276MB/);
+    owner.voice.engine='pc';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/data-smart-action="voice-reference"/);assert.match(host.innerHTML,/data-smart-action="delete-voice-reference"/);assert.match(host.innerHTML,/data-smart-action="voice" disabled/);assert.match(host.innerHTML,/원고 유지/);assert.doesNotMatch(host.innerHTML,/http:\/\/127\.0\.0\.1|data-smart-action="pc-help"|PC 연결|Vox|GPT-SoVITS/);
+    assert.match(host.innerHTML,/<strong>내 목소리<\/strong>/);
     globalThis.location={protocol:'http:',hostname:'127.0.0.1'};
-    owner.pcVoice.status={state:'ready',provider:'voxcpm2',localServer:true,profiles:[{id:'ref',name:'saved voice',duration:6,audioAvailable:true}]};owner.pcVoice.profileId='ref';
-    StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/내 목소리 · VoxCPM2/);assert.match(host.innerHTML,/48kHz/);assert.doesNotMatch(host.innerHTML,/data-smart-action="voice" disabled/);
-    owner.pcVoice.status.provider='gpt-sovits';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/내 목소리 · GPT-SoVITS/);assert.doesNotMatch(host.innerHTML,/48kHz/);assert.match(host.innerHTML,/saved voice/);
+    owner.pcVoice.status={state:'ready',provider:'voxcpm2',localServer:true,configured:true,profiles:[{id:'ref',name:'saved voice',duration:6,audioAvailable:true}]};owner.pcVoice.profileId='ref';
+    StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/사용할 준비가 됐어요/);assert.doesNotMatch(host.innerHTML,/Vox|48kHz|data-smart-action="voice" disabled/);
+    owner.pcVoice.status.provider='gpt-sovits';StudioTools.prototype.renderVoice.call(owner,host);assert.doesNotMatch(host.innerHTML,/GPT-SoVITS|48kHz/);assert.match(host.innerHTML,/saved voice/);
   }finally{globalThis.location=oldLocation;}
 });
 
@@ -2189,7 +2184,7 @@ test('PC generated voice round-trips as ordinary project audio without private r
     pcVoice:{profileId:'private-ref-id',promptText:'private reference words'},run:async(kind,work)=>work(new AbortController().signal),close(){},
     hooks:{commit:(doc,label)=>calls.push(label),select(){},timeline:{reveal(){}},toast(){}}};
   try{
-    await StudioTools.prototype.applyVoice.call(owner);assert.deepEqual(calls,['PC 내 목소리 음성 추가']);assert.equal(project.audio.tracks.length,1);assert.equal(project.audio.tracks[0].start,2);
+    await StudioTools.prototype.applyVoice.call(owner);assert.deepEqual(calls,['내 목소리 음성 추가']);assert.equal(project.audio.tracks.length,1);assert.equal(project.audio.tracks[0].start,2);
     const expected=captureDocument(),packed=packProject(),raw=new TextDecoder().decode(await packed.arrayBuffer());
     assert.doesNotMatch(raw,/private-ref-id|private reference words|engineKey/);reset();await unpackProject(packed);
     assert.deepEqual(captureDocument(),expected);assert.equal(assets.size,1);assert.equal([...assets.values()][0].buffer.sampleRate,rate);
@@ -2206,8 +2201,8 @@ test('PC ASR blocks public origins and checks the exact local provider without s
   for(const location of [undefined,{protocol:'https:',hostname:'example.com'},{protocol:'http:',hostname:'127.0.0.1.evil.test'},{protocol:'http:',hostname:'192.168.1.2'},{protocol:'file:',hostname:''}]){
     assert.equal(isPcAsrOrigin(location),false);
     const options={location,fetchImpl:()=>{throw new Error('must never fetch');}};
-    await assert.rejects(()=>pcAsrStatus(options),/PC 연결/);
-    await assert.rejects(()=>transcribePcAudio(pcAsrPcm(),options),/PC 연결/);
+    await assert.rejects(()=>pcAsrStatus(options),/추가 기능.*준비/);
+    await assert.rejects(()=>transcribePcAudio(pcAsrPcm(),options),/추가 기능.*준비/);
   }
   assert.ok(isPcAsrOrigin(pcLocation));assert.ok(isPcAsrOrigin({protocol:'http:',hostname:'localhost'}));
   let call;
@@ -2335,51 +2330,55 @@ test('PC ASR source word merging preserves separators and declines mismatches or
   assert.equal(invalid.skipped,1);
 });
 
-test('PC ASR UI exposes setup and actual device while keeping hosted Tiny usable',()=>{
+test('automatic caption UI keeps a simple create action and exposes processing location without model names',()=>{
   reset();const saved=globalThis.location;
-  const owner=Object.assign(Object.create(StudioTools.prototype),{captionScope:'selected',captionEngine:'local',pcAsr:{status:null,error:'',checking:false},audioRange:()=>({item:{name:'선택한 말소리'},duration:1})});
+  const owner=Object.assign(Object.create(StudioTools.prototype),{captionScope:'selected',captionEngine:'server',pcAsr:{status:null,error:'',checking:false},audioRange:()=>({item:{name:'선택한 말소리'},duration:1})});
   try{
-    globalThis.location={protocol:'https:',hostname:'example.com'};let html=owner.captionControls();assert.match(html,/value="local" selected/);assert.match(html,/Whisper Tiny/);assert.match(html,/data-smart-action="pc-help"/);assert.doesNotMatch(html,/http:\/\/127\.0\.0\.1|http:\/\/localhost/);
-    owner.captionEngine='pc';html=owner.captionControls();assert.match(html,/이 사이트의 PC 연결을 허용/);assert.match(html,/data-smart-action="captions" disabled/);
-    globalThis.location=pcLocation;owner.pcAsr.status=pcAsrReady();html=owner.captionControls();assert.match(html,/GPU \(CUDA\) · float16/);assert.doesNotMatch(html,/data-smart-action="captions" disabled/);
-    owner.pcAsr.status=pcAsrReady({busy:true,reason:'이 PC에서만 처리합니다.'});html=owner.captionControls();assert.match(html,/다른 PC 작업이 진행 중/);assert.match(html,/data-smart-action="captions" disabled/);
-    owner.pcAsr.status=pcAsrReady({device:'cpu',computeType:'int8'});assert.match(owner.captionControls(),/CPU · int8/);
-    owner.pcAsr.status=pcAsrReady({available:false,configured:false});assert.match(owner.captionControls(),/도움말에서 설치 확인/);assert.match(owner.captionControls(),/data-smart-action="captions" disabled/);assert.equal(owner.captionEngine,'pc');
+    globalThis.location={protocol:'https:',hostname:'example.com'};let html=owner.captionControls();
+    assert.match(html,/data-smart-action="captions"[^>]*>자동 자막 만들기/);
+    assert.match(html,/<details class="smart-details"><summary>처리 방식<\/summary>/);
+    assert.match(html,/온라인 처리/);assert.doesNotMatch(html,/Whisper|Tiny|large-v3|GPU|CUDA|float16|data-smart-action="pc-help"/);
+    owner.captionEngine='pc';html=owner.captionControls();assert.match(html,/data-smart-action="captions" disabled/);
+    globalThis.location=pcLocation;owner.pcAsr.status=pcAsrReady();html=owner.captionControls();assert.doesNotMatch(html,/data-smart-action="captions" disabled/);
+    owner.pcAsr.status=pcAsrReady({busy:true});assert.match(owner.captionControls(),/data-smart-action="captions" disabled/);
+    owner.pcAsr.status=pcAsrReady({available:false,configured:false});assert.match(owner.captionControls(),/data-smart-action="captions" disabled/);
+    owner.captionEngine='local';html=owner.captionControls();assert.doesNotMatch(html,/data-smart-action="captions" disabled/);assert.match(html,/이 브라우저에서 처리/);
     assert.equal(pcAsrDeviceLabel({device:'unknown'}),'실행 장치 미확인');
   }finally{globalThis.location=saved;reset();}
 });
 
-test('PC ASR status selects installed Turbo once without overwriting a later Tiny choice or caption drafts',async()=>{
+test('caption status prefers a ready PC but preserves explicit selection and never downgrades on failure',async()=>{
   const saved={location:globalThis.location,fetch:globalThis.fetch,document:globalThis.document};globalThis.location=pcLocation;
-  const textarea={value:'자막 수정 중'},engine={value:'local'},create={disabled:false},settings={contains:()=>false,innerHTML:'',querySelector:()=>null};
+  const textarea={value:'자막 수정 중'},engine={value:'server'},create={disabled:false},settings={innerHTML:''};
   globalThis.document={activeElement:textarea,getElementById:id=>id==='pcAsrSettings'?settings:id==='libraryContent'?{querySelector:selector=>selector.includes('caption-engine')?engine:create}:null};
-  const owner=Object.assign(Object.create(StudioTools.prototype),{captionScope:'selected',captionEngine:'local',captionEngineChosen:false,pcAsr:{status:null,error:'',checking:false},audioRange:()=>({duration:1}),hooks:{view:()=>'captions',renderLibrary(){throw new Error('must not redraw caption drafts');}}});
+  const owner=Object.assign(Object.create(StudioTools.prototype),{captionScope:'selected',captionEngine:'server',captionEngineChosen:false,pcAsr:{status:null,error:'',checking:false},audioRange:()=>({duration:1}),hooks:{view:()=>'captions',renderLibrary(){throw new Error('must not redraw caption drafts');}}});
   try{
-    globalThis.fetch=async()=>pcAsrJson(pcAsrReady());await owner.refreshPcAsr();assert.equal(owner.captionEngine,'pc');assert.equal(engine.value,'pc');assert.equal(create.disabled,false);assert.equal(globalThis.document.activeElement,textarea);assert.equal(textarea.value,'자막 수정 중');
+    globalThis.fetch=async()=>pcAsrJson(pcAsrReady({available:false}));await owner.refreshPcAsr();assert.equal(owner.captionEngine,'server');
+    globalThis.fetch=async()=>pcAsrJson(pcAsrReady({busy:true}));await owner.refreshPcAsr();assert.equal(owner.captionEngine,'server');
+    globalThis.fetch=async()=>pcAsrJson(pcAsrReady());await owner.refreshPcAsr();assert.equal(owner.captionEngine,'pc');assert.equal(engine.value,'pc');assert.equal(create.disabled,false);assert.equal(globalThis.document.activeElement,textarea);
     let release;globalThis.fetch=async()=>new Promise(resolve=>{release=resolve;});const pending=owner.refreshPcAsr();owner.captionEngine='local';owner.captionEngineChosen=true;release(pcAsrJson(pcAsrReady()));await pending;
     assert.equal(owner.captionEngine,'local');assert.equal(engine.value,'local');assert.equal(textarea.value,'자막 수정 중');
     owner.captionEngine='pc';globalThis.fetch=async()=>pcAsrJson(pcAsrReady({available:false}));await owner.refreshPcAsr();assert.equal(owner.captionEngine,'pc');assert.equal(create.disabled,true);
+    globalThis.fetch=async()=>{throw new Error('offline');};await owner.refreshPcAsr();assert.equal(owner.captionEngine,'pc');assert.equal(create.disabled,true);
     globalThis.location={protocol:'https:',hostname:'example.com'};globalThis.fetch=()=>{throw new Error('must never fetch');};await owner.refreshPcAsr();
   }finally{Object.assign(globalThis,saved);}
 });
 
-test('PC ASR review applies only on consent and preserves existing captions and trimmed timeline offset',async()=>{
+test('automatic captions run immediately, preserve existing captions and hide engine details',async()=>{
   reset();project.captions=[{id:'keep-caption',text:'기존 자막',trackId:'v3',start:0,end:1}];
   const saved={location:globalThis.location,fetch:globalThis.fetch,confirm:globalThis.confirm,Worker:globalThis.Worker};globalThis.location=pcLocation;
-  const before=captureDocument(),history=new History(),calls=[],pcm=referenceBuffer(2);let confirms=0;
+  const before=captureDocument(),history=new History(),calls=[],pcm=referenceBuffer(2);
   const owner=Object.assign(Object.create(StudioTools.prototype),{captionEngine:'pc',captionEngineChosen:false,captionScope:'selected',pcAsr:{status:pcAsrReady(),checking:false},dialog:{open:false},
     audioRange:()=>({type:'audio',id:'selected-audio',start:7,duration:1,item:{name:'말소리',buffer:pcm,trimStart:.25,trimEnd:1.25}}),
     open(){this.dialog.open=true;},setBody(html){this.review=html;},progress(){},async run(kind,work){return work(new AbortController().signal);},async refreshPcAsr(){},close(){this.dialog.open=false;},
     hooks:{commit:(document,label)=>{calls.push(label);history.push(document,label);},select(){},timeline:{reveal(){}},toast(){}}});
   try{
-    globalThis.Worker=class{constructor(){throw new Error('must not fall back to Tiny');}};
+    globalThis.Worker=class{constructor(){throw new Error('fallback should not run while the preferred path succeeds');}};
     globalThis.fetch=async(url,options)=>{calls.push(url);return url.endsWith('/transcribe')?pcAsrJson({jobId:pcAsrJobId},202):pcAsrJson({state:'done',result:pcAsrResult({text:'문장 단위 보존',words:[],segments:[{text:'문장 단위 보존',start:.1,end:.8,words:[],timing:'segment'}]})});};
-    globalThis.confirm=()=>{confirms++;return false;};await owner.openCaptions();assert.equal(calls.length,0);assert.deepEqual(captureDocument(),before);
-    globalThis.confirm=()=>{confirms++;return true;};await owner.openCaptions();assert.equal(confirms,2);assert.equal(owner.state.engine,'pc');assert.equal(owner.state.captions[0].start,7.1);assert.equal(owner.state.captions[0].end,7.8);
-    assert.match(owner.review,/실제 문장 시각으로 보존/);assert.match(owner.review,/전체 인식 원문/);assert.match(owner.review,/GPU \(CUDA\)/);assert.deepEqual(captureDocument(),before);
-    owner.applyCaptions();assert.equal(project.captions.length,2);assert.equal(project.captions[0].text,'기존 자막');assert.notEqual(project.captions[0].trackId,project.captions[1].trackId);assert.equal(calls.at(-1),'PC Turbo 자동 자막 추가');assert.equal(assets.size,0);
-    assert.equal(history.undo(),'PC Turbo 자동 자막 추가');assert.deepEqual(captureDocument(),before);
-    owner.pcAsr.status=pcAsrReady({available:false});globalThis.confirm=()=>{throw new Error('must not run');};await assert.rejects(()=>owner.openCaptions(),/Tiny로 자동 전환하지/);assert.equal(owner.captionEngine,'pc');
+    globalThis.confirm=()=>{throw new Error('automatic captions should not ask for an engine confirmation');};await owner.openCaptions();assert.equal(owner.state.engine,'pc');assert.equal(owner.state.captions[0].start,7.1);assert.equal(owner.state.captions[0].end,7.8);
+    assert.match(owner.review,/실제 시각으로 보존/);assert.match(owner.review,/전체 인식 원문/);assert.doesNotMatch(owner.review,/Whisper|large-v3|GPU|CUDA|float16|Tiny/);assert.deepEqual(captureDocument(),before);
+    owner.applyCaptions();assert.equal(project.captions.length,2);assert.equal(project.captions[0].text,'기존 자막');assert.notEqual(project.captions[0].trackId,project.captions[1].trackId);assert.equal(calls.at(-1),'자동 자막 추가');assert.equal(assets.size,0);
+    assert.equal(history.undo(),'자동 자막 추가');assert.deepEqual(captureDocument(),before);
   }finally{Object.assign(globalThis,saved);reset();}
 });
 
@@ -2526,6 +2525,26 @@ test('server captions drop unusable spans, clamp to the range and keep the raw t
   assert.equal(out.text,'유효 길이 0 범위 밖 숫자 아님 끝을 넘김','원문은 서버가 준 그대로 이어 붙입니다');
   assert.deepEqual(serverCaptions({segments:[]},5,0),{captions:[],skipped:0,text:''});
   for(const bad of [[0,0],[5,-1],[NaN,0]])assert.throws(()=>serverCaptions({segments:[]},bad[0],bad[1]),/구간/);
+});
+
+test('server WAV encoding preserves right-only and opposite-phase stereo speech',async()=>{
+  const right=new Float32Array(4800).fill(.25),silence=new Float32Array(4800),opposite=new Float32Array(4800).fill(-.25);
+  for(const channels of [[silence,right],[opposite,right]]){
+    const buffer={sampleRate:48000,numberOfChannels:2,length:right.length,getChannelData:i=>channels[i]};
+    const wav=new DataView(await encodeServerWav(buffer).arrayBuffer());
+    assert.equal(wav.getUint32(24,true),16000);assert.equal(wav.getUint16(22,true),1);assert.equal(wav.getUint32(40,true),3200);
+    for(let offset=44;offset<wav.byteLength;offset+=2)assert.ok(Math.abs(wav.getInt16(offset,true))>8000);
+  }
+});
+
+test('server transcription surfaces request failures and propagates cancellation',async()=>{
+  const saved=globalThis.fetch,buffer=referenceBuffer(1),controller=new AbortController();
+  try{
+    globalThis.fetch=async(url,options)=>{assert.equal(options.signal,controller.signal);assert.equal(options.body.get('lang'),'ko');return new Response(JSON.stringify({error:'하루 사용량 초과'}),{status:429});};
+    await assert.rejects(()=>transcribeRaw(buffer,{signal:controller.signal}),/하루 사용량 초과/);
+    const canceled=new DOMException('작업 취소','AbortError');globalThis.fetch=async()=>{throw canceled;};
+    await assert.rejects(()=>transcribeRaw(buffer,{signal:controller.signal}),error=>error===canceled);
+  }finally{globalThis.fetch=saved;}
 });
 
 // ── 모니터·타임라인 높이 배분 ──────────────────────────────────────────

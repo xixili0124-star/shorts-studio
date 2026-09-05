@@ -96,7 +96,7 @@ export async function loadBrowserTrackingModel(task = 'mosaic', {
       try {
         const data = await readTrackingModelResponse(cached, model.bytes, { signal });
         await verifyTrackingModel(data, model, cryptoImpl, signal);
-        onProgress(1, model.name + ' 저장된 모델 사용');return data;
+        onProgress(1, '저장된 빠른 추적 파일을 사용합니다.');return data;
       } catch (error) {
         if (error.name === 'AbortError' || error.code === 'BROWSER_UNSUPPORTED') throw error;
         try { await cache.delete(model.url); } catch {}
@@ -105,7 +105,7 @@ export async function loadBrowserTrackingModel(task = 'mosaic', {
   }
   checkTrackingAbort(signal);
   if (allowModelDownload !== true) throw trackingError('MODEL_DOWNLOAD_REQUIRED',
-    model.name + ' 모델을 처음 받아야 합니다. 다운로드 안내에 동의한 뒤 다시 실행해 주세요.', model);
+    '빠른 추적에 필요한 파일을 처음 받아야 합니다. 다운로드 안내에 동의한 뒤 다시 실행해 주세요.', model);
   if (typeof fetchImpl !== 'function') throw trackingError('BROWSER_UNSUPPORTED', '이 브라우저는 모델 파일을 받을 수 없습니다.');
   const controller = new AbortController();let timedOut = false;
   const cancel = () => controller.abort();
@@ -113,18 +113,18 @@ export async function loadBrowserTrackingModel(task = 'mosaic', {
   signal?.addEventListener('abort', cancel, { once: true });
   try {
     checkTrackingAbort(signal);
-    onProgress(0, model.name + ' 모델 다운로드 중…');
+    onProgress(0, '빠른 추적에 필요한 파일을 받는 중…');
     const response = await fetchImpl(model.url, { credentials: 'omit', referrerPolicy: 'no-referrer',
       redirect: 'error', cache: 'no-store', signal: controller.signal });
     const data = await readTrackingModelResponse(response, model.bytes, { signal: controller.signal,
-      onProgress: value => onProgress(value, model.name + ' 모델 다운로드 중… ' + Math.round(value * 100) + '%') });
+      onProgress: value => onProgress(value, '빠른 추적 파일 다운로드 중… ' + Math.round(value * 100) + '%') });
     await verifyTrackingModel(data, model, cryptoImpl, signal);checkTrackingAbort(signal);
     let saved = false;
     if (cache) {
       try { await cache.put(model.url, new Response(data, { headers: { 'content-type': 'application/octet-stream', 'content-length': String(data.byteLength) } }));saved = true; } catch {}
     }
     checkTrackingAbort(signal);
-    onProgress(1, saved ? model.name + ' 모델 저장 완료' : model.name + ' 준비 완료 · 저장 공간을 사용할 수 없어 이번 작업에서만 사용합니다.');
+    onProgress(1, saved ? '빠른 추적 파일을 저장했습니다.' : '빠른 추적 준비 완료 · 저장 공간을 사용할 수 없어 이번 작업에서만 사용합니다.');
     return data;
   } catch (error) {
     checkTrackingAbort(signal);

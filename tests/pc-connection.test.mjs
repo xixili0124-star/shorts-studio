@@ -83,8 +83,8 @@ test('the first pairing request waits for permission for 60 seconds and reports 
     } });
     const rejected = assert.rejects(pending, error => {
       assert.equal(error.code, 'PC_PAIR_START_TIMEOUT');
-      assert.match(error.message, /60초/);
-      assert.match(error.message, /원래 편집기 창/);
+      assert.match(error.message, /기기의 응답/);
+      assert.match(error.message, /로컬 네트워크/);
       return true;
     });
     t.mock.timers.tick(5000);
@@ -123,7 +123,7 @@ test('status and approval result requests retain the five second timeout', async
       const pending = phase === 'status' ? pcConnectionStatus(options) : connectPc(options);
       const rejected = assert.rejects(pending, error => {
         assert.notEqual(error.code, 'PC_PAIR_START_TIMEOUT');
-        assert.match(error.message, /PC 연결 프로그램/);
+        assert.match(error.message, /추가 기능/);
         assert.doesNotMatch(error.message, /60초/);
         return true;
       });
@@ -177,7 +177,7 @@ test('pairing shows static permission guidance and safely focuses the editor bef
         assert.equal(savedPcConnection(site, store), null);
         return json(bridgeStatus());
       } });
-      assert.match(progress[0], /원래 편집기 창/);
+    assert.match(progress[0], /로컬 네트워크/);
       assert.match(progress[0], /로컬 네트워크/);
       assert.equal(savedPcConnection(site, store).token, token);
       assert.equal(popup.closed, true);

@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createRequire } from 'node:module';
-import { KEYFRAME_CHANNELS, keyframeValue, evaluateItem, setKeyframe, removeKeyframe, moveKeyframe, setValueAt, sliceKeyframes, splitKeyframes, validateKeyframes } from '../public/js/keyframes.js';
+import { KEYFRAME_CHANNELS, keyframeValue, keyframeAtTime, quantizeKeyframeTime, evaluateItem, setKeyframe, removeKeyframe, moveKeyframe, setValueAt, sliceKeyframes, splitKeyframes, validateKeyframes } from '../public/js/keyframes.js';
 import { cropTrackingAt, cropTrackingGeometry, validCropTracking, cropTrackingWarnings, sliceCropTracking, splitCropTracking, smoothCropKeys, trackCrop } from '../public/js/crop-tracking.js';
 import { createTargetTracker } from '../public/js/browser-tracking.js';
 import { transformOf, transformPoint, inverseTransformPoint, visualCorners, withVisualTransform, alignVisual } from '../public/js/visual-transform.js';
@@ -49,6 +49,35 @@ test('animated property edits change the current key while static edits stay sta
   assert.equal(item.keyframes.tracks.scaleY, undefined);assert.equal(item.transform.scaleY, 1.5);
   setValueAt(item, 'scaleX', 2, 1.7, { autoKey: true });near(keyframeValue(item, 'scaleX', 2), 1.7);
   assert.throws(() => setKeyframe(item, 'volume', 1, 3.01));assert.throws(() => setKeyframe(item, 'rotation', NaN, 0));
+});
+
+test('keyframe editing uses one canonical time per frame and replaces same-frame legacy keys', () => {
+  const item = { transform: { rotation: 0 } }, fps = 30, canonical = 35 / fps;
+  near(quantizeKeyframeTime(1.15, fps, 4), canonical);
+  setKeyframe(item, 'rotation', 1.15, 20, { fps, duration: 4 });
+  assert.equal(item.keyframes.tracks.rotation.length, 1);near(item.keyframes.tracks.rotation[0].time, canonical);
+  setKeyframe(item, 'rotation', canonical + 1e-5, 90, { fps, duration: 4 });
+  assert.equal(item.keyframes.tracks.rotation.length, 1);near(item.keyframes.tracks.rotation[0].value, 90);
+  assert.equal(keyframeAtTime(item.keyframes.tracks.rotation, 1.15, fps), item.keyframes.tracks.rotation[0]);
+
+  // 예전 문서에 같은 프레임의 서로 다른 소수 시각이 있어도 한 번의 편집으로 정리합니다.
+  item.keyframes.tracks.rotation = [
+    { time: 1.15, value: 10, easing: 'linear' },
+    { time: canonical, value: 30, easing: 'linear' },
+  ];
+  setValueAt(item, 'rotation', 1.151, 45, { fps, duration: 4 });
+  assert.deepEqual(item.keyframes.tracks.rotation, [{ time: canonical, value: 45, easing: 'linear' }]);
+  assert.equal(removeKeyframe(item, 'rotation', 1.15, { fps, duration: 4 }), true);
+  assert.equal(item.keyframes, undefined);
+});
+
+test('frame-aware key movement quantizes its destination and replaces a same-frame collision', () => {
+  const item = { transform: { opacity: 1 } }, fps = 60;
+  setKeyframe(item, 'opacity', 0, .2, { fps, duration: 3 });
+  setKeyframe(item, 'opacity', 1, .8, { fps, duration: 3 });
+  assert.equal(moveKeyframe(item, 'opacity', 0, .992, { fps, duration: 3 }), true);
+  assert.deepEqual(item.keyframes.tracks.opacity, [{ time: 1, value: .2, easing: 'linear' }]);
+  assert.throws(() => quantizeKeyframeTime(1, 0, 3), /프레임/);
 });
 
 test('split and trim preserve sampled channel values and hold boundaries', () => {

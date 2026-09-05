@@ -36,7 +36,7 @@ async function request(path, { method='GET', body, trackingOptions, signal, loca
 
 export async function pcTrackingStatus(options){
   const status=await request('/status',options);
-  if(status?.localServer!==true||status.provider!=='sam2'||status.model!==PC_TRACKING_MODEL||typeof status.available!=='boolean'||typeof status.configured!=='boolean')throw new Error('SAM 2.1 Small 설치 상태를 확인하지 못했습니다.');
+  if(status?.localServer!==true||status.provider!=='sam2'||status.model!==PC_TRACKING_MODEL||typeof status.available!=='boolean'||typeof status.configured!=='boolean')throw new Error('정밀 추적 기능의 준비 상태를 확인하지 못했습니다.');
   return status;
 }
 
@@ -73,7 +73,7 @@ export async function trackPcVideo(clip,rect,{seedTime=clip.trimStart,signal,onP
       if(job.state==='failed')throw new Error(typeof job.error?.message==='string'?job.error.message.slice(0,1000):'PC 추적에 실패했습니다.');
       if(job.state==='cancelled'){finish(reject,abortError());return;}
       if(job.state!=='running')throw new Error('PC 추적 상태를 확인하지 못했습니다.');
-      onProgress(Number.isFinite(job.progress)?Math.max(0,Math.min(1,job.progress)):null,typeof job.message==='string'?job.message.slice(0,1000):'SAM 2.1 Small로 추적 중…');
+      onProgress(Number.isFinite(job.progress)?Math.max(0,Math.min(1,job.progress)):null,'정밀하게 대상을 따라가는 중…');
       pollTimer=setTimeout(poll,pollInterval);
     }catch(error){finish(reject,error,true);}};
     onProgress(null,'선택한 원본을 이 PC의 추적 엔진으로 보내는 중…');

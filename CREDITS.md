@@ -90,21 +90,13 @@
 
 영문 전용 글꼴은 한국어 글리프를 제공하지 않으므로 한국어 문구에는 기기의 대체 글꼴이 표시될 수 있습니다. 목록의 영문 미리보기에는 각 글꼴 이름을 사용합니다. 글꼴 요청에는 선택한 family와 weight만 들어가며, 사용자 자막·원고를 Google Fonts URL의 text 파라미터에 넣지 않습니다. 처음 글꼴을 불러올 때는 인터넷 연결이 필요합니다.
 
-## 기본 효과음 24종 · Kenney CC0
+## 사용자 등록 효과음 37종
 
-라이브러리는 원작자 Kenney가 공개 배포한 아래 5개 팩에서 선별한 24개 샘플을 사용합니다. 앱이 실행 중에 수식으로 만드는 효과음이 아닙니다. 원작자 배포 ZIP의 `License.txt`에서 개인·상업 프로젝트 사용 허용과 CC0를 확인했습니다. [CC0 1.0 공식 조건](https://creativecommons.org/publicdomain/zero/1.0/)에 따라 복제·변환·재배포할 수 있으며, 원작자 고지를 함께 제공합니다.
+기존 Kenney·OpenGameArt 효과음 24종은 기본 라이브러리와 배포 파일에서 제거했습니다. 현재 라이브러리는 사용자가 직접 제공한 MP3 37개만 정적 파일로 읽으며, 실행 중 음원을 합성하거나 외부 API를 호출하지 않습니다. 원본 음질과 길이는 바꾸지 않고 웹 경로에 안전한 영문 파일명만 적용했습니다.
 
-| 원본 팩 | 포함 수 | 동봉 고지 |
-| --- | --- | --- |
-| [Interface Sounds](https://kenney.nl/assets/interface-sounds) | 7 | [Kenney 원문 고지](public/sounds/licenses/kenney-interface.txt) |
-| [UI Audio](https://kenney.nl/assets/ui-audio) | 2 | [Kenney 원문 고지](public/sounds/licenses/kenney-ui.txt) |
-| [Impact Sounds](https://kenney.nl/assets/impact-sounds) | 5 | [Kenney 원문 고지](public/sounds/licenses/kenney-impact.txt) |
-| [RPG Audio](https://kenney.nl/assets/rpg-audio) | 5 | [Kenney 원문 고지](public/sounds/licenses/kenney-rpg.txt) |
-| [Digital Audio](https://kenney.nl/assets/digital-audio) | 5 | [Kenney 원문 고지](public/sounds/licenses/kenney-digital.txt) |
+이 파일들에는 재배포 또는 상업적 사용을 허용한다는 라이선스 자료가 함께 제공되지 않았습니다. 특히 배달의민족·배그·리그 오브 레전드·GTA·드래곤볼 등 브랜드나 저작물이 연상되는 음원은 공개 서비스와 유료 영상에 포함하기 전에 권리자 허락 또는 해당 음원의 명확한 이용 조건을 확인해야 합니다. 현재 파일을 CC0나 무료 상업용 음원으로 표시하지 않습니다.
 
-각 원본 Ogg Vorbis를 48 kHz·모노·PCM 16비트 WAV로 변환하고, RMS 목표 0.12·피크 상한 0.82 내에서 음량을 조정했습니다. 120 ms보다 짧은 샘플에는 끝에 무음만 덧붙였습니다. 피치·속도를 바꾸거나 새로운 합성음을 덧대지 않았습니다. 배포 WAV는 총 1,184,592바이트이며, 외부 음원 API 없이 앱의 정적 파일을 읽습니다.
-
-[샘플별 원본 파일·다운로드 URL·SHA-256·변환·검증 수치](public/sounds/manifest.json)에 출처를 기록하고 [디코딩한 24종 파형](public/sounds/waveforms.png)을 함께 제공합니다. 원문 고지는 줄바꿈·행 끝 공백만 정리했습니다. 기존 프로젝트에 저장된 효과음 WAV는 변경하지 않으며, 이전 합성 API는 호환용으로만 남겨 두었습니다. 기본 효과음은 자막 인식에 포함하는 음성이 아니라 효과음 트랙으로 취급합니다.
+[효과음 매니페스트](public/sounds/manifest.json)에 편집기 ID, 원래 파일명, 재생시간, 용량, SHA-256을 기록했습니다. 기존 프로젝트에 이미 저장된 예전 효과음 파일은 변경하지 않습니다. 새 기본 효과음은 자막 인식에 포함하는 음성이 아니라 효과음 트랙으로 취급합니다.
 
 ## Myinstants 외부 탐색
 

@@ -117,7 +117,7 @@ const sourceAudioAsset = sourceId => [...assets.values()].find(asset => asset.ki
 /** 하나의 영상 소재를 여러 번 놓아도 파생 파일은 한 개만 저장합니다. */
 export async function prepareVideoAudio(asset, { signal, onStatus = () => {} } = {}) {
   checkAbort(signal);
-  if (!asset || asset.kind !== 'video' || assets.get(asset.id) !== asset) throw new Error('원본 영상 소재를 다시 선택해 주세요.');
+  if (!asset || asset.kind !== 'video' || assets.get(asset.id) !== asset) throw new Error('원본 영상 파일을 다시 선택해 주세요.');
   const cached = sourceAudioAsset(asset.id);
   if (cached) return { asset: cached, created: false };
   if (asset.base.hasAudio === false) return { asset: null, created: false, silent: true };
@@ -146,7 +146,7 @@ export async function prepareVideoAudio(asset, { signal, onStatus = () => {} } =
     return { asset: null, created: false, oversized: true, reason: error.message };
   }
   checkAbort(signal);
-  if (assets.get(asset.id) !== asset) throw new Error('소리 분리 중 원본 소재가 변경되었습니다. 다시 추가해 주세요.');
+  if (assets.get(asset.id) !== asset) throw new Error('소리 분리 중 원본 파일이 변경되었습니다. 다시 추가해 주세요.');
   const existing = sourceAudioAsset(asset.id);
   if (existing) return { asset: existing, created: false };
   const result = addDecodedAudioAsset(file, buffer, { sourceVideoAudio: true, sourceVideoAssetId: asset.id });
@@ -160,12 +160,12 @@ const placementFields = plan => JSON.stringify({ start: plan.start, end: plan.en
 export async function insertMediaAsset(assetId, { time = 0, trackId, placement, signal, onStatus = () => {}, overrides = {} } = {}) {
   checkAbort(signal);
   const asset = assets.get(assetId);
-  if (!asset || !['video', 'image'].includes(asset.kind)) throw new Error('영상이나 이미지 소재를 선택해 주세요.');
+  if (!asset || !['video', 'image'].includes(asset.kind)) throw new Error('영상이나 이미지 파일을 선택해 주세요.');
   if (project.clips.length >= 1000) throw new Error('영상·이미지 클립은 최대 1,000개입니다.');
   const before = captureDocument(), signature = JSON.stringify(before);
   const check = () => {
     checkAbort(signal);
-    if (assets.get(assetId) !== asset || JSON.stringify(captureDocument()) !== signature) throw new Error('소재를 준비하는 동안 타임라인이 변경되었습니다. 다시 추가해 주세요.');
+    if (assets.get(assetId) !== asset || JSON.stringify(captureDocument()) !== signature) throw new Error('파일을 준비하는 동안 타임라인이 변경되었습니다. 다시 추가해 주세요.');
   };
   const target = trackId || placement?.trackId || trackIdFor('clip');
   if (!timelineTracks().some(track => track.id === target && track.kind === 'visual')) throw new Error('영상을 놓을 트랙을 다시 선택해 주세요.');

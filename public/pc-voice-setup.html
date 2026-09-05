@@ -41,7 +41,7 @@
     <h2 id="setup-title">처음 한 번 · Windows PC 준비</h2>
     <p>현재 자동 설치 도구는 Windows 64비트용입니다. 시작 도구를 실행할 Python 3.10 이상과 15GB 이상의 여유 공간이 필요합니다. VoxCPM2용 Python 3.11과 모델은 기존 GPT-SoVITS와도 분리된 폴더에 설치합니다.</p>
     <ol class="steps">
-      <li><h3>현재 작업부터 저장</h3><p>지금 편집 중이라면 <strong>.shorts 프로젝트 저장</strong>으로 소재와 편집 내용을 보관하세요. 브라우저 주소가 바뀌면 자동 저장 공간도 달라집니다.</p></li>
+      <li><h3>현재 작업부터 저장</h3><p>지금 편집 중이라면 <strong>.shorts 프로젝트 저장</strong>으로 라이브러리 파일과 편집 내용을 보관하세요. 브라우저 주소가 바뀌면 자동 저장 공간도 달라집니다.</p></li>
       <li><h3>실험 브랜치 내려받기</h3><p>압축을 완전히 풀어 주세요. 원본 운영 버전과 별도 폴더에 두면 됩니다. GitHub 로그인이 필요할 수 있습니다.</p><a class="button" href="https://github.com/xixili0124-star/shorts-studio/archive/refs/heads/codex/studio-lab.zip" target="_blank" rel="noopener noreferrer">PC용 실험판 ZIP 받기</a></li>
       <li><h3>VoxCPM2 설치</h3><p>폴더의 <code>setup-pc-voice.cmd</code>를 실행하고 다운로드 안내에 동의하세요. 모델 약 <strong>5GB</strong>, 실행 환경은 별도로 수 GB를 받습니다. 전역 Python과 기존 GPT-SoVITS 환경을 바꾸지 않습니다.</p><p class="muted">기본은 NVIDIA GPU용 CUDA 설치입니다. GPU 메모리와 다른 프로그램의 사용량에 따라 실행 가능 여부가 달라집니다. <code>--device cpu</code> 옵션도 있지만 CPU 생성 속도는 검증하지 않았습니다. 설치 중에 참고 녹음은 업로드하지 않습니다.</p></li>
       <li><h3>PC용 편집기 시작</h3><p><code>start-pc-voice.cmd</code>를 실행하고 창에 표시되는 로컬 편집기 주소를 여세요. 엔진이 준비되면 <strong>AI 음성 → 실행 방식 → PC 확장 · 내 목소리</strong>에서 연결을 확인합니다.</p><p class="muted">편집하는 동안 시작 창을 열어 두세요. 기존 8787 포트가 사용 중이면 기존 작업을 저장한 뒤 서버를 종료하거나, <code>start-pc-voice.cmd --port 8788</code>로 따로 실행하세요. 실행기는 다른 프로그램을 강제로 종료하지 않습니다.</p></li>
@@ -60,7 +60,7 @@
   </section>
   <section aria-labelledby="privacy-title">
     <h2 id="privacy-title">저장과 기기 이동</h2>
-    <p>참고 녹음·읽은 문장은 PC의 <code>.studio-local/voices</code>에 따로 보관합니다. 소재함·자동 저장·.shorts 프로젝트·Git에 포함하지 않습니다. 원고와 참고 녹음은 외부 TTS 서비스에 보내지 않습니다.</p>
+    <p>참고 녹음·읽은 문장은 PC의 <code>.studio-local/voices</code>에 따로 보관합니다. 라이브러리·자동 저장·.shorts 프로젝트·Git에 포함하지 않습니다. 원고와 참고 녹음은 외부 TTS 서비스에 보내지 않습니다.</p>
     <p>PC에서 <strong>생성한 음성을 타임라인에 추가 → .shorts 저장 → 모바일에서 열기</strong> 순서로 이어서 작업하세요. 완성된 음성은 파일에 포함되지만 참고 목소리는 따라가지 않습니다. 다른 PC에서 같은 목소리를 다시 생성하려면 별도 등록이 필요합니다.</p>
     <details><summary>삭제·취소는 어떻게 동작하나요?</summary><p>참고 음성 삭제는 PC에 보관한 녹음과 읽은 문장을 지웁니다. 이미 만든 WAV·프로젝트 사본은 유지됩니다. 엔진이 기억 중인 참조 정보는 엔진 종료 시 해제됩니다.</p><p>저장·삭제 창을 닫아도 이미 시작한 파일 작업은 완료될 수 있으므로 등록 목록을 확인하세요. 생성 중 취소는 결과 받기를 취소하며 GPU 작업은 잠시 계속될 수 있습니다. 응답 완료가 불확실하면 프로젝트를 저장하고 PC 엔진과 로컬 서버를 다시 실행하세요.</p></details>
     <details><summary>공유 웹주소에서 PC 엔진을 바로 켤 수 없나요?</summary><p>공개 사이트나 휴대폰에서 이 PC의 엔진을 자동 호출하지 않습니다. PC의 로컬 편집기로 접속해 주세요. 외부 공개 주소·공유기 포트 개방·유료 API 키는 필요 없습니다.</p></details>

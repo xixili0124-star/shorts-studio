@@ -214,3 +214,33 @@ test('cancelled keyframe drag does not swallow the next inspector command',()=>{
     assert.deepEqual(h.calls.edits,['키프레임 삭제']);
   }finally{h.restore();}
 });
+
+test('keyframe property selection renders its value slider beside the key controls',()=>{
+  const h=editorHarness();try{
+    h.editor.channel='rotation';h.state.range.item.transform={rotation:37};
+    const html=h.editor.render(h.state.range);
+    assert.match(html,/data-keyframe-channel/);
+    assert.match(html,/data-keyframe-value[^>]*data-prop="transform\.rotation"/);
+    assert.match(html,/value="37"[^>]*aria-label="현재 위치 회전 값"/);
+    assert.match(html,/위 슬라이더로 값을 정하세요/);
+    h.state.range.type='audio';h.state.range.item={type:'audio',volume:2.25};
+    const audio=h.editor.render(h.state.range);
+    assert.match(audio,/data-prop="volume"[^>]*max="300"[^>]*value="225"/);
+    h.state.range.type='clip';h.state.range.item={type:'video',audioSeparated:true,transform:{}};
+    assert.doesNotMatch(h.editor.render(h.state.range),/<option value="volume"/);
+  }finally{h.restore();}
+});
+
+test('adding a key seeks to the same quantized frame used by following property edits',()=>{
+  const h=editorHarness();try{
+    h.editor.channel='rotation';h.state.range.item={type:'image',transform:{rotation:15}};
+    h.state.time=11.15;
+    emit(h.host,'click',{target:h.controls.get('[data-keyframe-command="toggle"]')});
+    const expected=10+35/30,keys=h.state.range.item.keyframes.tracks.rotation;
+    assert.equal(keys.length,1);near(keys[0].time,35/30);assert.deepEqual(h.calls.seeks,[expected]);
+    assert.equal(h.state.time,expected);
+    // 같은 표시 프레임에서 다시 누르면 인접 소수 키를 추가하지 않고 현재 키를 지웁니다.
+    h.state.time=11.15;emit(h.host,'click',{target:h.controls.get('[data-keyframe-command="toggle"]')});
+    assert.equal(h.state.range.item.keyframes,undefined);
+  }finally{h.restore();}
+});

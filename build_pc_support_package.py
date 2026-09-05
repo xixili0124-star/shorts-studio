@@ -13,6 +13,7 @@ PACKAGE_ID = 'shorts-studio-pc-support'
 MANIFEST = 'pc-support-package.json'
 ZIP_NAME = 'Shorts-Studio-PC-Support.zip'
 INSTALLER_NAME = 'Shorts-Studio-PC-Setup.cmd'
+VOICE_INSTALLER_NAME = 'Shorts-Studio-Voice-Setup.cmd'
 DOWNLOAD_ORIGIN = 'https://shorts-studio-75p.pages.dev'
 MAX_ARCHIVE_BYTES = 16 * 1024 * 1024
 MAX_FILE_BYTES = 4 * 1024 * 1024
@@ -64,16 +65,21 @@ def validate_public_content(name, content):
         raise ValueError('개인 경로나 고정 키가 포함된 공개 소스는 패키징하지 않습니다: ' + name)
 
 
-def check_release_assets(archive, command):
+def check_release_assets(archive, command, *additional_commands):
     """전송용 gzip 크기와 별개로 배포할 원본 파일의 크기를 먼저 제한합니다."""
-    if any(len(value) > CLOUDFLARE_MAX_ASSET_BYTES for value in (archive, command)):
+    commands = (command, *additional_commands)
+    if any(len(value) > CLOUDFLARE_MAX_ASSET_BYTES for value in (archive, *commands)):
         raise ValueError('Cloudflare Pages의 개별 파일 25 MiB 한도를 초과했습니다.')
     if len(archive) > MAX_ARCHIVE_BYTES:
         raise ValueError('PC 지원 ZIP의 자체 크기 제한을 초과했습니다.')
-    return {'archiveBytes': len(archive), 'installerBytes': len(command),
+    result = {'archiveBytes': len(archive), 'installerBytes': len(command),
             'gzipArchiveBytes': len(gzip.compress(archive, mtime=0)),
             'gzipInstallerBytes': len(gzip.compress(command, mtime=0)),
             'pagesMaxAssetBytes': CLOUDFLARE_MAX_ASSET_BYTES}
+    if additional_commands:
+        result['voiceInstallerBytes'] = len(additional_commands[0])
+        result['gzipVoiceInstallerBytes'] = len(gzip.compress(additional_commands[0], mtime=0))
+    return result
 
 
 def safe_member(name):
@@ -180,10 +186,13 @@ def read_package(archive, expected_sha256=None):
     return manifest
 
 
-def bootstrap_cmd(package_sha256=None, package_size=None):
+def bootstrap_cmd(package_sha256=None, package_size=None, *, components=(), consumer=False):
     """실행 정책 변경 없이 읽을 수 있는 PowerShell 명령을 CMD에 넣습니다."""
     if package_sha256 is not None and (not re.fullmatch(r'[a-f0-9]{64}', package_sha256) or type(package_size) is not int or not 0 < package_size <= MAX_ARCHIVE_BYTES):
         raise ValueError('설치기에 고정할 패키지 정보가 올바르지 않습니다.')
+    components = tuple(components)
+    if any(name not in ('voice', 'asr', 'tracking') for name in components) or consumer and components != ('voice',):
+        raise ValueError('소비자용 설치 기능 지정이 올바르지 않습니다.')
     script = r"""
 $ErrorActionPreference='Stop';
 if(-not [Environment]::Is64BitOperatingSystem -or $env:PROCESSOR_ARCHITECTURE -eq 'ARM64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64'){throw 'Windows x64 is required.'};
@@ -199,7 +208,7 @@ $env:UV_CACHE_DIR=Join-Path $runtime 'cache';$env:UV_PYTHON_INSTALL_DIR=Join-Pat
 & $uv python install '__PYTHON_VERSION__' --no-bin --no-registry;if($LASTEXITCODE -ne 0){throw 'Python preparation failed.'};
 $python=(& $uv python find '__PYTHON_VERSION__' --managed-python|Out-String).Trim();if($LASTEXITCODE -ne 0 -or -not(Test-Path -LiteralPath $python -PathType Leaf)){throw 'Python was not found.'};
 __PACKAGE_FETCH__
-& $python -E -s -X utf8 (Join-Path $source 'install_pc_support.py') --source $source;if($LASTEXITCODE -ne 0){throw 'PC support setup did not finish.'};
+& $python -E -s -X utf8 (Join-Path $source 'install_pc_support.py') --source $source __INSTALL_ARGS__;if($LASTEXITCODE -ne 0){throw 'PC support setup did not finish.'};
 """
     if package_sha256:
         fetch = r"""
@@ -210,16 +219,20 @@ $source=SafeDir (Join-Path $stage 'source');$z=[IO.Compression.ZipFile]::OpenRea
         fetch = fetch.replace('__ZIP_URL__', DOWNLOAD_ORIGIN + '/downloads/' + ZIP_NAME).replace('__ZIP_SHA__', package_sha256).replace('__ZIP_SIZE__', str(package_size))
     else:
         fetch = "$source=$env:STUDIO_SETUP_SOURCE;if(-not(Test-Path -LiteralPath (Join-Path $source 'install_pc_support.py'))){throw 'Run this file beside install_pc_support.py.'};"
-    script = script.replace('__FILE_FUNCTIONS__', BOOTSTRAP_FILE_FUNCTIONS).replace('__PACKAGE_FETCH__', fetch).replace('__UV_VERSION__', UV_VERSION).replace('__UV_URL__', UV_URL).replace('__UV_SHA__', UV_SHA256).replace('__UV_SIZE__', str(UV_SIZE)).replace('__PYTHON_VERSION__', PYTHON_VERSION)
+    install_args = ('--components ' + ' '.join(components) + ' ' if components else '') + ('--yes --consumer' if consumer else '')
+    script = script.replace('__FILE_FUNCTIONS__', BOOTSTRAP_FILE_FUNCTIONS).replace('__PACKAGE_FETCH__', fetch).replace('__UV_VERSION__', UV_VERSION).replace('__UV_URL__', UV_URL).replace('__UV_SHA__', UV_SHA256).replace('__UV_SIZE__', str(UV_SIZE)).replace('__PYTHON_VERSION__', PYTHON_VERSION).replace('__INSTALL_ARGS__', install_args.strip())
     script = ' '.join(line.strip() for line in script.splitlines() if line.strip())
     command = 'powershell.exe -NoProfile -Command "& { ' + script + ' }"'
     if len(command) > 8000 or '"' in script:
         raise ValueError('설치 명령이 Windows CMD 제한을 초과했습니다.')
+    heading = ('echo Shorts Studio custom voice setup.\r\n'
+               'echo The required files will be prepared without another feature selection.\r\n') if consumer else (
+               'echo Shorts Studio PC support setup. No administrator or security-policy changes are required.\r\n'
+               'echo A verified Python runtime is prepared first. Model downloads require a separate choice.\r\n')
     return ('@echo off\r\nsetlocal DisableDelayedExpansion\r\nchcp 65001 >nul\r\nset "STUDIO_SETUP_SOURCE=%~dp0"\r\n'
-            'echo Shorts Studio PC support setup. No administrator or security-policy changes are required.\r\n'
-            'echo A verified Python runtime is prepared first. Model downloads require a separate choice.\r\n'
+            + heading
             + command + '\r\nset "STUDIO_SETUP_EXIT=%errorlevel%"\r\n'
-            'if not "%STUDIO_SETUP_EXIT%"=="0" echo Setup stopped. Existing models and reference recordings were not removed.\r\n'
+            'if not "%STUDIO_SETUP_EXIT%"=="0" echo Setup stopped. Existing files and voice recordings were not removed.\r\n'
             'pause\r\nexit /b %STUDIO_SETUP_EXIT%\r\n')
 
 
@@ -230,7 +243,7 @@ def build_package(source=ROOT, output=None):
     output.mkdir(parents=True, exist_ok=True)
     archive = output / ZIP_NAME
     temporary = archive.with_suffix('.zip.tmp')
-    for name in (ZIP_NAME, temporary.name, INSTALLER_NAME, ZIP_NAME + '.sha256'):
+    for name in (ZIP_NAME, temporary.name, INSTALLER_NAME, VOICE_INSTALLER_NAME, ZIP_NAME + '.sha256'):
         no_links(output / name, output)
     if temporary.exists():
         raise ValueError('기존 임시 파일이나 링크를 덮어쓰지 않습니다.')
@@ -246,11 +259,14 @@ def build_package(source=ROOT, output=None):
     read_package(temporary)
     digest, size = file_digest(temporary), temporary.stat().st_size
     installer = bootstrap_cmd(digest, size)
-    sizes = check_release_assets(temporary.read_bytes(), installer.encode('utf-8'))
+    voice_installer = bootstrap_cmd(digest, size, components=('voice',), consumer=True)
+    sizes = check_release_assets(temporary.read_bytes(), installer.encode('utf-8'), voice_installer.encode('utf-8'))
     temporary.replace(archive)
     (output / INSTALLER_NAME).write_bytes(installer.encode('utf-8'))
+    (output / VOICE_INSTALLER_NAME).write_bytes(voice_installer.encode('utf-8'))
     (output / (ZIP_NAME + '.sha256')).write_text(digest + '  ' + ZIP_NAME + '\n', encoding='ascii')
-    return {'archive': str(archive), 'installer': str(output / INSTALLER_NAME), 'sha256': digest,
+    return {'archive': str(archive), 'installer': str(output / INSTALLER_NAME),
+            'voiceInstaller': str(output / VOICE_INSTALLER_NAME), 'sha256': digest,
             'size': size, 'files': len(manifest['files']), 'assetSizes': sizes}
 
 

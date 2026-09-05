@@ -37,6 +37,11 @@ export function renderFrame(ctx, t, opts = {}) {
   const visualTracks=layout.tracks.filter(track=>track.kind==='visual');
   ctx.setTransform(1,0,0,1,0,0);ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';ctx.filter='none';
   ctx.fillStyle=band?tpl.bg:'#000';ctx.fillRect(0,0,W,H);
+  if(band&&tpl.quickFormat===true){
+    const color=(value,fallback)=>/^#[0-9a-f]{6}$/i.test(String(value||''))?String(value):fallback;
+    ctx.fillStyle=color(tpl.hook?.background,tpl.bg||'#000000');ctx.fillRect(0,0,W,band.y);
+    ctx.fillStyle=color(tpl.credit?.background,tpl.bg||'#000000');ctx.fillRect(0,band.y+band.h,W,Math.max(0,H-band.y-band.h));
+  }
   const atTime=t===layout.total?Math.max(0,t-1e-7):t;
   const legacyCaption=legacyEditorMode?activeCaption(atTime):null;
   const paintMedia=(target,at)=>{
@@ -523,6 +528,13 @@ function roundRect(ctx, x, y, w, h, r) {
 
 // ── 템플릿 (밴드 레이아웃 장식) ─────────────────────────
 function drawTemplate(ctx, W, H, tpl, k) {
+  if (tpl.quickFormat === true) {
+    const top=Math.max(0,Number(tpl.videoTop)||0);
+    const bottom=Math.max(0,1-top-(Number(tpl.videoHeight)||0));
+    if (tpl.hook?.on && String(tpl.hook.text||'').trim()) drawBandText(ctx,W,H,{...tpl.hook,text:String(tpl.hook.text)},0,H*top,k);
+    if (tpl.credit?.on && String(tpl.credit.text||'').trim()) drawBandText(ctx,W,H,{font:'"Noto Sans KR"',accent:tpl.credit.color,...tpl.credit,text:String(tpl.credit.text)},H*(1-bottom),H*bottom,k);
+    return;
+  }
   if (tpl.hook?.on) drawHook(ctx, W, H, tpl.hook, k);
   if (tpl.comment?.on) drawCommentCard(ctx, W, H, tpl.comment, k);
   if (tpl.credit?.on && tpl.credit.text.trim()) {
@@ -536,44 +548,53 @@ function drawTemplate(ctx, W, H, tpl, k) {
   }
 }
 
+function drawBandText(ctx,W,H,style,y,height,k){
+  if(height<=0)return;
+  ctx.save();ctx.beginPath();ctx.rect(0,y,W,height);ctx.clip();
+  const fallback=(y+height/2)/H,requested=Number(style.y);
+  const center=Number.isFinite(requested)?Math.max(y/H,Math.min((y+height)/H,requested)):fallback;
+  drawHook(ctx,W,H,{...style,y:center,maxHeight:height*.84},k);
+  ctx.restore();
+}
+
 /**
  * 상단 훅 문구. *별표* 로 감싼 조각만 강조색으로 칠한다.
  * 한 줄 안에서 색이 바뀌므로 조각별 폭을 재서 가운데 정렬을 직접 계산한다.
  */
 function drawHook(ctx, W, H, hook, k) {
-  const size = hook.size * k;
+  let size = Math.max(1,Number(hook.size)||58) * k;
   const weight = (FONTS.find(f => f.css === hook.font)?.weight) ?? 700;
   ctx.save();
-  ctx.font = `${weight} ${size}px ${hook.font}, "Noto Sans KR", sans-serif`;
   ctx.textBaseline = 'alphabetic';
-
-  const lineH = size * 1.22;
   const maxW = W * 0.92;
 
-  // 줄바꿈은 사용자가 넣은 그대로 존중하되, 넘치는 줄만 다시 접는다
-  const lines = [];
-  for (const raw of String(hook.text).split('\n')) {
-    const pieces = splitAccent(raw);
-    let cur = [];
-    let curW = 0;
-    for (const piece of pieces) {
-      for (const word of piece.text.split(/(\s+)/)) {
-        if (!word) continue;
-        const wWidth = ctx.measureText(word).width;
-        if (curW + wWidth > maxW && cur.length) {
-          lines.push(cur);
-          cur = [];
-          curW = 0;
-          if (!word.trim()) continue;   // 줄 첫머리 공백은 버린다
+  const layout=()=>{
+    ctx.font = `${weight} ${size}px ${hook.font}, "Noto Sans KR", sans-serif`;
+    const lines=[];
+    for(const raw of String(hook.text).split('\n')){
+      let cur=[],curW=0;
+      for(const piece of splitAccent(raw)){
+        for(const word of piece.text.split(/(\s+)/)){
+          if(!word)continue;
+          const units=ctx.measureText(word).width>maxW?[...word]:[word];
+          for(const unit of units){
+            const width=ctx.measureText(unit).width;
+            if(curW+width>maxW&&cur.length){lines.push(cur);cur=[];curW=0;if(!unit.trim())continue;}
+            cur.push({text:unit,accent:piece.accent,w:width});curW+=width;
+          }
         }
-        cur.push({ text: word, accent: piece.accent, w: wWidth });
-        curW += wWidth;
       }
+      lines.push(cur);
     }
-    lines.push(cur);
+    return lines;
+  };
+  let lines=layout(),lineH=size*1.22,total=lines.length*lineH;
+  const maxHeight=Number(hook.maxHeight)||0;
+  for(let attempt=0;maxHeight>0&&total>maxHeight&&attempt<4;attempt++){
+    const next=Math.max(12*k,size*(maxHeight/total)*.98);
+    if(Math.abs(next-size)<.01)break;
+    size=next;lines=layout();lineH=size*1.22;total=lines.length*lineH;
   }
-
-  const total = lines.length * lineH;
   let top = H * hook.y - total / 2;
 
   for (const line of lines) {
@@ -704,13 +725,15 @@ export async function loadFonts({signal}={}) {
     if(item.graphic==='lower')add('"Noto Sans KR"',item.subtitle||'SHORTS STUDIO');
   }
   if(project.template.mode==='band'){
-    const {hook,comment,credit}=project.template;
+    const {hook,comment,credit,quickFormat}=project.template;
     if(hook?.on)add(hook.font,hook.text);
-    if(comment?.on){
+    if(quickFormat===true){
+      if(credit?.on)add(credit.font||'"Noto Sans KR"',credit.text);
+    }else if(comment?.on){
       add('"Noto Sans KR"',comment.text+(comment.time||''),400);
       add('"Noto Sans KR"','@'+(comment.name||'?')+'♥'+(comment.likes||''),700);
     }
-    if(credit?.on)add('"Noto Sans KR"',credit.text,700);
+    if(quickFormat!==true&&credit?.on)add('"Noto Sans KR"',credit.text,700);
   }
   await Promise.all([...used.values()].map(({font,text,weight})=>ensureFont(font,text,weight,{signal})));
 }

@@ -28,6 +28,42 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 @media(max-height:740px) and (min-width:651px){.workbench{grid-template-rows:minmax(150px,1fr) var(--timeline-h,305px)}.track-head.audio-head,.track.audio-track{height:43px}.inspector{bottom:305px}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{animation:none!important;transition:none!important}}
 
+/* 라이브러리 파일 작업은 썸네일 오른쪽 위의 한 그룹에서 처리합니다. */
+.asset-actions{position:absolute;top:6px;right:6px;z-index:3;display:flex;gap:3px;padding:3px;background:#101313e8;border:1px solid #ffffff1f;border-radius:7px;box-shadow:0 3px 10px #0008;opacity:0;pointer-events:none;transform:translateY(-2px);transition:opacity .14s ease,transform .14s ease}
+.asset-card:hover .asset-actions,.asset-card:focus-within .asset-actions{opacity:1;pointer-events:auto;transform:none}
+.asset-actions .asset-add,.asset-actions .asset-remove{position:static;display:grid;place-items:center;width:27px;height:27px;padding:0;border-radius:4px;opacity:1;line-height:1;z-index:auto}
+.asset-actions .asset-add{background:#172115;color:var(--accent);border:1px solid #aee06173;font-size:18px}
+.asset-actions .asset-add:hover{background:#2a3a20;color:#d8ff9a}
+.asset-actions .asset-remove{background:#251918;color:#e7aaa1;border:1px solid #a5685e8f;font-size:17px}
+.asset-actions .asset-remove:hover{background:#4a2521;color:#fff}
+.asset-actions .asset-add:focus-visible,.asset-actions .asset-remove:focus-visible{outline-offset:2px}
+@media(hover:none){.asset-actions{opacity:1;pointer-events:auto;transform:none}}
+
+/* 퀵포맷: 실제 9:16 출력과 같은 상·영상·하 영역을 한눈에 조절합니다. */
+.quick-format-symbol{font-size:23px;line-height:22px}
+.quick-format-panel{padding-bottom:8px}
+.quick-format-hero{display:grid;grid-template-columns:66px minmax(0,1fr);gap:11px 12px;align-items:center;padding:13px;background:linear-gradient(145deg,#20251e,#1b1e1b);border:1px solid #3d4935;border-radius:8px}
+.quick-format-preview{--quick-top:20%;--quick-bottom:20%;--quick-top-position:50%;--quick-bottom-position:33%;--quick-top-bg:#000;--quick-bottom-bg:#000;--quick-top-color:#fff;--quick-bottom-color:#fff;--quick-top-accent:#ffe14d;--quick-bottom-accent:#ffe14d;width:64px;aspect-ratio:9/16;display:grid;grid-template-rows:var(--quick-top) minmax(0,1fr) var(--quick-bottom);overflow:hidden;border:1px solid #596155;border-radius:5px;background:#000;box-shadow:0 8px 20px #0007}
+.quick-format-preview .quick-video{min-height:0;background:linear-gradient(145deg,#5b7350,#263f43 55%,#293238);display:grid;place-items:center;color:#e7f5dc;font:700 6px Consolas,monospace;letter-spacing:.4px}
+.quick-format-preview .quick-copy{position:relative;min-height:0;text-align:center;font-weight:900;line-height:1.15;overflow:hidden;overflow-wrap:anywhere}
+.quick-format-preview .quick-copy>span{position:absolute;left:3px;right:3px;transform:translateY(-50%)}
+.quick-format-preview .quick-copy em{font-style:normal}.quick-copy-top{background:var(--quick-top-bg);color:var(--quick-top-color);font-family:var(--quick-top-font),'Noto Sans KR',sans-serif;font-size:var(--quick-top-size,5px)}.quick-copy-top>span{top:var(--quick-top-position)}.quick-copy-top em{color:var(--quick-top-accent)}
+.quick-copy-bottom{background:var(--quick-bottom-bg);color:var(--quick-bottom-color);font-family:var(--quick-bottom-font),'Noto Sans KR',sans-serif;font-size:var(--quick-bottom-size,4px)}.quick-copy-bottom>span{top:var(--quick-bottom-position)}.quick-copy-bottom em{color:var(--quick-bottom-accent)}
+.quick-format-summary{min-width:0}.quick-format-summary .eyebrow{margin-bottom:5px}.quick-format-summary strong{font-size:13px}.quick-format-summary p{margin-top:6px;color:var(--muted);font-size:9px;line-height:1.55}
+.quick-format-toggle{grid-column:2;display:flex;align-items:center;gap:7px;width:max-content;color:#cdd5c8;font-size:10px;font-weight:600;cursor:pointer}.quick-format-toggle input{accent-color:var(--accent)}
+.quick-format-presets{display:grid;grid-template-columns:1fr 1fr;gap:7px}
+.quick-format-preset{min-width:0;display:grid;grid-template-columns:28px minmax(0,1fr);grid-template-rows:auto auto;gap:2px 7px;align-items:center;padding:8px;text-align:left;background:#202325;border:1px solid #343a3d;border-radius:6px;color:var(--text)}
+.quick-format-preset:hover{border-color:#60704e;background:#252b23}.quick-format-preset.active{border-color:var(--accent);background:#28331f;box-shadow:inset 0 0 0 1px #b8ee6326}
+.quick-format-preset strong{font-size:10px;font-weight:600;white-space:nowrap}.quick-format-preset small{grid-column:2;color:var(--faint);font-size:8px;line-height:1.3}
+.quick-preset-shape{--preset-top:20%;--preset-bottom:20%;grid-row:1/3;width:24px;aspect-ratio:9/16;display:grid;grid-template-rows:var(--preset-top) minmax(0,1fr) var(--preset-bottom);background:#050505;border:1px solid #59605c;border-radius:3px;overflow:hidden}.quick-preset-shape i{grid-row:2;background:#647966}
+.quick-format-controls{min-width:0;margin:16px 0 0;padding:14px 0 0;border:0;border-top:1px solid var(--line)}
+.quick-format-controls[disabled]{opacity:.43}.quick-format-controls[disabled] textarea,.quick-format-controls[disabled] input,.quick-format-controls[disabled] button{cursor:not-allowed}
+.quick-format-controls .property-row{margin-bottom:11px}.quick-video-ratio{display:flex;justify-content:space-between;align-items:center;margin:-1px 0 15px;padding:8px 9px;border-radius:4px;background:#171a1b;color:var(--muted);font-size:9px}.quick-video-ratio strong{color:var(--accent);font:700 10px Consolas,monospace}
+.quick-format-text{display:block;margin-top:11px;font-size:10px;color:#b9c1c2}.quick-format-text textarea{width:100%;min-height:58px;margin-top:6px;padding:9px;resize:vertical;background:#151718;border:1px solid #343a3d;border-radius:5px;color:var(--text);font:10px/1.55 'Noto Sans KR',sans-serif}.quick-format-text textarea:focus{border-color:#75964e;outline:1px solid #75964e}
+.quick-copy-editor{margin:16px 0 0;padding:13px 10px 11px;border:1px solid #343d35;border-radius:7px;background:#191d1b}.quick-copy-editor h3{margin:0 0 4px;color:#d9e5d3;font-size:11px}.quick-copy-editor .font-picker{margin:12px 0}.quick-copy-editor .font-trigger{padding:8px 9px}.quick-copy-editor .font-trigger>span:first-child{font-size:15px}.quick-copy-editor .font-popup{position:relative;z-index:3}.quick-copy-editor .font-option{min-height:54px;padding:8px}.quick-copy-editor .font-option-name{font-size:17px}
+.quick-colors{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:12px}.quick-color{min-width:0;display:flex;flex-direction:column;align-items:center;gap:6px;padding:7px 3px;border:1px solid #353d39;border-radius:5px;background:#151918;color:#9fa9a4;font-size:9px}.quick-color input[type=color]{width:100%;height:28px;padding:2px;border:0;border-radius:4px;background:#282e2a;cursor:pointer}
+@media(max-width:1150px){.quick-format-hero{grid-template-columns:58px minmax(0,1fr);padding:10px}.quick-format-preview{width:56px}.quick-format-preset{grid-template-columns:24px minmax(0,1fr);padding:7px 5px;column-gap:5px}.quick-preset-shape{width:21px}.quick-format-preset small{display:none}}
+
 /* 클립 경계의 연결 버튼과 실제 배치 길이 미리보기 */
 .transition-band{position:absolute;top:8px;bottom:8px;background:repeating-linear-gradient(135deg,#d9e9ad12 0,#d9e9ad12 4px,#d9e9ad35 4px,#d9e9ad35 5px);border:1px solid #e0edb855;pointer-events:none;z-index:4;border-radius:3px}
 .transition-chip{top:50%;width:25px;height:25px;min-width:25px;transform:translate(-50%,-50%);background:#dce8c6;opacity:1;color:#24301a;z-index:6;border-radius:5px;box-shadow:0 2px 7px #0008}
@@ -362,6 +398,10 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 .mosaic-warn:hover,.mosaic-warn:focus-visible{height:9px;opacity:1;outline:1px solid #ffdada;outline-offset:0}
 .short-block .mosaic-warn{height:3px}
 
+/* 전체 구간을 보는 배율에서는 실제 시간 폭만 클릭되도록 클립 내부 도구를 접습니다. */
+.timeline-block.timeline-overview-block,.timeline-block.timeline-overview-block:hover,.timeline-block.timeline-overview-block:focus-within{min-width:0;overflow:hidden;z-index:2;border-radius:1px}
+.timeline-overview-block .block-label,.timeline-overview-block .block-grip,.timeline-overview-block .clip-settings,.timeline-overview-block .thumb-strip,.timeline-overview-block .waveform,.timeline-overview-block .link-mark,.timeline-overview-block .mosaic-warn{display:none}
+
 /* ── 타임라인 상태줄 ──────────────────────────────────────
    드래그 미리보기·거절 사유·선택 개수가 여기에 나옵니다.
    예전에는 sr-only 라 스크린리더에만 전달되고 눈에는 보이지 않았습니다. */
@@ -375,17 +415,6 @@ body{margin:0;background:var(--bg);color:var(--text);height:100dvh;overflow:hidd
 .timeline-notice[data-tone=info]::before{background:var(--accent)}
 .timeline-notice[data-tone=warn]{color:#f0b9a4;background:#241c19}
 .timeline-notice[data-tone=warn]::before{background:#e8825a}
-
-/* ── 소재 카드 버튼 ────────────────────────────────────────
-   ＋ 는 전각 문자라 버튼 기본 padding 과 겹쳐 21px 상자를 넘쳤습니다. */
-.asset-add,.asset-remove{position:absolute;top:5px;width:21px;height:21px;padding:0;line-height:1;
-  display:grid;place-items:center;border-radius:4px;opacity:0;transition:opacity .12s}
-.asset-add{right:5px;background:#131813de;color:var(--accent);border:1px solid #aee06166;font-size:14px}
-.asset-remove{right:30px;background:#1d1414de;color:#f0a9a9;border:1px solid #e0616166;font-size:15px}
-.asset-remove:hover:not(:disabled){background:#e06161;color:#160c0c}
-.asset-remove:disabled{opacity:0;pointer-events:none}
-.asset-card:hover .asset-add,.asset-add:focus-visible,
-.asset-card:hover .asset-remove:not(:disabled),.asset-remove:focus-visible{opacity:1}
 
 .asset-tools{display:flex;justify-content:flex-end;margin:2px 0 6px}
 .asset-tools .button{font-size:11px;padding:5px 9px;min-height:0}

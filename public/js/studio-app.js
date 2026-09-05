@@ -5,16 +5,16 @@ import {loadFonts,measureVisual,renderCaptionPreview,renderGraphicPreview} from 
 import {detectEngine,exportVideo} from './exporter.js';
 import {parseSrt,buildSrt} from './srt.js';
 import {uid,clamp,download} from './util.js';
-import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,demoSound,onAssetReady,discardStagedAsset} from './project-store.js';
+import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,demoSound,onAssetReady,removeAssetFromLibrary,unusedLibraryAssetIds} from './project-store.js';
 import {Timeline} from './timeline.js';
 import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight,STORAGE_KEY} from './layout.js';
 import {frameTime,timelineCollection,itemRange,splitAvailability,placeVideoClip,planClipTrim,applyClipTrim,setTransition,deleteTimelineItem,planPlacement,placeTimelineItem,currentGap,planItemTrim,applyItemTrim} from './timeline-edits.js';
 import {GRAPHICS,CAPTIONS,TRANSITIONS} from './presets.js';
 import {transformOf,alignVisual} from './visual-transform.js';
 import {safeAreaConfig} from './safe-areas.js';
-import {SOUND_EFFECTS,createSoundEffect} from './sound-effects.js';
+import {SOUND_EFFECTS,createSoundEffect,soundEffectAssetId} from './sound-effects.js';
 import {ensureFont} from './font-catalog.js';
-import {refreshFontPickers,wireFontPickers} from './font-picker.js';
+import {fontField,refreshFontPickers,wireFontPickers} from './font-picker.js';
 import {typographyControls,textAppearanceControls,captionEffectControls} from './inspector-controls.js';
 import {evaluateItem,setValueAt,hasKeyframes,keyframeValue} from './keyframes.js';
 import {StudioTools} from './studio-tools.js';
@@ -23,6 +23,7 @@ import {planLink,applyLink,applyUnlink,expandLinked,isLinkedSelection} from './l
 import {MonitorEditor} from './monitor-editor.js';
 import {KeyframeEditor} from './keyframe-editor.js';
 import {insertMediaAsset} from './media-insertion.js';
+import {QUICK_FORMAT_PRESETS,quickFormatState,applyQuickFormatPreset,setQuickFormatMargins,setQuickFormatEnabled,setQuickFormatText,setQuickFormatTextStyle} from './quick-format.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -31,7 +32,9 @@ let selection=null,view='media',mediaFilter='all',search='',isDemo=false,engine=
 let smartTools;
 let presetPreviewObserver,presetAnimation;
 let monitor,keyframeEditor,selectedItems=[],settingsClipboard=null;
+let quickFormatBefore=null;
 let safeConfig=safeAreaConfig('shorts'),safeEnabled=false,soundPreview=null,soundPreviewUrl=null,soundPreviewRequest=null;
+const libraryAssets=()=>[...assets.values()].filter(asset=>asset.libraryHidden!==true);
 const player=new Player($('preview'),{onTick:tick,onAudioError:toast});
 const history=new History(()=>{selection=validSelection();refresh();scheduleDraft();});
 const timeline=new Timeline({
@@ -55,6 +58,7 @@ const timeline=new Timeline({
 
 smartTools=new StudioTools({player,timeline,selection:()=>selection,view:()=>view,toast,renderLibrary,refresh,commit,select,saveDraft:()=>{dirty=true;scheduleDraft();}});
 monitor=new MonitorEditor({player,selection:()=>selection,selections:()=>editingSelection(),busy:()=>!!(exportCtrl||importing||smartTools.busy||timeline.dragging||keyframeEditor?.dragging),
+  fps:()=>project.fps,
   align:axis=>alignSelection(axis),commit,refresh,gestureStart:()=>clearTimeout(draftTimer),gestureEnd:()=>{if(dirty)scheduleDraft();}});
 keyframeEditor=new KeyframeEditor({host:$('inspectorContent'),range:()=>selection&&itemRange(selection.type,selection.id),
   time:()=>player.time,fps:()=>project.fps,seek:time=>player.seek(time,{allowBeyond:true}),pause:()=>player.pause(),
@@ -114,14 +118,13 @@ function updateToolbar(){
 }
 function select(type,id,options={}){
   selection=type?{type,id,...(options.gap||{})}:null;selectedItems=selectionRefs(selection?[selection]:[]);player.selection=selection;if(options.timeline!==false)timeline.select(type,id);
-  player.invalidate();
-  renderInspector();if(view==='media')document.querySelectorAll('[data-asset]').forEach(n=>n.classList.toggle('selected',type==='asset'&&n.dataset.asset===id));if(['captions','transitions','mosaic','silence'].includes(view))renderLibrary();
+  renderInspector();player.invalidate();keyframeEditor?.update();if(view==='media')document.querySelectorAll('[data-asset]').forEach(n=>n.classList.toggle('selected',type==='asset'&&n.dataset.asset===id));if(['captions','transitions','mosaic','silence'].includes(view))renderLibrary();
   updateToolbar();if(window.innerWidth<651)$('workbench').classList.remove('show-library');
 }
 function selectMany(refs,primary,options={}){
   selectedItems=selectionRefs(refs);selection=selectedItems.find(ref=>primary&&selectionKey(ref)===selectionKey(primary))||selectedItems.at(-1)||null;
   player.selection=selection;if(options.timeline!==false)timeline.selectMany(selectedItems,selection);
-  player.invalidate();renderInspector();updateToolbar();if(['captions','mosaic','silence'].includes(view))renderLibrary();
+  renderInspector();player.invalidate();keyframeEditor?.update();updateToolbar();if(['captions','mosaic','silence'].includes(view))renderLibrary();
 }
 function selectTransition(id,rightId){
   const pair=currentTransition({id,rightId});if(!pair)return;
@@ -174,8 +177,8 @@ function alignSelection(axis){
   const entries=resolveSelection(editingSelection()).filter(entry=>entry.type!=='audio');if(!entries.length)return;
   edit(axis==='x'?'가로 중앙 정렬':'세로 중앙 정렬',()=>{
     const canvas=$('preview');
-    for(const entry of entries){const time=clamp(player.time,entry.start,Math.max(entry.start,entry.end-1/project.fps));
-      alignVisual(entry.item,measureVisual(player.ctx,entry.type,entry.item,canvas.width,canvas.height,time),canvas.width,canvas.height,axis,time-entry.start,{duration:entry.duration});
+    for(const entry of entries){const time=clamp(player.time,entry.start,Math.max(entry.start,entry.end-1/project.fps)),local=keyframeEditor.local(entry);
+      alignVisual(entry.item,measureVisual(player.ctx,entry.type,entry.item,canvas.width,canvas.height,time),canvas.width,canvas.height,axis,local,{duration:entry.duration,fps:project.fps});
     }
   });
 }
@@ -272,15 +275,118 @@ function setView(next){
   if(window.innerWidth<=650){$('workbench').classList.add('show-library');$('workbench').classList.remove('show-inspector');}
 }
 
+function quickFormatMarkup(){
+  const current=quickFormatState(project.template),initialized=project.template.quickFormat===true;
+  const state=initialized?current:{...current,top:.20,bottom:.20,videoHeight:.60,preset:'balanced',topText:'',bottomText:'',
+    topStyle:{...current.topStyle,position:.50,size:82,color:'#ffffff',accent:'#ffe14d',background:'#000000'},
+    bottomStyle:{...current.bottomStyle,position:.33,size:58,color:'#ffffff',accent:'#ffe14d',background:'#000000'}};
+  const disabled=state.enabled?'':'disabled',topText=state.topText,bottomText=state.bottomText;
+  const percent=value=>(value*100).toFixed(0);
+  const previewCopy=(text,placeholder)=>esc(text||placeholder).replace(/\*([^*\n]+)\*/g,'<em>$1</em>').replace(/\n/g,'<br>');
+  const color=(label,position,property,value)=>`<label class="quick-color"><span>${label}</span><input type="color" data-quick-position="${position}" data-quick-style="${property}" value="${value}" aria-label="${position==='top'?'상단':'하단'} ${label}"></label>`;
+  const editor=(position,label,text,style,placeholder)=>`<section class="quick-copy-editor" data-quick-copy-editor="${position}">
+    <h3>${label} 텍스트</h3>
+    <label class="field-label quick-format-text">문구<textarea data-quick-text="${position}" maxlength="240" rows="3" placeholder="${placeholder}">${esc(text)}</textarea></label>
+    <label class="property-row"><span>위아래</span><input type="range" data-quick-position="${position}" data-quick-style="position" min="10" max="90" step="1" value="${percent(style.position)}" aria-label="${label} 텍스트 세로 위치"><output data-quick-style-output="position">${percent(style.position)}%</output></label>
+    ${fontField('font',style.font)}
+    <label class="property-row"><span>글자 크기</span><input type="range" data-quick-position="${position}" data-quick-style="size" min="24" max="200" step="1" value="${style.size}" aria-label="${label} 글자 크기"><output data-quick-style-output="size">${Math.round(style.size)}</output></label>
+    <div class="quick-colors">${color('글자색',position,'color',style.color)}${color('강조색',position,'accent',style.accent)}${color('배경색',position,'background',style.background)}</div>
+  </section>`;
+  const presetCards=QUICK_FORMAT_PRESETS.map(item=>`<button type="button" class="quick-format-preset ${state.preset===item.id?'active':''}" data-quick-preset="${item.id}" aria-pressed="${state.preset===item.id}"><span class="quick-preset-shape" style="--preset-top:${percent(item.top)}%;--preset-bottom:${percent(item.bottom)}%"><i></i></span><strong>${item.label}</strong><small>${item.hint}</small></button>`).join('');
+  return `<div class="quick-format-panel">
+    <section class="quick-format-hero">
+      <div class="quick-format-preview" style="--quick-top:${percent(state.top)}%;--quick-bottom:${percent(state.bottom)}%;--quick-top-position:${percent(state.topStyle.position)}%;--quick-bottom-position:${percent(state.bottomStyle.position)}%;--quick-top-bg:${state.topStyle.background};--quick-bottom-bg:${state.bottomStyle.background};--quick-top-color:${state.topStyle.color};--quick-bottom-color:${state.bottomStyle.color};--quick-top-accent:${state.topStyle.accent};--quick-bottom-accent:${state.bottomStyle.accent};--quick-top-font:${esc(state.topStyle.font)};--quick-bottom-font:${esc(state.bottomStyle.font)};--quick-top-size:${Math.max(3,state.topStyle.size/16)}px;--quick-bottom-size:${Math.max(3,state.bottomStyle.size/16)}px" aria-hidden="true"><div class="quick-copy quick-copy-top"><span>${previewCopy(topText,'상단 문구')}</span></div><div class="quick-video"><span>9:16 VIDEO</span></div><div class="quick-copy quick-copy-bottom"><span>${previewCopy(bottomText,'하단 문구')}</span></div></div>
+      <div class="quick-format-summary"><span class="eyebrow">QUICK FORMAT</span><strong>상하단 포맷</strong><p>영상 위아래에 원하는 색과 문구 영역을 만듭니다.</p></div>
+      <label class="quick-format-toggle"><input type="checkbox" data-quick-enabled ${state.enabled?'checked':''}><span>${state.enabled?'사용 중':'사용'}</span></label>
+    </section>
+    <div class="section-label">포맷 선택 <span>${state.preset==='custom'?'직접 조절':'PRESET'}</span></div>
+    <div class="quick-format-presets">${presetCards}</div>
+    <fieldset class="quick-format-controls" ${disabled}>
+      <legend class="sr-only">퀵포맷 세부 설정</legend>
+      <label class="property-row"><span>상단 영역</span><input type="range" data-quick-control="top" min="0" max="45" step="1" value="${percent(state.top)}" aria-label="상단 영역 높이"><output data-quick-output="top">${percent(state.top)}%</output></label>
+      <label class="property-row"><span>하단 영역</span><input type="range" data-quick-control="bottom" min="0" max="45" step="1" value="${percent(state.bottom)}" aria-label="하단 영역 높이"><output data-quick-output="bottom">${percent(state.bottom)}%</output></label>
+      <div class="quick-video-ratio"><span>영상 영역</span><strong data-quick-video-height>${percent(state.videoHeight)}%</strong></div>
+      ${editor('top','상단',topText,state.topStyle,'예: 이 장면, 끝까지 보세요')}
+      ${editor('bottom','하단',bottomText,state.bottomStyle,'예: 여러분의 생각은 어떤가요?')}
+    </fieldset>
+    <p class="library-hint"><strong>*강조할 말*</strong>처럼 별표로 감싸면 강조색이 적용됩니다.<br>배경과 문구는 미리보기와 최종 영상에 함께 적용됩니다.</p>
+  </div>`;
+}
+
+function syncQuickFormatPanel(state){
+  const host=$('libraryContent'),preview=host.querySelector('.quick-format-preview');
+  const previewCopy=(text,placeholder)=>esc(text||placeholder).replace(/\*([^*\n]+)\*/g,'<em>$1</em>').replace(/\n/g,'<br>');
+  if(preview){
+    preview.style.setProperty('--quick-top',`${state.top*100}%`);preview.style.setProperty('--quick-bottom',`${state.bottom*100}%`);
+    for(const position of ['top','bottom']){
+      const style=state[position+'Style'];
+      preview.style.setProperty(`--quick-${position}-position`,`${style.position*100}%`);
+      preview.style.setProperty(`--quick-${position}-bg`,style.background);preview.style.setProperty(`--quick-${position}-color`,style.color);
+      preview.style.setProperty(`--quick-${position}-accent`,style.accent);preview.style.setProperty(`--quick-${position}-font`,style.font);
+      preview.style.setProperty(`--quick-${position}-size`,`${Math.max(3,style.size/16)}px`);
+    }
+  }
+  for(const key of ['top','bottom']){
+    const input=host.querySelector(`[data-quick-control="${key}"]`),output=host.querySelector(`[data-quick-output="${key}"]`);
+    if(input)input.value=state[key]*100;if(output)output.textContent=Math.round(state[key]*100)+'%';
+  }
+  const height=host.querySelector('[data-quick-video-height]');if(height)height.textContent=Math.round(state.videoHeight*100)+'%';
+  const topCopy=host.querySelector('.quick-copy-top'),bottomCopy=host.querySelector('.quick-copy-bottom');
+  if(topCopy)topCopy.querySelector('span').innerHTML=previewCopy(state.topText,'상단 문구');if(bottomCopy)bottomCopy.querySelector('span').innerHTML=previewCopy(state.bottomText,'하단 문구');
+  for(const position of ['top','bottom']){
+    const editor=host.querySelector(`[data-quick-copy-editor="${position}"]`),style=state[position+'Style'];if(!editor)continue;
+    for(const property of ['position','size']){
+      const input=editor.querySelector(`[data-quick-style="${property}"]`),output=editor.querySelector(`[data-quick-style-output="${property}"]`);
+      const value=property==='position'?style.position*100:style.size;if(input)input.value=value;if(output)output.textContent=Math.round(value)+(property==='position'?'%':'');
+    }
+  }
+  host.querySelectorAll('[data-quick-preset]').forEach(button=>{const active=button.dataset.quickPreset===state.preset;button.classList.toggle('active',active);button.setAttribute('aria-pressed',String(active));});
+  const badge=host.querySelector('.section-label span');if(badge)badge.textContent=state.preset==='custom'?'직접 조절':'PRESET';
+}
+
+function beginQuickFormatControl(target){
+  if(!target.matches?.('[data-quick-control],[data-quick-text],[data-quick-style],[data-prop="font"]')||!target.closest('.quick-format-panel')||quickFormatBefore||exportCtrl||importing||smartTools.busy||monitor?.dragging)return;
+  player.pause();clearTimeout(draftTimer);quickFormatBefore=captureDocument();
+}
+
+function updateQuickFormatControl(target){
+  beginQuickFormatControl(target);
+  if(!quickFormatBefore)return;
+  let state=quickFormatState(project.template);
+  if(target.dataset.quickControl){
+    const key=target.dataset.quickControl,value=Number(target.value)/100;
+    state=setQuickFormatMargins(project.template,key==='top'?value:state.top,key==='bottom'?value:state.bottom,key);
+  }else if(target.dataset.quickText){
+    state=setQuickFormatText(project.template,target.dataset.quickText,target.value);
+  }else if(target.dataset.quickStyle||target.dataset.prop==='font'){
+    const editor=target.closest('[data-quick-copy-editor]'),position=target.dataset.quickPosition||editor?.dataset.quickCopyEditor;
+    const property=target.dataset.quickStyle||target.dataset.prop,value=property==='position'?Number(target.value)/100:target.value;
+    state=setQuickFormatTextStyle(project.template,position,property,value);
+  }
+  dirty=true;syncQuickFormatPanel(state);player.invalidate();
+}
+
+function finishQuickFormatControl(){
+  if(!quickFormatBefore)return;
+  const before=quickFormatBefore;quickFormatBefore=null;
+  if(history.push(before,'퀵포맷 조정')){dirty=true;isDemo=isDemo&&assets.size<=4;scheduleDraft();}
+  $('undo').disabled=!history.past.length;$('redo').disabled=!history.future.length;
+  prepareFonts();player.invalidate();
+}
+
 function renderLibrary(){
   presetPreviewObserver?.disconnect();cancelAnimationFrame(presetAnimation);
-  const titles={media:'소재 라이브러리',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'AI 음성 스튜디오',sounds:'효과음 라이브러리',mosaic:'트래킹 모자이크',silence:'무음 구간 자동 컷'};
-  $('libraryTitle').textContent=titles[view];$('libraryCount').textContent=view==='media'?String(assets.size).padStart(2,'0'):view==='graphics'?String(GRAPHICS.length):view==='captions'?String(CAPTIONS.length):view==='transitions'?String(TRANSITIONS.length):view==='sounds'?String(SOUND_EFFECTS.length):'LOCAL';
+  const titles={media:'라이브러리','quick-format':'퀵포맷',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'AI 음성 스튜디오',sounds:'효과음 라이브러리',mosaic:'트래킹 모자이크',silence:'무음 구간 자동 컷'};
+  const count=view==='media'?String(libraryAssets().length).padStart(2,'0'):view==='graphics'?String(GRAPHICS.length):view==='captions'?String(CAPTIONS.length):view==='transitions'?String(TRANSITIONS.length):view==='sounds'?String(SOUND_EFFECTS.length):'';
+  $('libraryTitle').textContent=titles[view];$('libraryCount').textContent=count;$('libraryCount').hidden=!count;
   const host=$('libraryContent');
   if(['voice','mosaic','silence'].includes(view)){smartTools.render(view,host);return;}
   if(view==='media'){
-    host.innerHTML=`<button class="import-zone" data-action="import"><span class="import-plus">＋</span><strong>파일 가져오기</strong><span>영상 · 이미지 · 오디오를 한곳에</span><small>또는 여기에 파일을 놓아주세요</small></button><div class="filter-tabs" aria-label="소재 종류">${[['all','전체'],['video','영상'],['image','이미지'],['audio','오디오']].map(([key,label])=>`<button data-filter="${key}" class="${mediaFilter===key?'active':''}">${label}</button>`).join('')}</div><label class="search-box"><span>⌕</span><input id="mediaSearch" type="search" placeholder="소재 검색" aria-label="소재 검색" value="${esc(search)}"><kbd>/</kbd></label><div class="asset-tools"><button id="clearAssets" class="button subtle" title="타임라인에서 쓰지 않는 소재만 라이브러리에서 지웁니다">안 쓰는 소재 비우기</button></div><div id="assetGrid" class="asset-grid"></div><p class="library-hint">더블클릭·＋는 재생 막대 위치에 추가합니다.<br>끌어 넣을 때 초록색 범위가 실제 배치 위치예요.<br>이미지 기본 3초 · 영상은 원본 길이</p>`;
+    host.innerHTML=`<button class="import-zone" data-action="import"><span class="import-plus">＋</span><strong>파일 가져오기</strong><span>영상 · 이미지 · 오디오를 한곳에</span><small>또는 여기에 파일을 놓아주세요</small></button><div class="filter-tabs" aria-label="라이브러리 파일 종류">${[['all','전체'],['video','영상'],['image','이미지'],['audio','오디오']].map(([key,label])=>`<button data-filter="${key}" class="${mediaFilter===key?'active':''}">${label}</button>`).join('')}</div><label class="search-box"><span>⌕</span><input id="mediaSearch" type="search" placeholder="라이브러리 검색" aria-label="라이브러리 검색" value="${esc(search)}"><kbd>/</kbd></label><div class="asset-tools"><button id="clearAssets" class="button subtle" title="타임라인에서 쓰지 않는 파일만 라이브러리에서 지웁니다">안 쓰는 파일 비우기</button></div><div id="assetGrid" class="asset-grid"></div><p class="library-hint">더블클릭·＋는 재생 막대 위치에 추가합니다.<br>×로 라이브러리에서 삭제할 수 있어요.<br>타임라인에 사용 중인 파일은 기존 클립을 유지합니다.</p>`;
     renderAssets();
+  }else if(view==='quick-format'){
+    host.innerHTML=quickFormatMarkup();
+    refreshFontPickers(host);
   }else if(view==='graphics'){
     host.innerHTML='<p class="preset-intro">직접 구성한 모션 타이포그래피.<br>클릭하거나 타임라인으로 끌어 넣으세요.</p><div class="preset-grid">'+GRAPHICS.map(g=>'<button class="preset-card" draggable="true" data-preset="g:'+g.id+'" aria-label="'+esc(g.name)+' 추가"><div class="preset-art real-preview"><canvas data-graphic-preview="'+g.id+'" width="420" height="300" aria-label="'+esc(g.name)+' 실제 그래픽"></canvas><span class="preview-loading">폰트 준비 중</span></div><strong>'+esc(g.name)+'</strong><small>'+esc(g.hint)+'</small></button>').join('')+'</div><p class="library-hint">문구·색상·크기는 오른쪽 속성에서,<br>길이와 배치는 타임라인에서 조절하세요.</p>';
     preparePresetPreviews(host);
@@ -295,8 +401,8 @@ function renderLibrary(){
 
   }else if(view==='sounds'){
     host.innerHTML='<p class="preset-intro">컷 사이에 리듬을 더하세요.<br>미리 듣고, ＋ 또는 드래그로 넣을 수 있어요.</p>'+
-      ['전환','클릭','알림','강조'].map(category=>'<div class="section-label">'+category+'</div><div class="sound-list">'+SOUND_EFFECTS.filter(s=>s.category===category).map(s=>'<article class="sound-card" draggable="true" data-preset="sfx:'+s.id+'"><button class="sound-play" data-preview-sound="'+s.id+'" aria-label="'+s.name+' 미리 듣기"><span class="play-symbol" aria-hidden="true"></span></button><div><strong>'+s.name+'</strong><small>'+s.duration.toFixed(2)+'초 · CC0 효과음</small></div><button class="sound-add" data-add-sound="'+s.id+'" aria-label="'+s.name+' 추가">＋</button></article>').join('')+'</div>').join('')+
-      '<p class="library-hint">재배포 가능한 CC0 효과음을 제공합니다.<br>출처와 사용 조건은 포함된 크레딧에서 확인할 수 있어요.</p><div class="external-sounds"><strong>더 많은 소리를 찾고 있다면</strong><a class="button secondary wide" href="https://www.myinstants.com/ko/instant/app/" target="_blank" rel="noopener noreferrer">Myinstants에서 찾기 ↗</a><p class="inspector-note">외부 사이트입니다. 자동 다운로드·음원 수집은 하지 않습니다. 다운로드 가능 여부와 상업적 재사용 권한은 다르므로, 권리를 확인한 파일만 소재함에 가져오세요.</p></div>';
+      ['전환','클릭','알림','강조'].map(category=>'<div class="section-label">'+category+'</div><div class="sound-list">'+SOUND_EFFECTS.filter(s=>s.category===category).map(s=>'<article class="sound-card" draggable="true" data-preset="sfx:'+s.id+'"><button class="sound-play" data-preview-sound="'+s.id+'" aria-label="'+s.name+' 미리 듣기"><span class="play-symbol" aria-hidden="true"></span></button><div><strong>'+s.name+'</strong><small>'+s.duration.toFixed(2)+'초 · 기본 효과음</small></div><button class="sound-add" data-add-sound="'+s.id+'" aria-label="'+s.name+' 추가">＋</button></article>').join('')+'</div>').join('')+
+      '<p class="library-hint">직접 등록한 효과음 37종입니다.<br>공개 배포·상업적 사용 전 각 음원의 이용 권한을 확인하세요.</p><div class="external-sounds"><strong>더 많은 소리를 찾고 있다면</strong><a class="button secondary wide" href="https://www.myinstants.com/ko/instant/app/" target="_blank" rel="noopener noreferrer">Myinstants에서 찾기 ↗</a><p class="inspector-note">외부 사이트입니다. 자동 다운로드·음원 수집은 하지 않습니다. 다운로드 가능 여부와 상업적 재사용 권한은 다르므로, 권리를 확인한 파일만 라이브러리에 가져오세요.</p></div>';
 
   }
 }
@@ -329,53 +435,35 @@ function preparePresetPreviews(host){
   canvases.forEach(canvas=>presetPreviewObserver.observe(canvas));
 }
 
-/** 이 소재를 쓰는 타임라인 항목 수입니다. 하나라도 있으면 지우지 않습니다. */
-function assetUses(id){
-  return project.clips.filter(c=>c.assetId===id).length
-    +(project.audio.tracks||[]).filter(t=>t.assetId===id).length;
-}
-const unusedAssetIds=()=>[...assets.keys()].filter(id=>!assetUses(id));
-/**
- * 소재를 라이브러리에서 지웁니다. 타임라인에서 쓰는 소재는 건드리지 않습니다.
- *
- * 되돌리기 기록은 함께 비웁니다. 기록 속 문서가 지운 소재를 가리키고 있으면
- * 되돌렸을 때 blob 주소가 이미 해제돼 있어 화면이 깨지고, 저장도 실패합니다.
- * 조용히 깨진 상태로 두는 것보다 기록을 비우고 그 사실을 알리는 편이 낫습니다.
- */
+/** 개별 삭제와 일괄 비우기가 같은 자원 보존 규칙을 사용합니다. */
 function removeAssets(ids){
-  if(exportCtrl||importing||smartTools?.busy)return;
-  const wanted=[...new Set(ids)].filter(id=>assets.has(id));
-  const removable=wanted.filter(id=>!assetUses(id)),blocked=wanted.length-removable.length;
-  if(!removable.length){
-    toast(blocked?'타임라인에서 사용 중인 소재예요. 타임라인에서 먼저 지운 뒤 다시 시도해 주세요.':'지울 소재가 없어요.');
-    return;
-  }
+  if(exportCtrl||importing||smartTools?.busy||monitor?.dragging)return;
+  const wanted=[...new Set(ids)].filter(id=>assets.has(id)&&assets.get(id).libraryHidden!==true);
+  if(!wanted.length)return toast('지울 파일이 없어요.');
   player.pause();
-  for(const id of removable){
-    if(selection?.type==='asset'&&selection.id===id){selection=null;selectedItems=[];player.selection=null;}
-    discardStagedAsset(id);
+  const removedIds=[],results=[];
+  for(const id of wanted){
+    const result=removeAssetFromLibrary(id);if(!result.ok)continue;
+    results.push(result);removedIds.push(...result.removedIds);
+    if(selection?.type==='asset'&&selection.id===id){selection=null;selectedItems=[];player.selection=null;timeline.select(null,null);}
   }
-  const undone=history.past.length||history.future.length;
-  history.clear();dirty=true;isDemo=false;
-  refresh();scheduleDraft();
-  toast(removable.length+'개 소재를 라이브러리에서 지웠어요.'
-    +(blocked?' 타임라인에서 사용 중인 '+blocked+'개는 남겨 뒀어요.':'')
-    +(undone?' 되돌리기 기록은 초기화됐어요.':''));
+  // 지운 파일을 참조하는 기록만 정리합니다. 다른 편집의 실행 취소는 유지합니다.
+  history.forgetAssets(removedIds);isDemo=false;dirty=true;refresh();scheduleDraft();
+  const retained=results.some(result=>result.hidden);
+  toast(results.length+'개 파일을 라이브러리에서 삭제했어요.'+(retained?' 타임라인과 연결된 원본은 그대로 유지됩니다.':''));
 }
 
 function renderAssets(){
   const grid=$('assetGrid');if(!grid)return;
-  const list=[...assets.values()].filter(a=>(mediaFilter==='all'||a.kind===mediaFilter)&&a.file.name.toLowerCase().includes(search.toLowerCase()));
+  const list=libraryAssets().filter(a=>(mediaFilter==='all'||a.kind===mediaFilter)&&a.file.name.toLowerCase().includes(search.toLowerCase()));
   grid.innerHTML=list.map(a=>{
     const picture=a.kind==='audio'?`<div class="audio-thumb">${(a.waveform||[]).filter((_,i)=>i%5===0).map(v=>`<i style="height:${Math.max(2,v*43)}px"></i>`).join('')}</div>`:`<img src="${a.thumb||''}" alt="${esc(a.file.name)}" draggable="false">`;
-    return `<article class="asset-card ${selection?.type==='asset'&&selection.id===a.id?'selected':''}" data-asset="${a.id}" draggable="true" tabindex="0" role="button" aria-label="${esc(a.file.name)}"><div class="asset-image">${picture}<span class="asset-kind">${a.kind==='audio'?'♫':a.kind==='video'?'▶':'▧'}</span><span class="asset-duration">${a.kind==='image'?'IMAGE':fmt(a.duration)}</span><button class="asset-add" data-add-asset="${a.id}" aria-label="${esc(a.file.name)} 타임라인에 추가" title="재생 막대 위치에 추가">＋</button><button class="asset-remove" data-remove-asset="${a.id}" aria-label="${esc(a.file.name)} 라이브러리에서 지우기" title="${assetUses(a.id)?'타임라인에서 사용 중 · 먼저 타임라인에서 지워 주세요':'라이브러리에서 지우기'}"${assetUses(a.id)?' disabled':''}>×</button></div><h3>${esc(a.file.name)}</h3><p>${a.kind==='video'?'영상':a.kind==='audio'?(a.aiGenerated?'AI 음성':'오디오'):'이미지'} · ${a.kind==='audio'?`${a.duration.toFixed(1)}초`:`${a.base.natW} × ${a.base.natH}`}</p></article>`;
-  }).join('')||'<p class="note" style="grid-column:1/-1;padding:20px 0">아직 소재가 없어요.<br>파일을 가져오면 여기에서 찾을 수 있어요.</p>';
-  const clear=$('clearAssets'),unused=unusedAssetIds().length;
-  if(clear){
-    clear.disabled=!unused;
-    clear.textContent=unused?'안 쓰는 소재 '+unused+'개 비우기':'안 쓰는 소재 없음';
-  }
+    return `<article class="asset-card ${selection?.type==='asset'&&selection.id===a.id?'selected':''}" data-asset="${a.id}" draggable="true" tabindex="0" role="button" aria-label="${esc(a.file.name)}"><div class="asset-image">${picture}<span class="asset-kind">${a.kind==='audio'?'♫':a.kind==='video'?'▶':'▧'}</span><span class="asset-duration">${a.kind==='image'?'IMAGE':fmt(a.duration)}</span><div class="asset-actions" data-asset-actions draggable="false" role="group" aria-label="${esc(a.file.name)} 작업"><button type="button" class="asset-remove" data-remove-asset="${a.id}" draggable="false" title="라이브러리에서 삭제" aria-label="${esc(a.file.name)} 라이브러리에서 삭제">×</button><button type="button" class="asset-add" data-add-asset="${a.id}" draggable="false" title="타임라인에 추가" aria-label="${esc(a.file.name)} 타임라인에 추가">＋</button></div></div><h3>${esc(a.file.name)}</h3><p>${a.kind==='video'?'영상':a.kind==='audio'?(a.aiGenerated?'AI 음성':'오디오'):'이미지'} · ${a.kind==='audio'?`${a.duration.toFixed(1)}초`:`${a.base.natW} × ${a.base.natH}`}</p></article>`;
+  }).join('')||'<p class="note" style="grid-column:1/-1;padding:20px 0">라이브러리가 비어 있어요.<br>파일을 가져오면 여기에서 찾을 수 있어요.</p>';
+  const clear=$('clearAssets'),unused=unusedLibraryAssetIds().length;
+  if(clear){clear.disabled=!unused;clear.textContent=unused?'안 쓰는 파일 '+unused+'개 비우기':'안 쓰는 파일 없음';}
 }
+function removeLibraryAsset(id){removeAssets([id]);}
 function renderCaptionList(){const list=$('captionList');if(!list)return;list.innerHTML=project.captions.map(c=>`<button data-select-caption="${c.id}" class="${selection?.id===c.id?'selected':''}"><small>${c.start.toFixed(2)} → ${c.end.toFixed(2)} · ${trackLabel(trackIdFor('caption',c))}</small>${esc(c.text)}</button>`).join('');}
 
 const range=(label,prop,value,min,max,step=1,suffix='')=>`<label class="property-row"><span>${label}</span><input type="range" data-prop="${prop}" min="${min}" max="${max}" step="${step}" value="${esc(value)}" aria-label="${label}"><output>${Number(value).toFixed(step<1?1:0)}${suffix}</output></label>`;
@@ -415,7 +503,7 @@ function renderBatchInspector(host,entries){
   const texts=entries.filter(entry=>['caption','graphic'].includes(entry.type)),sound=entries.filter(entry=>entry.type==='audio'||(entry.type==='clip'&&entry.item.type==='video'));
   const fading=entries.filter(entry=>['clip','audio'].includes(entry.type));
   $('selectionBadge').textContent=entries.length+'개 선택';
-  let html='<div class="selected-item"><div class="item-icon">▧</div><div><strong>'+entries.length+'개 클립 함께 편집</strong><small>'+new Set(entries.map(entry=>entry.trackId)).size+'개 트랙 · Shift 클릭으로 추가 선택</small></div></div>'+settingsControls()+'<p class="inspector-note batch-note">변경한 설정만 호환되는 선택 클립에 함께 적용합니다. 문구·소재·재생 위치·길이는 유지해요. 서로 다른 값은 “여러 값”으로 표시합니다.</p>';
+  let html='<div class="selected-item"><div class="item-icon">▧</div><div><strong>'+entries.length+'개 클립 함께 편집</strong><small>'+new Set(entries.map(entry=>entry.trackId)).size+'개 트랙 · Shift 클릭으로 추가 선택</small></div></div>'+settingsControls()+'<p class="inspector-note batch-note">변경한 설정만 호환되는 선택 클립에 함께 적용합니다. 문구·원본 파일·재생 위치·길이는 유지해요. 서로 다른 값은 “여러 값”으로 표시합니다.</p>';
   if(visual.length)html+=section('화면 설정 대상','<p class="note">영상·이미지·자막·그래픽 '+visual.length+'개</p>')+visualControls(evaluateItem(visual[0].item,Math.max(0,player.time-visual[0].start)),media.length?'clip':'graphic');
   if(texts.length){
     const style=texts[0].type==='caption'?{...project.captionStyle,...texts[0].item.style}:texts[0].item;
@@ -442,9 +530,9 @@ function renderBatchInspector(host,entries){
 
 function renderInspector(){
   const host=$('inspectorContent'),item=selected(),type=selection?.type;
-  if(!item){$('selectionBadge').textContent='프로젝트';host.innerHTML='<div class="inspector-empty">이야기의 시작은 소재 하나.<br>파일을 불러오거나 타임라인에서<br>편집할 항목을 선택해 주세요.</div><button class="button secondary wide" data-action="import">＋ 파일 가져오기</button>';return;}
+  if(!item){$('selectionBadge').textContent='프로젝트';host.innerHTML='<div class="inspector-empty">라이브러리에서 파일을 불러오거나<br>타임라인에서 편집할 항목을<br>선택해 주세요.</div><button class="button secondary wide" data-action="import">＋ 파일 가져오기</button>';return;}
   if(type==='asset'){
-    $('selectionBadge').textContent='소재';host.innerHTML=`<div class="selected-item"><div class="item-icon">${item.kind==='audio'?'♫':'▧'}</div><div><strong>${esc(item.file.name)}</strong><small>${(item.file.size/1048576).toFixed(1)} MB · ${item.kind==='image'?'이미지':`${item.duration.toFixed(2)}초`}</small></div></div>${section('소재 정보',`<p class="note">원본 파일은 수정하지 않습니다.<br>같은 소재를 여러 번 추가해서 각각 다르게 편집할 수 있어요.</p>`)}<button class="button primary wide" data-add-asset="${item.id}">＋ 타임라인에 추가</button>`;return;
+    $('selectionBadge').textContent='라이브러리';host.innerHTML=`<div class="selected-item"><div class="item-icon">${item.kind==='audio'?'♫':'▧'}</div><div><strong>${esc(item.file.name)}</strong><small>${(item.file.size/1048576).toFixed(1)} MB · ${item.kind==='image'?'이미지':`${item.duration.toFixed(2)}초`}</small></div></div>${section('파일 정보',`<p class="note">원본 파일은 수정하지 않습니다.<br>같은 파일을 여러 번 추가해 각각 다르게 편집할 수 있어요.</p>`)}<button class="button primary wide" data-add-asset="${item.id}">＋ 타임라인에 추가</button><button class="button subtle wide delete-action" data-remove-asset="${item.id}">라이브러리에서 삭제</button>`;return;
   }
   if(type==='transition'){
     $('selectionBadge').textContent='전환';
@@ -502,14 +590,14 @@ function renderInspector(){
 async function importFiles(files){
   if(smartTools.busy)return toast('AI 처리를 마치거나 취소한 뒤 파일을 가져와 주세요.');
   if(importing||exportCtrl||monitor?.dragging)return;importing=true;player.pause();const before=captureDocument();const errors=[];let added=0;
-  $('workbench').inert=true;document.querySelector('.appbar').inert=true;toast('소재를 불러오고 있어요…');
+  $('workbench').inert=true;document.querySelector('.appbar').inert=true;toast('파일을 라이브러리에 불러오고 있어요…');
   try{for(const file of files){
     try{if(/\.(srt|vtt)$/i.test(file.name)){const caps=parseSrt(await file.text());if(!caps.length)throw new Error('자막 구간을 읽지 못했습니다.');if(project.captions.length+caps.length>5000)throw new Error('자막은 최대 5,000개입니다.');const trackId=targetTrack('caption',null,true);for(const cap of caps)cap.trackId=trackId;project.captions.push(...caps);selectedItems=[];selection={type:'caption',id:caps[0].id};view='captions';}
     else{const asset=await addAsset(file);selectedItems=[];selection={type:'asset',id:asset.id};view='media';}added++;}
     catch(e){errors.push(`${file.name}: ${e.message}`);}
   }}finally{importing=false;$('workbench').inert=false;document.querySelector('.appbar').inert=false;}
-  isDemo=false;commit(before,'소재 가져오기');if(added){dirty=true;scheduleDraft();}
-  toast(errors.length?`${added}개 추가 · ${errors[0]}`:`${added}개 소재를 가져왔어요. 더블클릭하거나 타임라인으로 끌어 넣으세요.`);
+  isDemo=false;commit(before,'파일 가져오기');if(added){dirty=true;scheduleDraft();}
+  toast(errors.length?`${added}개 추가 · ${errors[0]}`:`${added}개 파일을 라이브러리에 추가했어요. 더블클릭하거나 타임라인으로 끌어 넣으세요.`);
 }
 async function mediaEdit(command){
   if(exportCtrl||importing||smartTools.busy||monitor?.dragging)return;
@@ -585,7 +673,8 @@ function applyTransition(id,all=false,target=null){
   toast((all?'모든 연결에 ':'선택한 연결에 ')+preset.name+'를 적용했어요.');return result;
 }
 function deleteSelection(ripple=false){
-  if(exportCtrl||importing||smartTools.busy||monitor?.dragging||!selection||selection.type==='asset')return;
+  if(exportCtrl||importing||smartTools.busy||monitor?.dragging||!selection)return;
+  if(selection.type==='asset'){removeLibraryAsset(selection.id);return;}
   const special=['transition','gap'].includes(selection.type),wasGap=selection.type==='gap',refs=structuralSelection();let count=0;
   if(edit(special?(wasGap?'빈 공간 닫기':'전환 제거'):ripple?'선택 클립 당겨 삭제':'선택 클립 삭제',()=>{
     count=special?Number(deleteTimelineItem(selection,ripple)):deleteSelectedItems(refs,ripple);
@@ -684,7 +773,7 @@ function applyProperty(input){
     const key=prop.slice(10);
     if(['offsetX','offsetY','scaleX','scaleY','opacity'].includes(key))value/=100;
     if(['flipX','flipY'].includes(key))item.transform={...transformOf(item),[key]:value};
-    else {const range=itemRange(type,item.id);setValueAt(item,key,clamp(player.time-range.start,0,range.duration),value,{duration:range.duration});}
+    else {const range=itemRange(type,item.id);setValueAt(item,key,keyframeEditor.local(range),value,{duration:range.duration,fps:project.fps});}
   }else if(prop.startsWith('crop.')){
     const key=prop.slice(5),other={left:'right',right:'left',top:'bottom',bottom:'top'}[key];
     item.crop={...item.crop,[key]:Math.max(0,Math.min(value/100,.98-(item.crop?.[other]||0)))};
@@ -702,7 +791,7 @@ function applyProperty(input){
     const r=itemRange(type,item.id),edge=prop==='trimStart'?'start':'end';
     applyItemTrim(planItemTrim(type,item.id,edge,frameTime(prop==='trimStart'?r.start+value-item.trimStart:r.end+value-item.trimEnd)));
   }else if(prop==='volume'){
-    const range=itemRange(type,item.id);setValueAt(item,'volume',clamp(player.time-range.start,0,range.duration),clamp(value,0,3),{duration:range.duration});
+    const range=itemRange(type,item.id);setValueAt(item,'volume',keyframeEditor.local(range),clamp(value,0,3),{duration:range.duration,fps:project.fps});
   }else if(prop.startsWith('style.'))item.style={...project.captionStyle,...item.style,[prop.slice(6)]:value};
   else{
     if(['fadeIn','fadeOut'].includes(prop))delete item.fadeEnvelope;
@@ -735,8 +824,8 @@ async function startExport(){
   }catch(e){$('exportMessage').textContent=e.name==='AbortError'?'내보내기를 취소했습니다.':e.message;}
   finally{exportCtrl=null;$('startExport').disabled=false;$('exportDialog').querySelector('form button').disabled=false;$('workbench').inert=false;document.querySelector('.appbar').inert=false;$('cancelExport').hidden=true;for(const id of ['exportResolution','exportFps','exportQuality'])$(id).disabled=false;refresh();}
 }
-function openExport(){if(totalDuration()<=0)return toast('타임라인에 소재 또는 자막을 추가해 주세요.');player.pause();$('exportProjectName').textContent=documentName;$('exportSummary').textContent=`${project.clips.length} 클립 · ${totalDuration().toFixed(2)}초 · 9:16 · ${engine?.label||'확인 중'}`;$('exportDialog').showModal();}
-function saveProjectFile(){try{download(packProject(),`${documentName.replace(/[<>:"/\\|?*]/g,'_')}.shorts`);$('saveStatus').textContent='프로젝트 파일 저장';dirty=false;toast('편집 정보와 소재가 포함된 .shorts 프로젝트를 저장했어요.');}catch(error){toast(error.message);}}
+function openExport(){if(totalDuration()<=0)return toast('타임라인에 파일 또는 자막을 추가해 주세요.');player.pause();$('exportProjectName').textContent=documentName;$('exportSummary').textContent=`${project.clips.length} 클립 · ${totalDuration().toFixed(2)}초 · 9:16 · ${engine?.label||'확인 중'}`;$('exportDialog').showModal();}
+function saveProjectFile(){try{download(packProject(),`${documentName.replace(/[<>:"/\\|?*]/g,'_')}.shorts`);$('saveStatus').textContent='프로젝트 파일 저장';dirty=false;toast('편집 정보와 라이브러리 파일이 포함된 .shorts 프로젝트를 저장했어요.');}catch(error){toast(error.message);}}
 async function openProjectFile(file){if(!file||importing||exportCtrl||monitor?.dragging)return;if(smartTools.busy)return toast('AI 처리를 마치거나 취소한 뒤 프로젝트를 열어 주세요.');player.pause();importing=true;clearTimeout(draftTimer);$('workbench').inert=true;document.querySelector('.appbar').inert=true;try{await unpackProject(file);history.clear();isDemo=false;selectedItems=[];selection=null;refresh();scheduleDraft();toast('프로젝트를 열었어요.');}catch(e){toast(e.message);}finally{importing=false;$('workbench').inert=false;document.querySelector('.appbar').inert=false;refresh();}}
 
 async function loadDemo(){
@@ -802,7 +891,7 @@ async function addSound(id,time=player.time,lane=timeline.preferredTrack('audio'
   if(importing||exportCtrl)return;
   stopSoundPreview();
   return mediaEdit(async()=>{
-    const asset=await addAsset(await createSoundEffect(id),{id:'builtin-sfx-'+id});
+    const asset=await addAsset(await createSoundEffect(id),{id:soundEffectAssetId(id)});
     return placeAssetImpl(asset.id,time,lane,plan);
   });
 }
@@ -831,6 +920,7 @@ function routeAction(action){
 
 function wire(){
   wireFontPickers($('inspectorContent'));
+  wireFontPickers($('libraryContent'));
   document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{if(view===b.dataset.view&&window.innerWidth<=650)$('workbench').classList.toggle('show-library');else setView(b.dataset.view);});
   $('play').onclick=()=>player.toggle();$('prevFrame').onclick=()=>player.step(-1);$('nextFrame').onclick=()=>player.step(1);
   $('safeArea').onclick=()=>{const panel=$('safeAreaPanel');panel.hidden=!panel.hidden;$('safeArea').setAttribute('aria-expanded',String(!panel.hidden));if(!panel.hidden)renderSafePanel();};
@@ -856,27 +946,39 @@ function wire(){
   $('helpButton').onclick=()=>smartTools.pcHelp.show();$('toggleInspector').onclick=()=>{$('workbench').classList.toggle('show-inspector');$('workbench').classList.remove('show-library');};
   $('emptyImport').onclick=pickMedia;$('loadDemo').onclick=()=>loadDemo().then(scheduleDraft).catch(e=>toast(e.message));
   $('resetDemo').onclick=()=>{if(totalDuration()>0&&!confirm('현재 편집을 샘플 프로젝트로 바꿀까요? 필요한 작업은 먼저 저장해 주세요.'))return;$('helpDialog').close();loadDemo().then(scheduleDraft).catch(e=>toast(e.message));};
-  $('newProject').onclick=()=>{if(totalDuration()>0&&!confirm('편집 타임라인을 비울까요? 현재 소재함은 유지합니다.'))return;edit('빈 프로젝트 시작',()=>{project.clips=[];project.overlays=[];project.captions=[];project.audio.tracks=[];project.timelineTracks=undefined;project.template.mode='none';selectedItems=[];selection=null;setDocumentName('새 프로젝트');isDemo=false;});$('helpDialog').close();};
+  $('newProject').onclick=()=>{if(totalDuration()>0&&!confirm('편집 타임라인을 비울까요? 현재 라이브러리는 유지합니다.'))return;edit('빈 프로젝트 시작',()=>{project.clips=[];project.overlays=[];project.captions=[];project.audio.tracks=[];project.timelineTracks=undefined;project.template.mode='none';selectedItems=[];selection=null;setDocumentName('새 프로젝트');isDemo=false;});$('helpDialog').close();};
   $('fileInput').onchange=e=>{importFiles([...e.target.files]);e.target.value='';e.target.accept='video/*,image/*,audio/*,.mkv,.ts,.srt,.vtt';};
   for(const host of [$('libraryContent'),$('inspectorContent')])host.addEventListener('click',e=>{
     const sound=e.target.closest('[data-add-sound]');if(sound){addSound(sound.dataset.addSound).catch(e=>toast(e.message));return;}
     const listen=e.target.closest('[data-preview-sound]');if(listen){previewSound(listen.dataset.previewSound).catch(e=>toast(e.message));return;}
     const add=e.target.closest('[data-add-asset]');if(add){e.stopPropagation();placeAsset(add.dataset.addAsset).catch(e=>toast(e.message));return;}
+    const remove=e.target.closest('[data-remove-asset]');if(remove){e.preventDefault();e.stopPropagation();removeLibraryAsset(remove.dataset.removeAsset);return;}
+    if(e.target.closest('[data-asset-actions]')){e.stopPropagation();return;}
+    const quickPreset=e.target.closest('[data-quick-preset]');if(quickPreset){edit('퀵포맷 적용',()=>applyQuickFormatPreset(project.template,quickPreset.dataset.quickPreset));return;}
     const action=e.target.closest('[data-action]');if(action){routeAction(action.dataset.action);return;}
     const filter=e.target.closest('[data-filter]');if(filter){mediaFilter=filter.dataset.filter;renderLibrary();return;}
     const scope=e.target.closest('[data-scope]');if(scope){captionScope=scope.dataset.scope;renderLibrary();return;}
     const preset=e.target.closest('[data-preset]');if(preset){const [type,key]=preset.dataset.preset.split(':');if(type==='g')addGraphic(key);else if(type==='c')applyCaptionPreset(key);else if(type==='sfx')addSound(key).catch(e=>toast(e.message));else applyTransition(key);return;}
     const cap=e.target.closest('[data-select-caption]');if(cap){select('caption',cap.dataset.selectCaption);player.seek(selected().start);return;}
-    const remove=e.target.closest('[data-remove-asset]');
-    if(remove){e.preventDefault();e.stopPropagation();removeAssets([remove.dataset.removeAsset]);return;}
-    if(e.target.closest('#clearAssets')){removeAssets(unusedAssetIds());return;}
+    if(e.target.closest('#clearAssets')){removeAssets(unusedLibraryAssetIds());return;}
     const asset=e.target.closest('[data-asset]');if(asset)select('asset',asset.dataset.asset);
   });
-  $('libraryContent').addEventListener('dblclick',e=>{const card=e.target.closest('[data-asset]');if(card&&!e.target.closest('[data-add-asset]'))placeAsset(card.dataset.asset).catch(e=>toast(e.message));});
-  $('libraryContent').addEventListener('keydown',e=>{const card=e.target.closest('[data-asset]');if(card&&e.key==='Enter'){e.preventDefault();placeAsset(card.dataset.asset).catch(e=>toast(e.message));}});
-  $('libraryContent').addEventListener('dragstart',e=>{if(exportCtrl||importing||smartTools.busy||monitor?.dragging){e.preventDefault();return;}const a=e.target.closest('[data-asset]'),p=e.target.closest('[data-preset]');if(a){e.dataTransfer.setData('application/x-shorts-asset',a.dataset.asset);timeline.beginExternalDrag('asset',a.dataset.asset);}else if(p){e.dataTransfer.setData('application/x-shorts-preset',p.dataset.preset);timeline.beginExternalDrag('preset',p.dataset.preset);}e.dataTransfer.effectAllowed='copy';});
-  $('libraryContent').addEventListener('change',e=>{if(e.target.id==='transitionDuration'){const pair=currentTransition();if(pair&&pair.type!=='cut')applyTransition(pair.type);}});
-  $('libraryContent').addEventListener('input',e=>{if(e.target.id==='mediaSearch'){search=e.target.value;renderAssets();}});
+  $('libraryContent').addEventListener('dblclick',e=>{const card=e.target.closest('[data-asset]');if(card&&!e.target.closest('[data-asset-actions]'))placeAsset(card.dataset.asset).catch(e=>toast(e.message));});
+  $('libraryContent').addEventListener('keydown',e=>{const card=e.target.closest('[data-asset]');if(card&&(e.key==='Enter'||e.key===' ')&&!e.target.closest('[data-asset-actions]')){e.preventDefault();e.stopPropagation();placeAsset(card.dataset.asset).catch(e=>toast(e.message));}});
+  $('libraryContent').addEventListener('dragstart',e=>{if(e.target.closest('[data-asset-actions],button')||exportCtrl||importing||smartTools.busy||monitor?.dragging){e.preventDefault();return;}const a=e.target.closest('[data-asset]'),p=e.target.closest('[data-preset]');if(a){e.dataTransfer.setData('application/x-shorts-asset',a.dataset.asset);timeline.beginExternalDrag('asset',a.dataset.asset);}else if(p){e.dataTransfer.setData('application/x-shorts-preset',p.dataset.preset);timeline.beginExternalDrag('preset',p.dataset.preset);}e.dataTransfer.effectAllowed='copy';});
+  $('libraryContent').addEventListener('focusin',e=>beginQuickFormatControl(e.target));
+  $('libraryContent').addEventListener('pointerdown',e=>beginQuickFormatControl(e.target));
+  const isQuickControl=target=>target.matches?.('[data-quick-control],[data-quick-text],[data-quick-style],[data-prop="font"]')&&target.closest('.quick-format-panel');
+  $('libraryContent').addEventListener('focusout',e=>{if(isQuickControl(e.target))finishQuickFormatControl();});
+  $('libraryContent').addEventListener('change',e=>{
+    if(e.target.matches?.('[data-quick-enabled]')){edit(e.target.checked?'퀵포맷 켜기':'퀵포맷 끄기',()=>setQuickFormatEnabled(project.template,e.target.checked));return;}
+    if(isQuickControl(e.target)){finishQuickFormatControl();return;}
+    if(e.target.id==='transitionDuration'){const pair=currentTransition();if(pair&&pair.type!=='cut')applyTransition(pair.type);}
+  });
+  $('libraryContent').addEventListener('input',e=>{
+    if(isQuickControl(e.target)){updateQuickFormatControl(e.target);return;}
+    if(e.target.id==='mediaSearch'){search=e.target.value;renderAssets();}
+  });
   const beginProperty=input=>{if(!input.dataset.prop||exportCtrl||importing||smartTools.busy||monitor?.dragging)return;clearTimeout(draftTimer);if(!controlBefore.has(input))controlBefore.set(input,captureDocument());};
   $('inspectorContent').addEventListener('focusin',e=>beginProperty(e.target));
   $('inspectorContent').addEventListener('pointerdown',e=>beginProperty(e.target));

@@ -56,8 +56,11 @@ export function wireFontPickers(host) {
     if(filter){picker.querySelectorAll('[data-font-filter]').forEach(button=>button.setAttribute('aria-pressed',String(button===filter)));filterOptions(picker);return;}
     const choice=event.target.closest('[data-font-choice]');
     if(choice){const input=picker.querySelector('[data-prop]');input.value=choice.dataset.fontChoice;closePicker(picker);
+      const selected=FONTS.find(font=>font.css===choice.dataset.fontChoice),label=picker.querySelector('[data-font-trigger]>span:first-child');
+      picker.querySelectorAll('[data-font-choice]').forEach(option=>option.setAttribute('aria-selected',String(option===choice)));
+      if(selected&&label){label.textContent=selected.label;label.style.fontFamily=selected.css+', sans-serif';label.style.fontWeight=selected.weight;}
       input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));
-      host.querySelector('[data-font-trigger]')?.focus();
+      picker.querySelector('[data-font-trigger]')?.focus();
     }
   });
   host.addEventListener('input',event=>{if(event.target.matches('.font-search'))filterOptions(event.target.closest('.font-picker'));});

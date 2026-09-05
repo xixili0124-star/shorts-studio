@@ -4,7 +4,7 @@ import { measureVisual } from './render.js';
 import { resolveSelection, selectionKey } from './batch-edits.js';
 import { transformOf, visualCorners, croppedBounds, hitVisual, cropFromDrag, resizeFromDrag, snapVisualCenter, transformAroundAnchor, transformPoint } from './visual-transform.js';
 import { clamp } from './util.js';
-import { KEYFRAME_CHANNELS, setValueAt } from './keyframes.js';
+import { KEYFRAME_CHANNELS, quantizeKeyframeTime, setValueAt } from './keyframes.js';
 
 const $=id=>document.getElementById(id);
 const clone=value=>value===undefined?undefined:JSON.parse(JSON.stringify(value));
@@ -52,6 +52,10 @@ export class MonitorEditor {
   }
   canCrop(entries=this.entries()){return !!entries.length&&entries.every(entry=>entry.type==='clip');}
   localTime(entry){return clamp(this.player.time-entry.start,0,Math.max(0,entry.end-entry.start-1e-7));}
+  editLocalTime(entry){
+    const duration=Math.max(0,entry.end-entry.start),fps=Number(this.callbacks.fps?.())||30;
+    return quantizeKeyframeTime(this.localTime(entry),fps,duration);
+  }
   current(entries=this.entries()){
     const visible=entries.filter(r=>this.player.time>=r.start&&this.player.time<r.end),primary=this.callbacks.selection();
     return visible.find(r=>primary&&selectionKey(r)===selectionKey(primary))||visible.at(-1);
@@ -96,12 +100,12 @@ export class MonitorEditor {
     const handle=event.target.closest('[data-edges]'),edges=handle?.dataset.edges.split(' ')||['move'];
     if(!handle&&!hitVisual(p,bounds,current.item,W,H,this.localTime(current)))return;
     this.player.pause();event.preventDefault();this.callbacks.gestureStart?.();
-    const targets=entries.map(entry=>({
-      entry,item:entry.item,bounds:this.bounds(entry),localTime:this.localTime(entry),
-      initial:{transform:clone(transformOf(entry.item,this.localTime(entry))),crop:clone(entry.item.crop)},
+    const targets=entries.map(entry=>{const localTime=this.editLocalTime(entry),fps=Number(this.callbacks.fps?.())||30;return({
+      entry,item:entry.item,bounds:this.bounds(entry),localTime,fps,
+      initial:{transform:clone(transformOf(entry.item,localTime)),crop:clone(entry.item.crop)},
       original:{transform:clone(entry.item.transform),crop:clone(entry.item.crop),keyframes:clone(entry.item.keyframes)},
       autoKey:typeof this.callbacks.autoKey==='function'?!!this.callbacks.autoKey(entry):!!this.callbacks.autoKey,
-    }));
+    });});
     const primary=targets.find(t=>t.entry.id===current.id),visible=croppedBounds(bounds,current.item.crop);
     const center=transformPoint({x:visible.x+visible.w/2,y:visible.y+visible.h/2},bounds,current.item,W,H,this.localTime(current));
     this.drag={pointer:event.pointerId,from:p,targets,primary,edges,center,before:captureDocument(),moved:false,mode:this.mode};
@@ -120,7 +124,7 @@ export class MonitorEditor {
     const initial=transformOf(target.initial);
     for(const channel of KEYFRAME_CHANNELS){
       if(channel==='volume'||!Number.isFinite(next[channel])||Math.abs(next[channel]-initial[channel])<1e-9)continue;
-      setValueAt(target.item,channel,target.localTime,next[channel],{autoKey:target.autoKey,duration:target.entry.end-target.entry.start});
+      setValueAt(target.item,channel,target.localTime,next[channel],{autoKey:target.autoKey,duration:target.entry.end-target.entry.start,fps:target.fps});
     }
   }
   move(event){

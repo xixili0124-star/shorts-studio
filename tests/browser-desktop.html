@@ -10,7 +10,7 @@
 <main>
   <h1>PC 스튜디오 DOM 통합 검사</h1>
   <p>별도 검수 주소의 빈 편집기를 사용합니다. 테스트 자막과 퀵포맷을 추가·수정한 뒤 정리하며 AI 처리, 다운로드, 사용자 프로젝트 교체는 실행하지 않습니다.</p>
-  <p>실제 앱 DOM과 합성 클릭·입력 이벤트로 UI 연결을 검사합니다. 390px 전환은 브라우저 레이아웃 검증이며 실제 휴대전화의 터치·OS 검증을 대신하지 않습니다.</p>
+  <p>실제 앱 DOM과 합성 클릭·포인터·키보드 이벤트로 UI 연결을 검사합니다. 오른쪽 고정 미리보기와 왼쪽 편집 영역을 픽셀로 측정합니다. 390px 전환은 실제 휴대전화의 터치·OS 검증을 대신하지 않습니다.</p>
   <div class="actions"><button id="runAll" disabled>전체 검사 실행</button><span id="status">편집기 준비 중…</span></div>
   <ol id="checks"></ol>
   <pre id="result" role="status">준비 중…</pre>
@@ -36,7 +36,68 @@ const activeInspector=()=>doc.querySelector('[data-desktop-inspector][aria-press
 const captions=()=>[...doc.querySelectorAll('.timeline-block[data-type="caption"]')];
 const titleOf=node=>[...(node.querySelector('h3')?.childNodes||[])].filter(child=>child.nodeType===3).map(child=>child.textContent).join('').trim();
 const captionSections=()=>[...q('#inspectorContent').children].filter(node=>node.matches('.property-section'));
+const rect=selector=>q(selector).getBoundingClientRect();
+const near=(actual,expected,message,tolerance=1.5)=>assert(Math.abs(actual-expected)<=tolerance,message+' ('+actual.toFixed(2)+' / '+expected.toFixed(2)+')');
+function sameRect(actual,expected,message){for(const key of ['left','top','width','height'])near(actual[key],expected[key],message+' · '+key);}
+function desktopGeometry(label){
+  const work=rect('#workbench'),viewer=rect('.viewer'),library=rect('#library'),timeline=rect('.timeline-panel'),inspector=rect('#inspector');
+  near(viewer.top,work.top,label+' · 미리보기가 상단부터 시작하지 않습니다');
+  near(viewer.bottom,work.bottom,label+' · 미리보기가 하단까지 이어지지 않습니다');
+  near(viewer.right,work.right,label+' · 미리보기가 오른쪽 끝에 고정되지 않습니다');
+  near(timeline.left,work.left,label+' · 타임라인 왼쪽이 작업 영역과 어긋납니다');
+  near(timeline.right,viewer.left,label+' · 타임라인이 미리보기 아래로 넘어가거나 중간에 빈 열이 남습니다');
+  near(timeline.bottom,work.bottom,label+' · 타임라인이 왼쪽 하단에 있지 않습니다');
+  near(library.top,work.top,label+' · 라이브러리 상단이 어긋납니다');
+  near(library.bottom,timeline.top,label+' · 라이브러리가 타임라인 위까지만 차지하지 않습니다');
+  if(visible(q('#inspector'))){
+    near(library.right,inspector.left,label+' · 라이브러리와 속성 사이에 빈 공간이 생겼습니다');
+    near(inspector.right,viewer.left,label+' · 속성이 미리보기 왼쪽에 있지 않습니다');
+    near(inspector.top,work.top,label+' · 속성이 왼쪽 상단 영역을 벗어납니다');
+    near(inspector.bottom,timeline.top,label+' · 속성이 타임라인으로 내려갑니다');
+    assert(inspector.width>=200,'속성 패널이 조작할 수 없을 만큼 좁습니다.');
+  }else near(library.right,viewer.left,label+' · 선택이 없는데 속성 자리의 빈 공간이 남습니다');
+  assert(timeline.width>450,label+' · 타임라인에 편집할 폭이 부족합니다.');
+  return {work,viewer,library,timeline,inspector};
+}
+async function key(selector,keyName,options={}){const node=q(selector);assert(visible(node),'보이지 않는 키보드 조작: '+selector);node.focus();node.dispatchEvent(new win.KeyboardEvent('keydown',{key:keyName,bubbles:true,cancelable:true,...options}));await settle();}
+let nextPointer=700000;
+async function timelineTap(node,{ctrlKey=false}={}){
+  node.scrollIntoView({block:'nearest',inline:'nearest'});await settle();
+  const box=node.getBoundingClientRect(),at={x:box.left+Math.min(45,box.width/2),y:box.top+box.height*.7},target=doc.elementFromPoint(at.x,at.y),id=++nextPointer;
+  assert(target?.closest('.timeline-block')?.dataset.id===node.dataset.id,'타임라인 클립이 다른 요소에 가려져 선택할 수 없습니다.');
+  const captures=new Map(),saved=new Map(),proto=win.Element.prototype;
+  // 이 합성 포인터 ID만 캡처를 모사합니다. 실제 사용자 포인터와 앱 코드는 변경하지 않습니다.
+  for(const name of ['setPointerCapture','hasPointerCapture','releasePointerCapture']){
+    const original=proto[name];saved.set(name,original);proto[name]=function(pointer){if(pointer!==id)return original.call(this,pointer);if(name==='setPointerCapture'){captures.set(id,this);return;}if(name==='hasPointerCapture')return captures.get(id)===this;if(captures.get(id)===this)captures.delete(id);};
+  }
+  const event=type=>new win.PointerEvent(type,{pointerId:id,pointerType:'mouse',isPrimary:true,bubbles:true,cancelable:true,composed:true,clientX:at.x,clientY:at.y,button:0,buttons:type==='pointerdown'?1:0,ctrlKey});
+  try{target.dispatchEvent(event('pointerdown'));(captures.get(id)||target).dispatchEvent(event('pointerup'));}
+  finally{for(const [name,original] of saved)proto[name]=original;captures.clear();}
+  await settle();
+}
+async function resizePointer(selector,deltaX,{cancel=false,afterMove=()=>{}}={}){
+  const node=q(selector),box=node.getBoundingClientRect(),at={x:box.left+box.width/2,y:box.top+box.height*.45},id=++nextPointer,target=doc.elementFromPoint(at.x,at.y);
+  assert(visible(node)&&(target===node||node.contains(target)),'폭 조절 경계가 다른 요소에 가려졌습니다: '+selector);
+  const captures=new Map(),saved=new Map(),proto=win.Element.prototype;
+  // 활성 브라우저 포인터만 캡처할 수 있으므로, 합성 ID의 캡처만 대신 연결합니다.
+  for(const name of ['setPointerCapture','hasPointerCapture','releasePointerCapture']){
+    const original=proto[name];saved.set(name,original);proto[name]=function(pointer){if(pointer!==id)return original.call(this,pointer);if(name==='setPointerCapture'){captures.set(id,this);return;}if(name==='hasPointerCapture')return captures.get(id)===this;if(captures.get(id)===this)captures.delete(id);};
+  }
+  const send=(type,dx=0)=>{const destination=captures.get(id)||node;destination.dispatchEvent(new win.PointerEvent(type,{pointerId:id,pointerType:'mouse',isPrimary:true,bubbles:true,cancelable:true,composed:true,clientX:at.x+dx,clientY:at.y,button:0,buttons:type==='pointerup'||type==='pointercancel'?0:1}));};
+  try{
+    send('pointerdown');await settle();send('pointermove',deltaX);await settle();await afterMove();send(cancel?'pointercancel':'pointerup',deltaX);await settle();
+  }finally{
+    if(captures.has(id))send('pointercancel',deltaX);
+    for(const [name,original] of saved)proto[name]=original;captures.clear();
+  }
+}
 const tests={
+  async workspaceLayout(){
+    assert(!doc.body.classList.contains('desktop-has-selection'),'빈 편집기에 선택 상태가 남았습니다.');
+    assert(!visible(q('#inspector')),'선택한 클립이 없는데 속성 패널이 표시됩니다.');
+    assert(!visible(doc.querySelector('#desktopInspectorEmpty')),'선택이 없는데 빈 프로젝트 안내가 속성 자리를 차지합니다.');
+    desktopGeometry('선택 없음');uniqueIds();return '오른쪽 미리보기는 전체 높이 고정 · 왼쪽 위 라이브러리 확장 · 왼쪽 아래 타임라인';
+  },
   async navigation(){
     assert(doc.querySelectorAll('[data-desktop-group]').length===5,'상위 탐색이 다섯 작업으로 정리되지 않았습니다.');
     const routes=[['files',null,'media'],['captions',null,'captions'],['sound','sounds','sounds'],['sound','voice','voice'],['sound','silence','silence'],['design','quick-format','quick-format'],['design','graphics','graphics'],['design','transitions','transitions'],['tools','mosaic','mosaic'],['tools','crop-tracking','crop-tracking']];
@@ -58,16 +119,39 @@ const tests={
       assert(textBox.right<=box.right+1&&textBox.left>=box.left,'트랙명이 선택 버튼 밖으로 넘칩니다: '+label.textContent);
       assert(Math.abs(badgeBox.width-24)<.5&&Math.abs(badgeBox.height-24)<.5,'트랙 배지 크기가 24×24가 아닙니다: '+badge.textContent);
     }
-    const heads=q('.track-heads').getBoundingClientRect(),scroll=q('#timelineScroll').getBoundingClientRect(),tools=q('.edit-tools').getBoundingClientRect(),library=q('#library').getBoundingClientRect(),panel=q('.timeline-panel').getBoundingClientRect();
+    const heads=rect('.track-heads'),scroll=rect('#timelineScroll'),tools=rect('.edit-tools'),panel=rect('.timeline-panel'),viewer=rect('.viewer');
     assert(heads.width<=185,'트랙 칸에 과도한 빈 폭이 남았습니다.');
-    assert(tools.left>=scroll.left&&tools.left>=library.right-1,'편집 도구가 트랙 칸이나 연장한 메뉴 패널과 겹칩니다.');
-    assert(Math.abs(library.bottom-scroll.top)<=1&&Math.abs(panel.left)<1,'메뉴 패널이 + 줄을 넘어 트랙까지 내려왔거나 타임라인 전체 폭이 줄었습니다.');
-    assert(!visible(q('.timeline-title'))&&!doc.querySelector('#desktopTrackMore'),'타임라인 왼쪽 + 또는 빈 제목 줄이 남았습니다.');
+    assert(tools.left>=panel.left&&tools.right<=panel.right+1,'편집 도구가 왼쪽 타임라인 폭을 벗어납니다.');
+    assert(scroll.left>=heads.right-1&&scroll.right<=viewer.left+1,'트랙 내용이 트랙 헤더와 겹치거나 오른쪽 미리보기 아래로 넘어갑니다.');
+    desktopGeometry('트랙 전체 이름');
+    assert(!visible(doc.querySelector('.timeline-title'))&&!doc.querySelector('#desktopTrackMore'),'타임라인 왼쪽 + 또는 빈 제목 줄이 남았습니다.');
     await click('#trackHeaders .audio-head [data-add-track]');
     assert(doc.querySelectorAll('#trackHeaders .track-selector').length===selectors.length+1,'행의 + 버튼으로 추가한 트랙이 없습니다.');
     for(const label of doc.querySelectorAll('#trackHeaders .track-selector strong'))assert(label.scrollWidth<=label.clientWidth+1,'추가 트랙명이 잘립니다: '+label.textContent);
     await click('#undo');assert(doc.querySelectorAll('#trackHeaders .track-selector').length===selectors.length,'추가 트랙 되돌리기가 실패했습니다.');
-    return '184px 트랙 칸·24px 배지·전체 이름, 메뉴는 + 줄까지만 연장, 타임라인 전체 폭 유지';
+    return '184px 이내 트랙 칸·24px 배지·전체 이름, 왼쪽 타임라인 내부 도구 배치와 행별 + 유지';
+  },
+  async previewResize(){
+    const separator=q('#desktopPreviewResizer'),compact=q('#desktopCompactPreview');
+    assert(visible(separator)&&separator.getAttribute('role')==='separator'&&separator.getAttribute('aria-orientation')==='vertical'&&separator.tabIndex===0,'미리보기 폭 경계가 키보드로 조절 가능한 세로 separator가 아닙니다.');
+    assert(visible(compact)&&compact.getAttribute('aria-label'),'간단 보기 버튼의 접근성 이름이 없습니다.');
+    if(compact.getAttribute('aria-pressed')==='true')await click(compact);
+    await key('#desktopPreviewResizer','Home');const home=desktopGeometry('기본 미리보기');
+    await key('#desktopPreviewResizer','ArrowRight');const smaller=desktopGeometry('폭 축소');
+    assert(smaller.viewer.width<home.viewer.width,'오른쪽 화살표로 미리보기 폭이 줄지 않습니다.');
+    near(smaller.viewer.height,home.viewer.height,'폭을 줄이자 미리보기 높이가 변했습니다');
+    near(smaller.timeline.width-home.timeline.width,home.viewer.width-smaller.viewer.width,'미리보기에서 확보한 폭이 타임라인에 배분되지 않습니다');
+    await key('#desktopPreviewResizer','ArrowLeft');near(rect('.viewer').width,home.viewer.width,'왼쪽 화살표로 폭이 복구되지 않습니다');
+    await key('#desktopPreviewResizer','End');const maximum=rect('.viewer').width;
+    near(maximum,Number(separator.getAttribute('aria-valuemax')),'최대 폭과 접근성 값이 다릅니다');assert(maximum<=481,'미리보기가 최대 480px를 넘습니다.');
+    await key('#desktopPreviewResizer','Home');near(rect('.viewer').width,home.viewer.width,'Home으로 기본 폭을 복구하지 못했습니다');
+    await key('#desktopPreviewResizer','ArrowRight');const beforeCompact=desktopGeometry('간단 보기 전');
+    await click(compact);assert(compact.getAttribute('aria-pressed')==='true'&&doc.body.classList.contains('desktop-preview-compact'),'간단 보기 선택 상태가 표시되지 않습니다.');
+    const collapsed=desktopGeometry('간단 보기');near(collapsed.viewer.width,200,'간단 보기 폭이 200px가 아닙니다');near(collapsed.viewer.height,beforeCompact.viewer.height,'간단 보기로 높이가 바뀌었습니다');
+    await click(compact);assert(compact.getAttribute('aria-pressed')==='false','간단 보기를 해제하지 못했습니다.');sameRect(rect('.viewer'),beforeCompact.viewer,'간단 보기 해제 후 이전 미리보기 영역이 복원되지 않습니다');
+    await click(compact);await key('#desktopPreviewResizer','ArrowLeft');assert(!doc.body.classList.contains('desktop-preview-compact')&&rect('.viewer').width>=220,'간단 보기에서 폭을 조절해도 일반 보기로 돌아오지 않습니다.');
+    await key('#desktopPreviewResizer','Home');desktopGeometry('폭 검사 후 복구');
+    return '세로 경계 키보드 조절·최대/기본 폭·간단 200px·이전 폭 복구, 확보한 폭은 왼쪽 타임라인으로';
   },
   async captionPanels(){
     await group('captions');const host=q('#libraryContent'),children=[...host.children];
@@ -82,7 +166,8 @@ const tests={
     await tab('styles');return '자막(직접 추가·스타일) → 자동자막 → 목록 분리, 공유 직계 노드와 명령 유지';
   },
   async captionEdit(){
-    const before=captions().length;await click('[data-action="add-caption"]');assert(captions().length===before+1,'직접 추가한 자막이 타임라인에 없습니다.');assert(activeInspector()==='basic','새 자막의 기본 편집이 열리지 않았습니다.');
+    const before=captions().length,viewerBefore=rect('.viewer');await click('[data-action="add-caption"]');assert(captions().length===before+1,'직접 추가한 자막이 타임라인에 없습니다.');assert(activeInspector()==='basic','새 자막의 기본 편집이 열리지 않았습니다.');
+    assert(visible(q('#inspector')),'자막을 추가했는데 중앙 속성 패널이 열리지 않습니다.');sameRect(rect('.viewer'),viewerBefore,'클립 선택이 오른쪽 미리보기 영역을 바꿨습니다');desktopGeometry('자막 선택');
     const text=q('#inspectorContent textarea[data-prop="text"]');assert(visible(text),'기본 탭에서 문구를 바로 편집할 수 없습니다.');text.focus();text.value=captionText;text.dispatchEvent(new win.Event('input',{bubbles:true}));text.dispatchEvent(new win.Event('change',{bubbles:true}));await settle();
     assert(q('#inspectorContent textarea[data-prop="text"]').value===captionText,'문구 변경이 속성 재렌더 후 사라졌습니다.');assert(captions().some(node=>node.textContent.includes(captionText)),'문구 변경이 실제 타임라인 클립에 반영되지 않았습니다.');
     await tab('list');assert(q('#captionList').textContent.includes(captionText),'자막 목록에 변경 내용이 반영되지 않았습니다.');await tab('styles');return '자막 추가 → 기본 문구 입력 → 실제 타임라인·목록 반영';
@@ -92,6 +177,101 @@ const tests={
     await inspectorTab('motion');const channel=q('[data-keyframe-channel]');assert(visible(channel),'움직임에서 키프레임 속성을 고를 수 없습니다.');channel.value='rotation';channel.dispatchEvent(new win.Event('change',{bubbles:true}));await settle();
     assert(activeInspector()==='motion','키프레임 속성 변경 후 기본 탭으로 튀었습니다.');assert(q('[data-keyframe-channel]').value==='rotation','선택한 회전 속성이 유지되지 않습니다.');assert(visible(q('[data-keyframe-value]')),'현재 키프레임 값을 바로 조절할 수 없습니다.');
     assert(!visible(q('#inspectorContent textarea[data-prop="text"]')),'움직임 탭에서도 기본 편집이 함께 표시됩니다.');uniqueIds();return '꾸미기 분리 · 키프레임 속성 변경 뒤 움직임 탭과 슬라이더 유지';
+  },
+  async selectionLayout(){
+    const selected=desktopGeometry('선택 속성 열기');assert(visible(q('#inspector')),'선택 속성을 검사할 자막이 선택되지 않았습니다.');
+    await click('#desktopCloseInspector');assert(!visible(q('#inspector')),'닫기를 누른 속성 패널이 남아 있습니다.');
+    const closed=desktopGeometry('선택 속성 닫기');assert(closed.library.width>selected.library.width+180,'속성을 닫은 자리를 라이브러리가 채우지 않습니다.');sameRect(closed.viewer,selected.viewer,'속성 닫기가 미리보기를 움직였습니다');
+    await timelineTap(captions()[0]);assert(visible(q('#inspector')),'같은 클립을 다시 눌러도 속성 패널이 재개방되지 않습니다.');
+    assert(activeInspector()==='motion','같은 선택을 재개방하면서 편집 중인 움직임 탭을 잃었습니다.');desktopGeometry('동일 클립 재선택');
+    await timelineTap(captions()[0],{ctrlKey:true});assert(!doc.body.classList.contains('desktop-has-selection'),'Ctrl 클릭으로 클립 선택이 해제되지 않았습니다.');assert(!visible(q('#inspector')),'선택 해제 후에도 속성이 보입니다.');
+    const unselected=desktopGeometry('선택 해제');sameRect(unselected.viewer,selected.viewer,'선택 해제가 미리보기를 움직였습니다');near(unselected.library.width,closed.library.width,'선택을 해제해도 라이브러리가 확장되지 않습니다');
+    q('#toggleInspector').click();await settle();assert(!visible(q('#inspector')),'선택 없이 빈 속성 패널을 다시 열 수 있습니다.');
+    await timelineTap(captions()[0]);assert(visible(q('#inspector')),'다시 선택한 자막의 속성이 열리지 않습니다.');
+    assert(q('#inspectorContent textarea[data-prop="text"]').value===captionText,'선택만 변경했는데 자막이 바뀌었습니다.');
+    await inspectorTab('motion');sameRect(rect('.viewer'),selected.viewer,'다시 선택하며 미리보기 폭 또는 높이가 변했습니다');desktopGeometry('선택 복구');
+    return '선택 없음 → 중앙 속성 표시 → 닫기·라이브러리 확장 → 동일 클립 재개방 → 선택 해제·재선택';
+  },
+  async smallDesktopLayout(){
+    const before=desktopGeometry('작은 PC 창 전'),selectedId=captions().find(node=>node.classList.contains('selected'))?.dataset.id,tabBefore=activeInspector();
+    assert(selectedId&&visible(q('#inspector')),'작은 PC 창을 검사할 자막 선택과 속성이 필요합니다.');
+    const noHorizontalOverflow=(selector,label)=>{const node=q(selector);assert(node.scrollWidth<=node.clientWidth+1,label+'에 가로 넘침이 생겼습니다. ('+node.scrollWidth+' / '+node.clientWidth+')');};
+    const overlayGeometry=label=>{
+      const inspector=rect('#inspector'),timeline=rect('.timeline-panel'),viewer=rect('.viewer'),nav=rect('#desktopNav');
+      assert(visible(q('#inspector')),label+' · 선택 속성이 닫혔습니다.');
+      assert(inspector.bottom<=timeline.top+1,label+' · 속성이 타임라인을 덮습니다.');
+      assert(inspector.right<=viewer.left+1,label+' · 속성이 오른쪽 미리보기를 덮습니다.');
+      assert(inspector.top>=nav.bottom-1,label+' · 속성이 상위 탐색을 덮습니다.');
+      near(timeline.right,viewer.left,label+' · 타임라인이 미리보기 아래로 넘어갑니다');
+      for(const [selector,name] of [['#library','라이브러리'],['#libraryContent','라이브러리 내용'],['.timeline-toolbar','타임라인 도구']])noHorizontalOverflow(selector,label+' · '+name);
+    };
+    const safePopupGeometry=label=>{
+      const panel=q('#safeAreaPanel'),popup=panel.getBoundingClientRect(),button=q('#safeArea'),buttonBox=button.getBoundingClientRect();
+      assert(visible(panel),label+' · 안전영역 설정이 열리지 않습니다.');
+      near(popup.width,320,label+' · 안전영역 설정 폭이 320px로 유지되지 않습니다');
+      assert(popup.bottom<buttonBox.top,label+' · 안전영역 팝업이 여는 버튼을 덮습니다.');
+      assert(popup.left>=0&&popup.right<=win.innerWidth+1,label+' · 안전영역 설정이 창 밖으로 나갑니다.');
+      const target=doc.elementFromPoint(buttonBox.left+buttonBox.width/2,buttonBox.top+buttonBox.height/2);
+      assert(target===button||button.contains(target),label+' · 안전영역 버튼이 다른 요소에 가려졌습니다.');
+      noHorizontalOverflow('#safeAreaPanel',label+' · 안전영역 설정');
+    };
+    try{
+      iframe.style.width='900px';iframe.style.height='800px';
+      await until(()=>win.innerWidth===900&&win.innerHeight===800,'900×800 PC 창으로 바뀌지 않았습니다.');await settle();
+      assert(doc.body.classList.contains('desktop-ui')&&!doc.body.classList.contains('mobile-ui'),'900px PC 창이 모바일 화면으로 전환됐습니다.');
+      if(!visible(q('#inspector')))await click('#toggleInspector');overlayGeometry('900px 일반 보기');
+      const overlayBefore={inspector:rect('#inspector'),viewer:rect('.viewer'),timeline:rect('.timeline-panel'),library:rect('#library')};
+      await key('#desktopInspectorResizer','ArrowLeft');assert(rect('#inspector').width>overlayBefore.inspector.width,'900px 겹침 속성의 폭 경계가 작동하지 않습니다.');overlayGeometry('900px 속성 폭 변경');
+      sameRect(rect('.viewer'),overlayBefore.viewer,'900px 속성 폭 변경이 미리보기를 바꿨습니다');sameRect(rect('.timeline-panel'),overlayBefore.timeline,'900px 속성 폭 변경이 타임라인을 바꿨습니다');sameRect(rect('#library'),overlayBefore.library,'900px 겹침 속성 폭이 라이브러리 자체 폭을 바꿨습니다');
+      await key('#desktopInspectorResizer','ArrowRight');near(rect('#inspector').width,overlayBefore.inspector.width,'900px 속성 폭이 복구되지 않습니다');
+      await click('#safeArea');safePopupGeometry('900px 일반 보기');await click('#closeSafeArea');
+      await click('#desktopCompactPreview');near(rect('.viewer').width,200,'900px 간단 보기 폭이 200px가 아닙니다');overlayGeometry('900px 간단 보기');
+      await click('#safeArea');safePopupGeometry('900px 간단 보기');await click('#closeSafeArea');
+    }finally{
+      if(visible(q('#safeAreaPanel')))await click('#closeSafeArea');
+      if(q('#desktopCompactPreview').getAttribute('aria-pressed')==='true')await click('#desktopCompactPreview');
+      iframe.style.width='1280px';iframe.style.height='850px';
+      await until(()=>win.innerWidth===1280&&win.innerHeight===850,'검사 후 1280×850 PC 창으로 복구하지 못했습니다.');await settle();
+    }
+    assert(captions().find(node=>node.classList.contains('selected'))?.dataset.id===selectedId,'작은 창 왕복 중 선택 자막이 바뀌었습니다.');
+    assert(activeInspector()===tabBefore&&q('#inspectorContent textarea[data-prop="text"]').value===captionText,'작은 창 왕복 중 편집 탭이나 자막 문구가 바뀌었습니다.');
+    sameRect(desktopGeometry('작은 PC 창 복구').viewer,before.viewer,'작은 창 왕복 후 미리보기 위치·크기가 복구되지 않습니다');
+    return '900×800 속성은 왼쪽 상단에만 표시 · 가로 넘침 없음 · 일반/간단 보기 안전영역 320px와 버튼 분리 · 1280px 선택 복구';
+  },
+  async inspectorResize(){
+    const selector='#desktopInspectorResizer',separator=q(selector),storageKey='shorts-studio.desktop-inspector.v1';
+    assert(visible(separator)&&separator.getAttribute('role')==='separator'&&separator.getAttribute('aria-orientation')==='vertical'&&separator.tabIndex===0,'속성 폭 경계가 키보드로 조절 가능한 세로 separator가 아닙니다.');
+    await key(selector,'Home');const home=desktopGeometry('속성 기본 폭');
+    const unchanged=(next,previous,label)=>{sameRect(next.viewer,previous.viewer,label+' · 오른쪽 미리보기가 바뀌었습니다');sameRect(next.timeline,previous.timeline,label+' · 아래 타임라인이 바뀌었습니다');near(next.library.width-previous.library.width,previous.inspector.width-next.inspector.width,label+' · 속성과 라이브러리가 반대로 폭을 배분하지 않습니다');};
+    await key(selector,'ArrowLeft');const wider=desktopGeometry('속성 폭 확대');assert(wider.inspector.width>home.inspector.width,'왼쪽 화살표로 속성 폭이 늘지 않습니다.');unchanged(wider,home,'속성 폭 확대');
+    await key(selector,'ArrowRight');const restored=desktopGeometry('속성 폭 복구');near(restored.inspector.width,home.inspector.width,'오른쪽 화살표로 속성 폭이 복구되지 않습니다');unchanged(restored,home,'속성 폭 복구');
+    await resizePointer(selector,-36,{afterMove:()=>{const moved=desktopGeometry('속성 포인터 이동');assert(doc.body.classList.contains('desktop-inspector-resizing'),'속성 폭 드래그 상태가 표시되지 않습니다.');near(moved.inspector.width,home.inspector.width+36,'포인터 이동만큼 속성 폭이 늘지 않습니다');unchanged(moved,home,'속성 포인터 이동');}});
+    const committed=desktopGeometry('속성 포인터 확정'),saved=win.localStorage.getItem(storageKey);assert(!doc.body.classList.contains('desktop-inspector-resizing'),'포인터를 놓은 뒤 속성 드래그 상태가 남았습니다.');near(JSON.parse(saved).width,committed.inspector.width,'포인터로 확정한 속성 폭이 저장되지 않습니다');
+    await resizePointer(selector,-24,{cancel:true,afterMove:()=>{const moved=desktopGeometry('취소 전 속성 이동');near(moved.inspector.width,committed.inspector.width+24,'취소할 속성 이동이 적용되지 않습니다');unchanged(moved,committed,'취소 전 속성 이동');}});
+    sameRect(rect('#inspector'),committed.inspector,'포인터 취소 후 속성 원래 폭이 복구되지 않습니다');assert(win.localStorage.getItem(storageKey)===saved,'포인터 취소가 저장된 속성 폭을 바꿨습니다.');assert(!doc.body.classList.contains('desktop-inspector-resizing'),'포인터 취소 뒤 속성 드래그 상태가 남았습니다.');
+    await key(selector,'End');const wide=desktopGeometry('속성 최대 폭'),preferred=win.localStorage.getItem(storageKey);near(wide.inspector.width,Number(separator.getAttribute('aria-valuemax')),'속성 최대 폭과 접근성 값이 다릅니다');unchanged(wide,home,'속성 최대 폭');
+    try{
+      iframe.style.width='1000px';await until(()=>win.innerWidth===1000,'속성 clamp 검사 폭으로 바뀌지 않았습니다.');await settle();
+      const limited=desktopGeometry('작은 창 속성 폭 제한'),max=Number(separator.getAttribute('aria-valuemax')),min=Number(separator.getAttribute('aria-valuemin'));
+      assert(limited.inspector.width<wide.inspector.width,'창이 좁아져도 저장된 속성 폭을 제한하지 않습니다.');near(limited.inspector.width,max,'창 폭에 따른 속성 최대 폭이 반영되지 않습니다');assert(limited.inspector.width>=min-1&&limited.library.width>=239,'창을 줄이자 속성 또는 라이브러리 최소 폭을 침범했습니다.');
+      assert(win.localStorage.getItem(storageKey)===preferred,'창 폭 제한이 저장한 선호 폭을 덮어썼습니다.');
+    }finally{
+      iframe.style.width='1280px';iframe.style.height='850px';await until(()=>win.innerWidth===1280,'속성 검사 후 PC 폭을 복구하지 못했습니다.');await settle();
+    }
+    sameRect(rect('#inspector'),wide.inspector,'창을 다시 넓혔는데 저장한 속성 폭이 복구되지 않습니다');
+    await key(selector,'Home');near(rect('#inspector').width,home.inspector.width,'Home으로 속성 기본 폭을 복구하지 못했습니다');
+    await click('#desktopCloseInspector');assert(!visible(separator),'속성을 닫은 뒤에도 폭 조절 경계가 남았습니다.');await timelineTap(captions()[0]);assert(visible(separator),'클립 재선택 후 속성 폭 경계가 복원되지 않습니다.');
+    return '속성 폭 키보드·포인터 확정/취소 · 라이브러리와 반대로 배분 · 미리보기/타임라인 고정 · 창 크기 제한 후 선호 폭 복구';
+  },
+  async timelineResize(){
+    const separator=q('#timelineResizer');assert(visible(separator)&&separator.getAttribute('aria-orientation')==='horizontal','왼쪽 편집 영역 높이 경계가 없습니다.');
+    const before=desktopGeometry('타임라인 높이 기본');
+    await key('#timelineResizer','ArrowUp');const taller=desktopGeometry('타임라인 높이 확대');
+    assert(taller.timeline.height>before.timeline.height,'위쪽 화살표로 타임라인 높이가 늘지 않습니다.');
+    sameRect(taller.viewer,before.viewer,'타임라인 높이 변경이 오른쪽 미리보기 크기나 위치를 바꿨습니다');
+    near(before.library.height-taller.library.height,taller.timeline.height-before.timeline.height,'타임라인 높이를 왼쪽 위 편집 영역에서 배분하지 않습니다');
+    await key('#timelineResizer','ArrowDown');const restored=desktopGeometry('타임라인 높이 복구');sameRect(restored.viewer,before.viewer,'높이 복구 중 미리보기가 바뀌었습니다');near(restored.timeline.height,before.timeline.height,'타임라인 높이가 복구되지 않습니다');
+    return '타임라인 위아래 높이 조절은 왼쪽 영역만 변경 · 오른쪽 미리보기 위치·폭·높이 동일';
   },
   async menusAndInspector(){
     await click('#desktopCloseInspector');assert(!visible(q('#inspector')),'편집 패널이 접히지 않습니다.');await click('#toggleInspector');assert(visible(q('#inspector')),'미리보기 버튼으로 편집 패널을 다시 열 수 없습니다.');assert(activeInspector()==='motion','패널 재개방 시 현재 작업이 사라졌습니다.');
@@ -145,17 +325,22 @@ const tests={
   },
   async mobileRoundTrip(){
     const nodes=new Map(['library','inspector'].map(id=>[id,q('#'+id)]));nodes.set('viewer',q('.viewer'));nodes.set('timeline',q('.timeline-panel'));const parents=new Map([...nodes].map(([key,node])=>[key,node.parentElement]));
-    await group('captions');await inspectorTab('motion');await tab('styles');await click('.desktop-project-menu > summary');
+    await group('captions');await inspectorTab('motion');await tab('styles');await key('#desktopPreviewResizer','ArrowRight');await key('#desktopInspectorResizer','ArrowLeft');const desktopBefore=desktopGeometry('모바일 전환 전'),inspectorSaved=win.localStorage.getItem('shorts-studio.desktop-inspector.v1');await click('.desktop-project-menu > summary');
     iframe.style.width='390px';iframe.style.height='844px';await until(()=>doc.body.classList.contains('mobile-ui'),'390px에서 모바일 전용 화면으로 전환되지 않았습니다.');await settle();
     assert(!doc.body.classList.contains('desktop-ui'),'모바일에 데스크톱 활성 상태가 남았습니다.');assert([...doc.querySelectorAll('.desktop-only')].every(node=>!visible(node)),'모바일에 PC 전용 메뉴가 보입니다.');assert(!doc.querySelector('.desktop-only[open]'),'모바일 전환 뒤 PC 팝오버가 열린 채 남았습니다.');
+    assert(!q('#workbench').style.getPropertyValue('--desktop-preview-width'),'모바일에 PC의 고정 미리보기 폭이 남았습니다.');assert(!doc.body.classList.contains('desktop-preview-resizing'),'모바일에서 PC 폭 조절 상태가 유지됩니다.');
+    assert(!q('#workbench').style.getPropertyValue('--desktop-inspector-width'),'모바일에 PC의 고정 속성 폭이 남았습니다.');assert(!doc.body.classList.contains('desktop-inspector-resizing'),'모바일에서 PC 속성 폭 조절 상태가 유지됩니다.');assert(win.localStorage.getItem('shorts-studio.desktop-inspector.v1')===inspectorSaved,'모바일 진입이 PC 속성 폭 저장값을 바꿨습니다.');
     await click('#mobileActionDock [data-mobile-action="inspector:text"]');const text=q('#inspectorContent textarea[data-prop="text"]');assert(visible(text)&&text.value===captionText,'PC 움직임 필터가 모바일 문구 편집을 숨기거나 데이터를 바꿨습니다.');assert(q('#inspectorContent').parentElement===q('#inspector'),'공유 속성 노드가 복제됐습니다.');assert([...doc.querySelectorAll('.desktop-only')].every(node=>!visible(node)),'모바일 편집 패널에 PC 탭/안내가 노출됩니다.');await click('#mobilePanelDone');
     await click('#mobileActionDock [data-mobile-action="inspector:font"]');assert(visible(q('#inspectorContent [data-prop="style.size"]')),'PC 필터 때문에 모바일 글꼴/크기 편집이 숨겨졌습니다.');await click('#mobilePanelDone');
     iframe.style.width='1280px';iframe.style.height='850px';await until(()=>doc.body.classList.contains('desktop-ui')&&!doc.body.classList.contains('mobile-ui'),'PC 레이아웃으로 복귀하지 못했습니다.');await settle();
-    for(const [key,node] of nodes)assert(node.isConnected&&node.parentElement===parents.get(key),key+' 원래 PC 위치가 복원되지 않았습니다.');assert(!doc.querySelector('[data-mobile-filtered]'),'PC 복귀 후 모바일 속성 필터가 남았습니다.');assert(activeInspector()==='motion','모바일 왕복 후 PC 움직임 탭이 사라졌습니다.');assert(visible(q('#desktopNav'))&&visible(q('#desktopInspectorTabs')),'PC 탐색/속성 탭이 복원되지 않았습니다.');uniqueIds();return '1280 → 390 → 1280 전환, 모바일 문구/폰트 편집, 공유 DOM 복원 및 필터 격리';
+    for(const [key,node] of nodes)assert(node.isConnected&&node.parentElement===parents.get(key),key+' 원래 PC 위치가 복원되지 않았습니다.');assert(!doc.querySelector('[data-mobile-filtered]'),'PC 복귀 후 모바일 속성 필터가 남았습니다.');assert(activeInspector()==='motion','모바일 왕복 후 PC 움직임 탭이 사라졌습니다.');assert(visible(q('#desktopNav'))&&visible(q('#desktopInspectorTabs')),'PC 탐색/속성 탭이 복원되지 않았습니다.');
+    const desktopAfter=desktopGeometry('모바일 왕복 후');sameRect(desktopAfter.viewer,desktopBefore.viewer,'모바일 왕복 후 조절해 둔 미리보기 위치·폭·높이가 복구되지 않았습니다');near(desktopAfter.timeline.width,desktopBefore.timeline.width,'모바일 왕복 후 왼쪽 타임라인 폭이 복구되지 않았습니다');
+    sameRect(desktopAfter.inspector,desktopBefore.inspector,'모바일 왕복 후 조절한 속성 위치·폭·높이가 복구되지 않았습니다');near(desktopAfter.library.width,desktopBefore.library.width,'모바일 왕복 후 라이브러리 폭이 복구되지 않았습니다');assert(win.localStorage.getItem('shorts-studio.desktop-inspector.v1')===inspectorSaved,'모바일 왕복이 PC 속성 폭 저장값을 바꿨습니다.');
+    uniqueIds();return '1280 → 390 → 1280 전환, 모바일 문구/폰트 편집, 공유 DOM·미리보기/속성의 개별 저장 폭·왼쪽 타임라인 복원';
   },
   async cleanup(){
     for(let count=0;captions().length&&count<12;count++){assert(!q('#undo').disabled,'테스트 자막 작업을 되돌릴 수 없습니다.');await click('#undo');}
-    assert(captions().length===0,'되돌리기 뒤 테스트 자막이 남았습니다.');await group('files');uniqueIds();return '실행 취소로 테스트 자막 정리 · 빈 편집기 복구';
+    assert(captions().length===0,'되돌리기 뒤 테스트 자막이 남았습니다.');await group('files');assert(!visible(q('#inspector')),'자막을 모두 되돌렸는데 속성 패널이 남았습니다.');desktopGeometry('빈 편집기 복구');uniqueIds();return '실행 취소로 테스트 자막 정리 · 선택 없는 확장 라이브러리와 고정 미리보기 복구';
   },
 };
 async function run(){
@@ -167,6 +352,9 @@ async function run(){
 $('runAll').onclick=run;
 try{
   await until(()=>iframe.contentDocument?.documentElement?.dataset.studioReady==='true','편집기 초기화/폰트 준비가 20초 안에 완료되지 않았습니다.',20000);doc=iframe.contentDocument;win=iframe.contentWindow;
+  // 자동 검사가 입력에 포커스를 두는 동안 실제 키 입력이 테스트 문구에 섞이지 않게 합니다.
+  // 검사 자체의 합성 입력과 실행 버튼이 있는 바깥 페이지는 영향을 받지 않습니다.
+  for(const type of ['keydown','keypress','beforeinput'])win.addEventListener(type,event=>{if(running&&event.isTrusted){event.preventDefault();event.stopImmediatePropagation();}},{capture:true});
   win.addEventListener('error',event=>{if(running)errors.push(event.error?.stack||event.message);});win.addEventListener('unhandledrejection',event=>{if(running)errors.push(event.reason?.stack||String(event.reason));});
   assert(doc.body.classList.contains('desktop-ui'),'처음부터 PC 전용 레이아웃이 아닙니다.');assert(captions().length===0,'빈 프로젝트가 아닌 기존 자막을 감지했습니다.');for(const id of ['saveProject','openProject','rippleDeleteClip','copyClipSettings','pasteClipSettings'])originals.set(id,q('#'+id));
   ready=true;document.body.dataset.result='ready';$('runAll').disabled=false;$('status').textContent='준비 완료 · '+Object.keys(tests).length+'개 검사';$('result').textContent='전체 검사 실행을 누르세요.';

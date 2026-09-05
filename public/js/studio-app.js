@@ -128,16 +128,19 @@ function select(type,id,options={}){
   renderInspector();player.invalidate();keyframeEditor?.update();if(view==='media')document.querySelectorAll('[data-asset]').forEach(n=>n.classList.toggle('selected',type==='asset'&&n.dataset.asset===id));if(['captions','transitions','mosaic','crop-tracking','silence'].includes(view))renderLibrary();
   updateToolbar();if(window.innerWidth<651)$('workbench').classList.remove('show-library');
   mobileStudio?.onSelection(type);
+  desktopStudio?.onSelection();
 }
 function selectMany(refs,primary,options={}){
   selectedItems=selectionRefs(refs);selection=selectedItems.find(ref=>primary&&selectionKey(ref)===selectionKey(primary))||selectedItems.at(-1)||null;
   player.selection=selection;if(options.timeline!==false)timeline.selectMany(selectedItems,selection);
   renderInspector();player.invalidate();keyframeEditor?.update();updateToolbar();if(['captions','mosaic','crop-tracking','silence'].includes(view))renderLibrary();
+  desktopStudio?.onSelection();
 }
 function selectTransition(id,rightId){
   const pair=currentTransition({id,rightId});if(!pair)return;
   player.pause();selection={type:'transition',id,rightId};selectedItems=[];activeTransition=pair.type;
   timeline.select('transition',id,rightId);player.seek(pair.center,{allowBeyond:true});setView('transitions');renderInspector();updateToolbar();
+  desktopStudio?.onSelection();
 }
 
 function refresh(){
@@ -210,8 +213,8 @@ function toggleTrackSwitch(id,name){
     +(name==='hidden'&&next?' · 소리는 그대로 납니다. 소리도 빼려면 오디오 트랙을 음소거하세요.':''));
 }
 
-// ── 모니터와 타임라인의 높이 배분 ────────────────────────────────────
-// 세로 영상은 높이가 곧 크기라, 화면이 낮은 노트북에서는 이 경계가 중요합니다.
+// ── 작업 공간과 타임라인의 높이 배분 ─────────────────────────────────
+// PC의 오른쪽 미리보기는 이 높이와 무관하게 전체 세로 공간을 유지합니다.
 let expandedFrom=null;
 const workbenchHeight=()=>$('workbench')?.getBoundingClientRect().height||0;
 const currentTimelineHeight=()=>Math.round($('timelineScroll')?.closest('.timeline-panel')?.getBoundingClientRect().height||0);
@@ -221,6 +224,9 @@ function applyTimelineHeight(height,{store=true}={}){
   const next=clampTimelineHeight(height,workbenchHeight());
   if(next===null)return null;
   document.documentElement.style.setProperty('--timeline-h',next+'px');
+  const separator=$('timelineResizer');
+  separator.setAttribute('aria-valuemin',String(MIN_TIMELINE));separator.setAttribute('aria-valuemax',String(maxTimelineHeight(workbenchHeight())));
+  separator.setAttribute('aria-valuenow',String(next));separator.setAttribute('aria-valuetext',`타임라인 높이 ${next}픽셀`);
   if(store)try{localStorage.setItem(STORAGE_KEY,String(next));}catch{}
   timeline?.render();player.invalidate();
   return next;
@@ -242,6 +248,7 @@ function setupLayout(){
   let saved=null;try{saved=localStorage.getItem(STORAGE_KEY);}catch{}
   const stored=readStoredHeight(saved,workbenchHeight());
   if(stored)applyTimelineHeight(stored,{store:false});
+  else applyTimelineHeight(currentTimelineHeight(),{store:false});
   const bar=$('timelineResizer');
   $('expandMonitor').onclick=()=>setExpanded(!expandedFrom);
   bar.addEventListener('pointerdown',event=>{
@@ -1089,7 +1096,7 @@ async function init(){
   });
   desktopStudio=new DesktopStudio({setView,view:()=>view,route:routeAction,
     openTracking:task=>{if(selection?.type==='clip'&&(task==='mosaic'||selected()?.type==='video'))smartTools.action(task).catch(error=>toast(error.message));},
-    busy:()=>!!(exportCtrl||importing||smartTools.busy||monitor?.dragging||keyframeEditor?.dragging),
+    busy:()=>!!(exportCtrl||importing||smartTools.busy||timeline.dragging||monitor?.dragging||keyframeEditor?.dragging),
     selection:()=>({type:selection?.type,id:selection?.id,count:editingSelection().length}),
     layout:()=>{if(!timeline.dragging&&!monitor?.dragging){timeline.render();player.invalidate();}},
   });

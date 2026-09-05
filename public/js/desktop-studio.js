@@ -1,3 +1,5 @@
+import {DesktopPreviewLayout,DesktopInspectorLayout} from './desktop-layout.js';
+
 // PC는 작업의 목적별로 도구를 보여줍니다. 편집 데이터와 기존 입력 노드는 공유합니다.
 const $=id=>document.getElementById(id);
 const groups={files:{label:'파일',view:'media',icon:'folder'},captions:{label:'자막',view:'captions',icon:'text'},sound:{label:'소리',view:'sounds',icon:'sound'},design:{label:'디자인',view:'quick-format',icon:'design'},tools:{label:'트래킹',view:'mosaic',icon:'tools'}};
@@ -23,7 +25,7 @@ export function desktopInspectorTabs(titles,type){
 
 export class DesktopStudio{
  constructor(hooks){
-  this.hooks=hooks;this.active=false;this.captionTab='styles';this.inspectorTab='basic';this.selectionType=null;this.lastView=null;this.memory={};this.mount();this.syncMode();
+  this.hooks=hooks;this.active=false;this.inspectorOpen=false;this.inspectorFrame=null;this.captionTab='styles';this.inspectorTab='basic';this.selectionType=null;this.lastView=null;this.memory={};this.mount();this.syncMode();
   addEventListener('resize',()=>this.syncMode());
   this.modeObserver=new MutationObserver(()=>this.syncMode());this.modeObserver.observe(document.body,{attributes:true,attributeFilter:['class']});
  }
@@ -41,6 +43,12 @@ export class DesktopStudio{
   for(const [id,symbol] of [['splitClip','split'],['duplicateClip','copy'],['deleteClip','trash']]){const label=$(id).querySelector('span');$(id).replaceChildren();$(id).insertAdjacentHTML('afterbegin',icon(symbol));$(id).append(label);}
   // 원래 버튼을 이동했으므로 PC와 모바일의 실행 명령·활성 조건은 그대로입니다.
   const savedExport=$('openExport');savedExport.innerHTML=icon('export')+'<span>내보내기</span>';
+  const separator=document.createElement('div');separator.id='desktopPreviewResizer';separator.className='desktop-only desktop-preview-resizer';separator.setAttribute('role','separator');separator.setAttribute('aria-orientation','vertical');separator.setAttribute('aria-controls','preview');separator.tabIndex=0;separator.setAttribute('aria-label','미리보기 너비 조절');separator.title='좌우로 끌어 미리보기 너비 조절';document.querySelector('.viewer').prepend(separator);
+  const compact=document.createElement('button');compact.type='button';compact.id='desktopCompactPreview';compact.className='desktop-only desktop-compact-preview';compact.setAttribute('aria-pressed','false');compact.innerHTML='<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 4H4v16h4m8-16h4v16h-4M10 8v8m4-8v8"/></svg><span>작게 보기</span>';$('expandMonitor').before(compact);
+  const timelineSeparator=$('timelineResizer');this.timelineSeparatorLabels={label:timelineSeparator.getAttribute('aria-label'),title:timelineSeparator.getAttribute('title')};
+  this.previewLayout=new DesktopPreviewLayout({workbench:$('workbench'),separator,compactButton:compact,layout:()=>this.hooks.layout(),busy:()=>this.hooks.busy()||!!this.inspectorLayout?.drag,onWidthChange:()=>this.inspectorLayout?.refresh({notify:false})});
+  const inspectorSeparator=document.createElement('div');inspectorSeparator.id='desktopInspectorResizer';inspectorSeparator.className='desktop-only desktop-inspector-resizer';inspectorSeparator.setAttribute('role','separator');inspectorSeparator.setAttribute('aria-orientation','vertical');inspectorSeparator.setAttribute('aria-controls','inspector');inspectorSeparator.setAttribute('aria-label','라이브러리와 속성 패널 너비 조절');inspectorSeparator.setAttribute('aria-disabled','true');inspectorSeparator.tabIndex=-1;inspectorSeparator.title='좌우로 끌어 속성 패널 너비 조절';$('inspector').prepend(inspectorSeparator);
+  this.inspectorLayout=new DesktopInspectorLayout({workbench:$('workbench'),separator:inspectorSeparator,layout:()=>this.hooks.layout(),busy:()=>this.hooks.busy()||!!this.previewLayout.drag,available:()=>this.inspectorOpen&&!!this.hooks.selection().type,previewWidth:()=>this.previewLayout.currentWidth()});
   nav.addEventListener('click',event=>{const target=event.target.closest('[data-desktop-group]');if(!target||this.hooks.busy())return;const group=target.dataset.desktopGroup,next=this.memory[group]||groups[group].view;this.hooks.setView(next);if(group==='tools')this.hooks.openTracking?.(next);});
   tabs.addEventListener('click',event=>{const target=event.target.closest('[data-desktop-tab]');if(!target||this.hooks.busy())return;const key=target.dataset.desktopTab;if(desktopGroupForView(this.hooks.view())==='captions'){this.captionTab=key;this.refreshLibrary();}else{this.hooks.setView(key);if(desktopGroupForView(key)==='tools')this.hooks.openTracking?.(key);}});
   inspectorTabs.addEventListener('click',event=>{const target=event.target.closest('[data-desktop-inspector]');if(!target||this.hooks.busy())return;this.inspectorTab=target.dataset.desktopInspector;this.refreshInspector();$('inspectorContent').scrollTop=0;});
@@ -55,12 +63,30 @@ export class DesktopStudio{
  }
  syncMode(){
   const active=!document.body.classList.contains('mobile-ui');if(this.active===active)return;this.active=active;document.body.classList.toggle('desktop-ui',active);
-  if(active){this.refreshLibrary();this.refreshInspector();this.sync();}else{for(const detail of document.querySelectorAll('.desktop-only[open]'))detail.open=false;}
+  this.previewLayout.setActive(active);
+  this.inspectorLayout.setActive(active);
+  const timelineSeparator=$('timelineResizer');
+  if(active){timelineSeparator.setAttribute('aria-label','작업 공간과 타임라인 높이 조절');timelineSeparator.title='작업 공간과 타임라인 높이 조절';this.refreshLibrary();this.refreshInspector();this.sync();this.toggleInspector(this.inspectorOpen);}
+  else{
+   if(this.inspectorFrame!==null){cancelAnimationFrame(this.inspectorFrame);this.inspectorFrame=null;}
+   for(const detail of document.querySelectorAll('.desktop-only[open]'))detail.open=false;
+   document.body.classList.remove('desktop-inspector-hidden','desktop-inspector-open');
+   for(const [attribute,value] of [['aria-label',this.timelineSeparatorLabels.label],['title',this.timelineSeparatorLabels.title]]){if(value===null)timelineSeparator.removeAttribute(attribute);else timelineSeparator.setAttribute(attribute,value);}
+  }
  }
  toggleInspector(open){
-  if(!this.active)return;const narrow=innerWidth<=1000;
-  const next=open??(narrow?!document.body.classList.contains('desktop-inspector-open'):document.body.classList.contains('desktop-inspector-hidden'));
-  document.body.classList.toggle('desktop-inspector-hidden',!next);document.body.classList.toggle('desktop-inspector-open',next);$('toggleInspector').setAttribute('aria-pressed',String(next));this.hooks.layout();
+  if(!this.active)return;
+  const hasSelection=!!this.hooks.selection().type,next=hasSelection&&(open??!this.inspectorOpen),changed=next!==this.inspectorOpen;
+  this.inspectorOpen=next;document.body.classList.toggle('desktop-inspector-hidden',!next);document.body.classList.toggle('desktop-inspector-open',next);
+  const toggle=$('toggleInspector');toggle.disabled=!hasSelection;toggle.setAttribute('aria-pressed',String(next));toggle.setAttribute('aria-expanded',String(next));
+  toggle.setAttribute('aria-label',hasSelection?(next?'속성 패널 닫기':'속성 패널 열기'):'클립을 선택하면 속성을 편집할 수 있습니다');
+  this.inspectorLayout?.refresh({notify:false});
+  // 선택 콜백 다음에 타임라인이 포인터 캡처를 설정하므로 그 전에 노드를 다시 그리지 않습니다.
+  if(changed&&this.inspectorFrame===null)this.inspectorFrame=requestAnimationFrame(()=>{this.inspectorFrame=null;if(this.active)this.hooks.layout();});
+ }
+ onSelection(){
+  if(!this.active)return;
+  this.sync();this.toggleInspector(!!this.hooks.selection().type);
  }
  refreshLibrary(){
   if(!this.active)return;const view=this.hooks.view(),group=desktopGroupForView(view);this.memory[group]=view;
@@ -96,9 +122,9 @@ export class DesktopStudio{
  }
  sync(){
   if(!this.active)return;const state=this.hooks.selection(),key=[state.type,state.id,state.count].join(':');
-  if(key!==this.selectionKey){const previous=this.selectionKey;this.selectionKey=key;this.refreshInspector();if(state.type&&previous!==undefined&&innerWidth<=1000)this.toggleInspector(true);}
+  if(key!==this.selectionKey){this.selectionKey=key;this.refreshInspector();this.toggleInspector(!!state.type);}
   $('desktopDuration').textContent=$('totalDuration').textContent;
   const busy=!!this.hooks.busy();
-  if(this.lastBusy!==busy){this.lastBusy=busy;for(const node of document.querySelectorAll('[data-desktop-group],[data-desktop-tab],[data-desktop-inspector],[data-desktop-action],[data-desktop-command]'))node.disabled=busy;}
+  if(this.lastBusy!==busy){this.lastBusy=busy;for(const node of document.querySelectorAll('[data-desktop-group],[data-desktop-tab],[data-desktop-inspector],[data-desktop-action],[data-desktop-command],#desktopCompactPreview'))node.disabled=busy;$('desktopPreviewResizer').setAttribute('aria-disabled',String(busy));this.inspectorLayout?.refresh({notify:false});}
  }
 }

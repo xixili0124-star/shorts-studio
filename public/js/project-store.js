@@ -530,13 +530,3 @@ export async function loadDraft() {
   await hydrate(record.document,record.assets);
   return true;
 }
-
-/** 권리 문제가 없는 짧은 시험 사운드를 PCM WAV로 생성합니다. */
-export function demoSound(seconds=12) {
-  const rate=24000,n=Math.floor(rate*seconds),bytes=new ArrayBuffer(44+n*2),view=new DataView(bytes);
-  const str=(at,s)=>[...s].forEach((c,i)=>view.setUint8(at+i,c.charCodeAt(0)));
-  str(0,'RIFF');view.setUint32(4,36+n*2,true);str(8,'WAVE');str(12,'fmt ');view.setUint32(16,16,true);view.setUint16(20,1,true);view.setUint16(22,1,true);view.setUint32(24,rate,true);view.setUint32(28,rate*2,true);view.setUint16(32,2,true);view.setUint16(34,16,true);str(36,'data');view.setUint32(40,n*2,true);
-  const notes=[220,261.63,329.63,293.66];
-  for(let i=0;i<n;i++) {const t=i/rate,beat=t%.5,f=notes[Math.floor(t/.5)%4],env=Math.exp(-beat*7)*Math.min(1,t*3,(seconds-t)*3);const v=(Math.sin(2*Math.PI*f*t)*.13+Math.sin(2*Math.PI*f*.5*t)*.06)*env;view.setInt16(44+i*2,Math.round(v*32767),true);}
-  return new File([bytes],'Night pulse · 샘플 사운드.wav',{type:'audio/wav'});
-}

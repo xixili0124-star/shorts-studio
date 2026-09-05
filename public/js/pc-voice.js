@@ -22,7 +22,7 @@ async function readBounded(response,maximum){
 
 async function request(path,payload,{signal,timeout=10000,location=globalThis.location,fetchImpl=globalThis.fetch}={}){
   const transport=pcTransportContext(location);
-  if(!['/status','/references','/delete','/synthesize'].includes(path))throw new Error('지원하지 않는 PC 음성 요청입니다.');
+  if(!['/status','/prepare','/references','/delete','/synthesize'].includes(path))throw new Error('지원하지 않는 PC 음성 요청입니다.');
   check(signal);const ctrl=new AbortController();let expired=false;
   const cancel=()=>ctrl.abort();signal?.addEventListener('abort',cancel,{once:true});
   const timer=setTimeout(()=>{expired=true;ctrl.abort();},timeout);
@@ -51,8 +51,27 @@ async function request(path,payload,{signal,timeout=10000,location=globalThis.lo
 }
 
 export const pcVoiceStatus=options=>request('/status',undefined,options);
+export const preparePcVoice=options=>request('/prepare',{consent:true},options);
 export const deleteVoiceReference=(profileId,options)=>request('/delete',{profileId,consent:true},options);
 export const generatePcVoice=(payload,options={})=>request('/synthesize',payload,{timeout:330000,...options});
+
+// 진행률을 추정하지 않고 실제 준비 상태를 확인합니다. 취소는 기다리기만 중단합니다.
+export async function waitForPcVoice({signal,onStatus=()=>{},status=pcVoiceStatus,interval=1500,timeout=2*60*60*1000}={}){
+  const deadline=Date.now()+timeout;
+  while(Date.now()<deadline){
+    check(signal);const current=await status({signal});check(signal);onStatus(current);
+    if(current.state==='ready')return current;
+    if(current.preparation?.state==='failed')throw new Error(current.preparation.message||'음성 준비를 마치지 못했습니다. 다시 시도해 주세요.');
+    if(['restart-required','stopping'].includes(current.state))throw new Error(current.message||'음성 기능을 다시 실행해 주세요.');
+    if(current.state==='offline'&&current.configured&&!current.preparation?.active)throw new Error(current.message||'음성 기능을 시작하지 못했습니다. 다시 시도해 주세요.');
+    await new Promise((resolve,reject)=>{
+      const cancelled=()=>{clearTimeout(timer);signal?.removeEventListener('abort',cancelled);reject(abortError());};
+      const timer=setTimeout(()=>{signal?.removeEventListener('abort',cancelled);resolve();},interval);
+      signal?.addEventListener('abort',cancelled,{once:true});if(signal?.aborted)cancelled();
+    });
+  }
+  throw new Error('준비가 오래 걸리고 있습니다. 잠시 후 다시 눌러 진행 상태를 확인해 주세요.');
+}
 
 export async function saveVoiceReference({name,promptText,wav,consent},options={}){
   check(options.signal);

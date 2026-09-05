@@ -1,0 +1,17 @@
+/* 음성 목록은 데스크톱과 모바일에서 같은 개인정보 보관 흐름을 사용합니다. */
+.voice-list-heading{display:flex;justify-content:space-between;align-items:center;margin:22px 0 10px;font-size:12px;color:var(--text,#eceeed)}
+.voice-list-heading>span{color:var(--muted,#92989b);font-variant-numeric:tabular-nums}
+.saved-voice-list{display:grid;gap:8px}
+.saved-voice-row{display:flex;align-items:center;gap:8px;min-width:0;border:1px solid var(--line,#2b2e31);border-radius:9px;background:var(--surface,#17191b);padding:4px}
+.saved-voice-row.selected{border-color:var(--accent,#b8ee63);background:color-mix(in srgb,var(--accent,#b8ee63) 7%,var(--surface,#17191b))}
+.saved-voice-choice{display:flex;align-items:center;gap:11px;min-width:0;flex:1;padding:9px 7px;background:transparent;border:0;color:inherit;text-align:left;cursor:pointer}
+.saved-voice-choice>span:last-child{min-width:0;display:grid;gap:4px}
+.saved-voice-choice strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.saved-voice-choice small{font-size:11px;color:var(--muted,#92989b)}
+.saved-voice-symbol{flex:none;display:grid;place-items:center;width:28px;height:28px;border-radius:50%;background:var(--surface-2,#232628);color:var(--accent,#b8ee63);font-size:18px}
+.saved-voice-delete{flex:none;display:grid;place-items:center;width:32px;height:32px;border:0;border-radius:6px;background:transparent;color:var(--muted,#92989b);font-family:Arial,sans-serif;font-size:23px;line-height:1;cursor:pointer}
+.saved-voice-delete:hover{background:#653a343f;color:#ffada0}
+.saved-voice-choice:focus-visible,.saved-voice-delete:focus-visible{outline:2px solid var(--accent,#b8ee63);outline-offset:2px}
+.saved-voice-choice:disabled,.saved-voice-delete:disabled{opacity:.45;cursor:default}
+.voice-list-empty{padding:22px 12px;text-align:center;border:1px dashed var(--line,#2b2e31);border-radius:9px;color:var(--muted,#92989b);font-size:12px}
+body.mobile-ui .saved-voice-delete{width:42px;height:42px}

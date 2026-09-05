@@ -1,19 +1,16 @@
-# 샘플 소재 출처
+# 예시 영상 출처
 
-샘플 사진은 사용자가 자신의 소재로 교체할 수 있는 시연용 이미지입니다. 원본 다운로드에 사용한 사진을 그대로 보관하며 AI로 사진을 수정하지 않았습니다.
+기존 서울 사진 3장과 합성 배경음악·예시 자막/그래픽은 기본 프로젝트에서 제거했습니다. 새 예시는 실제 촬영 영상 세 편이며, 정지 사진에 움직임을 합성한 파일이 아닙니다. 원본 촬영자의 CC0 공개 고지를 확인했습니다(2026-09-06).
 
-| 파일 | 작가 및 원본 페이지 |
-| --- | --- |
-| `public/demo/seoul-01.jpg` | [Stéphan Valentin / Unsplash](https://unsplash.com/photos/buildings-with-pathway-surround-by-people-wepDTOWs4d0) |
-| `public/demo/seoul-02.jpg` | [Andrea De Santis / Unsplash](https://unsplash.com/photos/CGSYtth5Bdw) |
-| `public/demo/seoul-03.jpg` | [Andrea De Santis / Unsplash](https://unsplash.com/photos/yCVLNvXSK6A) |
+| 파일 | 촬영자·원본 | 발췌 구간 | 이용 조건 |
+| --- | --- | --- | --- |
+| `public/demo/portrait.mp4` | [Msahique / Raw Video.webm](https://commons.wikimedia.org/wiki/File:Raw_Video.webm) | 3–15초 | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `public/demo/cat-walking.mp4` | [Dzkouslavia / Black Cat walking.webm](https://commons.wikimedia.org/wiki/File:Black_Cat_walking.webm) | 0–10초 | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
+| `public/demo/waves.mp4` | [Rhetos / Salzwiesenwellen (Horumersiel).webm](https://commons.wikimedia.org/wiki/File:Salzwiesenwellen_(Horumersiel).webm) | 2–12초 | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) |
 
-이용 조건: [Unsplash License](https://unsplash.com/license). 사진을 제품의 홍보물로 확대 사용하기 전에는 해당 장면의 별도 권리도 확인하세요.
-
-샘플 사운드는 `demoSound()`가 생성하는 PCM 합성음으로, 상용 음악이나 TTS 음질 샘플이 아닙니다.
+H.264/AAC MP4로 변환하고 해상도를 낮췄으며 원본 녹음 소리를 유지했습니다. 고양이 원본의 불연속 오디오 시각은 재샘플링하여 영상 시작부터 끝까지 연속된 시간축으로 맞췄습니다. [예시 매니페스트](public/demo/manifest.json)에 다운로드 원본, 발췌 구간, 해상도·길이·용량 및 SHA-256을 기록했습니다. 인물이 이 제품을 추천한다는 뜻은 아니며, 예시 영상은 편집 기능을 시험하기 위한 것입니다. 한국어 자동자막 품질 평가는 별도 한국어 영상으로 진행해야 합니다.
 
 `public/og.png`는 이 실험판을 위해 생성한 AI 이미지입니다. 앱의 실제 스크린샷이 아닙니다.
-
 
 ## 한국어·영문 폰트 64종
 
@@ -95,6 +92,8 @@
 기존 Kenney·OpenGameArt 효과음 24종은 기본 라이브러리와 배포 파일에서 제거했습니다. 현재 라이브러리는 사용자가 직접 제공한 MP3 37개만 정적 파일로 읽으며, 실행 중 음원을 합성하거나 외부 API를 호출하지 않습니다. 원본 음질과 길이는 바꾸지 않고 웹 경로에 안전한 영문 파일명만 적용했습니다.
 
 이 파일들에는 재배포 또는 상업적 사용을 허용한다는 라이선스 자료가 함께 제공되지 않았습니다. 특히 배달의민족·배그·리그 오브 레전드·GTA·드래곤볼 등 브랜드나 저작물이 연상되는 음원은 공개 서비스와 유료 영상에 포함하기 전에 권리자 허락 또는 해당 음원의 명확한 이용 조건을 확인해야 합니다. 현재 파일을 CC0나 무료 상업용 음원으로 표시하지 않습니다.
+
+클릭·촬영 / 알림·완료 / 오류·의문 / 등장·상승 / 타격·폭발 / 코믹·리액션 / 드럼·긴장 / 게임·무기 / 금전으로 나눕니다. 분류 변경은 원본 파일과 이용 권리를 바꾸지 않습니다.
 
 [효과음 매니페스트](public/sounds/manifest.json)에 편집기 ID, 원래 파일명, 재생시간, 용량, SHA-256을 기록했습니다. 기존 프로젝트에 이미 저장된 예전 효과음 파일은 변경하지 않습니다. 새 기본 효과음은 자막 인식에 포함하는 음성이 아니라 효과음 트랙으로 취급합니다.
 

@@ -358,3 +358,13 @@ body.desktop-ui:not(.mobile-ui) .keyframe-row{padding:6px;border-radius:5px;back
   body.desktop-ui:not(.mobile-ui) .desktop-project-facts{margin-top:16px;margin-bottom:15px;padding-top:12px;padding-bottom:12px}
   body.desktop-ui:not(.mobile-ui) .desktop-quick-action{padding:11px 0}
 }
+
+/* 트랙명과 배지는 제어 버튼 수에 따라 눌리지 않도록 독립 폭을 보장합니다. */
+body.desktop-ui:not(.mobile-ui) .track-heads{width:236px;flex:0 0 236px}
+body.desktop-ui:not(.mobile-ui) .track-head .track-selector{gap:8px;padding:0 5px;min-width:110px}
+body.desktop-ui:not(.mobile-ui) .track-head .track-selector .track-code{display:grid;place-items:center;width:24px;min-width:24px;height:24px;flex:0 0 24px;font:12px/1 Consolas,monospace;padding:0}
+body.desktop-ui:not(.mobile-ui) .track-head .track-selector strong{font-size:12px;min-width:72px;overflow:visible;text-overflow:clip}
+body.desktop-ui:not(.mobile-ui) .track-head .track-selector small,body.desktop-ui:not(.mobile-ui) .ruler-spacer small{display:none}
+body.desktop-ui:not(.mobile-ui) .track-head .remove-track:disabled{display:none}
+body.desktop-ui:not(.mobile-ui) .brand-mark{overflow:hidden}
+body.desktop-ui:not(.mobile-ui) .brand-mark img{display:block;width:30px;height:30px;object-fit:cover;border-radius:7px;flex:none}

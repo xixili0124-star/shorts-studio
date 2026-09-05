@@ -13,7 +13,7 @@ import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight} fro
 import {keyframeValue} from '../public/js/keyframes.js';
 import {cropTrackingAt} from '../public/js/crop-tracking.js';
 import {project,newClipDefaults,buildLayout,layersAt,clipAt,anchorItem,syncAnchoredItems,clipFadeGain,clipDuration,clipStartTime,pinClipPositions,transitionPairs,totalDuration,timelineTracks,trackIdFor,trackLabel,trackItems,migrateTimeline,addTimelineTrack,removeTimelineTrack,TRACK_ROLES} from '../public/js/state.js';
-import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,packProject,unpackProject,validateDocument,clearAssets,waveformOf,demoSound} from '../public/js/project-store.js';
+import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,packProject,unpackProject,validateDocument,clearAssets,waveformOf} from '../public/js/project-store.js';
 import {encodeWav,transcriptionCaptions} from '../public/js/ai-client.js';
 import {renderFrame,measureVisual,loadFonts} from '../public/js/render.js';
 import {Player} from '../public/js/player.js';
@@ -156,10 +156,6 @@ test('automatic captions use returned timestamps and split speech gaps',()=>{
   const caps=transcriptionCaptions({words:[{word:'hello',start:1.2,end:1.5},{word:'world.',start:1.6,end:2.1},{word:'next',start:3.4,end:3.9}]});
   assert.deepEqual(caps.map(c=>[c.start,c.end,c.text]),[[1.2,2.1,'hello world.'],[3.4,3.9,'next']]);
   assert.deepEqual(transcriptionCaptions({segments:[{text:'real segment',start:9,end:10}]}).map(c=>[c.start,c.end]),[[9,10]]);
-});
-
-test('sample audio is a real PCM WAV with the advertised duration',async()=>{
-  const file=demoSound(2);const v=new DataView(await file.arrayBuffer());assert.equal(v.getUint32(24,true),24000);assert.equal(v.getUint32(40,true),2*24000*2);
 });
 
 test('decoder request survives cloned clip data during undo',async()=>{
@@ -1297,8 +1293,8 @@ test('voice and caption panels stay task focused while optional setup remains ge
     for(const markup of panels){
       assert.doesNotMatch(markup,/pc-install-steps|Windows PC 설치 파일 다운로드|href="[^"]*pc-(?:voice|asr|tracking)-setup\.html|href="[^"]*Shorts-Studio-PC-Setup\.cmd|PC용 로컬 버전|PC 사용 안내/);
     }
-    assert.match(panels[2],/data-smart-action="voice-reference"[^>]*>목소리 등록/);
-    assert.match(panels[2],/data-smart-action="delete-voice-reference"[^>]*>목소리 삭제/);
+    assert.match(panels[2],/data-smart-action="voice-record"[^>]*>녹음/);
+    assert.match(panels[2],/data-smart-action="voice-upload"[^>]*>파일 업로드/);
     assert.match(panels[2],/data-smart-action="voice"[^>]*>내 목소리로 만들기/);
     assert.doesNotMatch(panels[2],/Vox|GPT-SoVITS|PC 연결|data-smart-action="pc-help"/);
     assert.match(panels[3],/data-smart-action="captions"[^>]*>자동 자막 만들기/);
@@ -2090,8 +2086,8 @@ test('voice mode keeps all choices while hiding implementation and connection de
   const owner={voice:{engine:'local',text:'원고 유지',voice:'F1',speed:1,steps:5,systemVoice:'',accepted:false},pcVoice:{status:null,error:'',checking:false,profileId:'',accepted:false},pcVoiceMarkup:StudioTools.prototype.pcVoiceMarkup};const host={innerHTML:''};
   try{
     StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/기본 음성/);assert.match(host.innerHTML,/원고 유지/);assert.match(host.innerHTML,/value="device"/);assert.match(host.innerHTML,/value="pc"/);assert.doesNotMatch(host.innerHTML,/Supertonic|모델·엔진|276MB/);
-    owner.voice.engine='pc';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/data-smart-action="voice-reference"/);assert.match(host.innerHTML,/data-smart-action="delete-voice-reference"/);assert.match(host.innerHTML,/data-smart-action="voice" disabled/);assert.match(host.innerHTML,/원고 유지/);assert.doesNotMatch(host.innerHTML,/http:\/\/127\.0\.0\.1|data-smart-action="pc-help"|PC 연결|Vox|GPT-SoVITS/);
-    assert.match(host.innerHTML,/<strong>내 목소리<\/strong>/);
+    owner.voice.engine='pc';StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/data-smart-action="voice-record"/);assert.match(host.innerHTML,/data-smart-action="voice-upload"/);assert.doesNotMatch(host.innerHTML,/data-smart-action="delete-voice-reference"/);assert.match(host.innerHTML,/data-smart-action="voice" disabled/);assert.match(host.innerHTML,/원고 유지/);assert.doesNotMatch(host.innerHTML,/http:\/\/127\.0\.0\.1|data-smart-action="pc-help"|PC 연결|Vox|GPT-SoVITS/);
+    assert.match(host.innerHTML,/value="pc" selected>내 목소리로 만들기/);
     globalThis.location={protocol:'http:',hostname:'127.0.0.1'};
     owner.pcVoice.status={state:'ready',provider:'voxcpm2',localServer:true,configured:true,profiles:[{id:'ref',name:'saved voice',duration:6,audioAvailable:true}]};owner.pcVoice.profileId='ref';
     StudioTools.prototype.renderVoice.call(owner,host);assert.match(host.innerHTML,/사용할 준비가 됐어요/);assert.doesNotMatch(host.innerHTML,/Vox|48kHz|data-smart-action="voice" disabled/);
@@ -2156,7 +2152,7 @@ test('reference registration refreshes storage state even when the response is l
 test('reference deletion completes and refreshes after its dialog closes',async()=>{
   const savedFetch=globalThis.fetch,savedLocation=globalThis.location,savedConfirm=globalThis.confirm;globalThis.location=pcLocation;globalThis.confirm=()=>true;
   let release,request;globalThis.fetch=async(url,options)=>{request=options;return new Promise(resolve=>{release=resolve;});};
-  const ui=referenceUiOwner();ui.owner.pcVoice.profileId='to-delete';ui.owner.open=()=>{ui.owner.dialog.open=true;};
+  const ui=referenceUiOwner();ui.owner.pcVoice.profileId='to-delete';ui.owner.pcVoice.status={profiles:[{id:'to-delete'}]};ui.owner.open=()=>{ui.owner.dialog.open=true;};
   try{const pending=ui.owner.deleteReference();await new Promise(setImmediate);ui.owner.close();assert.equal(request.signal.aborted,false);
     release(new Response('{"deleted":true}',{headers:{'Content-Type':'application/json'}}));await pending;
     assert.equal(ui.owner.pcVoice.profileId,'');assert.equal(ui.refreshed,1);assert.match(ui.messages[0],/삭제했/);

@@ -5,14 +5,14 @@ import {loadFonts,measureVisual,renderCaptionPreview,renderGraphicPreview} from 
 import {detectEngine,exportVideo} from './exporter.js';
 import {parseSrt,buildSrt} from './srt.js';
 import {uid,clamp,download} from './util.js';
-import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,demoSound,onAssetReady,removeAssetFromLibrary,unusedLibraryAssetIds} from './project-store.js';
+import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,onAssetReady,removeAssetFromLibrary,unusedLibraryAssetIds} from './project-store.js';
 import {Timeline} from './timeline.js';
 import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight,STORAGE_KEY} from './layout.js';
 import {frameTime,timelineCollection,itemRange,splitAvailability,placeVideoClip,planClipTrim,applyClipTrim,setTransition,deleteTimelineItem,planPlacement,placeTimelineItem,currentGap,planItemTrim,applyItemTrim} from './timeline-edits.js';
 import {GRAPHICS,CAPTIONS,TRANSITIONS} from './presets.js';
 import {transformOf,alignVisual} from './visual-transform.js';
 import {safeAreaConfig} from './safe-areas.js';
-import {SOUND_EFFECTS,createSoundEffect,soundEffectAssetId} from './sound-effects.js';
+import {SOUND_EFFECTS,SOUND_CATEGORIES,createSoundEffect,soundEffectAssetId} from './sound-effects.js';
 import {ensureFont} from './font-catalog.js';
 import {fontField,refreshFontPickers,wireFontPickers} from './font-picker.js';
 import {typographyControls,textAppearanceControls,captionEffectControls} from './inspector-controls.js';
@@ -26,6 +26,8 @@ import {insertMediaAsset} from './media-insertion.js';
 import {QUICK_FORMAT_PRESETS,quickFormatState,applyQuickFormatPreset,setQuickFormatMargins,setQuickFormatEnabled,setQuickFormatText,setQuickFormatTextStyle} from './quick-format.js';
 import {MobileStudio} from './mobile-studio.js';
 import {DesktopStudio} from './desktop-studio.js';
+import {listSavedQuickFormats,saveQuickFormat,deleteSavedQuickFormat,applySavedQuickFormat} from './saved-quick-formats.js';
+import {DEMO_MEDIA,createDemoMediaFile} from './demo-media.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -122,14 +124,14 @@ function updateToolbar(){
 }
 function select(type,id,options={}){
   selection=type?{type,id,...(options.gap||{})}:null;selectedItems=selectionRefs(selection?[selection]:[]);player.selection=selection;if(options.timeline!==false)timeline.select(type,id);
-  renderInspector();player.invalidate();keyframeEditor?.update();if(view==='media')document.querySelectorAll('[data-asset]').forEach(n=>n.classList.toggle('selected',type==='asset'&&n.dataset.asset===id));if(['captions','transitions','mosaic','silence'].includes(view))renderLibrary();
+  renderInspector();player.invalidate();keyframeEditor?.update();if(view==='media')document.querySelectorAll('[data-asset]').forEach(n=>n.classList.toggle('selected',type==='asset'&&n.dataset.asset===id));if(['captions','transitions','mosaic','crop-tracking','silence'].includes(view))renderLibrary();
   updateToolbar();if(window.innerWidth<651)$('workbench').classList.remove('show-library');
   mobileStudio?.onSelection(type);
 }
 function selectMany(refs,primary,options={}){
   selectedItems=selectionRefs(refs);selection=selectedItems.find(ref=>primary&&selectionKey(ref)===selectionKey(primary))||selectedItems.at(-1)||null;
   player.selection=selection;if(options.timeline!==false)timeline.selectMany(selectedItems,selection);
-  renderInspector();player.invalidate();keyframeEditor?.update();updateToolbar();if(['captions','mosaic','silence'].includes(view))renderLibrary();
+  renderInspector();player.invalidate();keyframeEditor?.update();updateToolbar();if(['captions','mosaic','crop-tracking','silence'].includes(view))renderLibrary();
 }
 function selectTransition(id,rightId){
   const pair=currentTransition({id,rightId});if(!pair)return;
@@ -283,6 +285,11 @@ function setView(next){
   mobileStudio?.onViewChange();
 }
 
+function savedQuickFormatMarkup(enabled){
+  let records=[],error='';try{records=listSavedQuickFormats();}catch(e){error=e.message;}
+  return `<section class="saved-quick-formats" aria-label="저장한 퀵포맷"><h3>내 퀵포맷</h3><label class="field-label">이름<input id="quickFormatName" type="text" maxlength="40" placeholder="예: 뉴스 숏츠" value="나의 퀵포맷 ${records.length+1}"></label><button class="button secondary wide" data-quick-save ${enabled?'':'disabled'}>현재 퀵포맷 저장</button>${error?`<p class="note warning">${esc(error)}</p>`:''}<div class="saved-quick-list">${records.map(record=>`<div class="saved-quick-row"><button type="button" data-quick-use="${esc(record.id)}" title="저장한 값으로 적용">${esc(record.name)}<span>적용</span></button><button type="button" data-quick-remove="${esc(record.id)}" aria-label="${esc(record.name)} 퀵포맷 삭제">×</button></div>`).join('')}</div><p class="inspector-note">문구·폰트·색상·위치까지 이 브라우저에 저장합니다.</p></section>`;
+}
+
 function quickFormatMarkup(){
   const current=quickFormatState(project.template),initialized=project.template.quickFormat===true;
   const state=initialized?current:{...current,top:.20,bottom:.20,videoHeight:.60,preset:'balanced',topText:'',bottomText:'',
@@ -307,6 +314,7 @@ function quickFormatMarkup(){
       <div class="quick-format-summary"><span class="eyebrow">QUICK FORMAT</span><strong>상하단 포맷</strong><p>영상 위아래에 원하는 색과 문구 영역을 만듭니다.</p></div>
       <label class="quick-format-toggle"><input type="checkbox" data-quick-enabled ${state.enabled?'checked':''}><span>${state.enabled?'사용 중':'사용'}</span></label>
     </section>
+    ${savedQuickFormatMarkup(state.enabled)}
     <div class="section-label">포맷 선택 <span>${state.preset==='custom'?'직접 조절':'PRESET'}</span></div>
     <div class="quick-format-presets">${presetCards}</div>
     <fieldset class="quick-format-controls" ${disabled}>
@@ -385,11 +393,15 @@ function finishQuickFormatControl(){
 function renderLibrary(){renderLibraryContent();mobileStudio?.refreshPanel();desktopStudio?.refreshLibrary();}
 function renderLibraryContent(){
   presetPreviewObserver?.disconnect();cancelAnimationFrame(presetAnimation);
-  const titles={media:'라이브러리','quick-format':'퀵포맷',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'AI 음성 스튜디오',sounds:'효과음 라이브러리',mosaic:'트래킹 모자이크',silence:'무음 구간 자동 컷'};
+  const titles={media:'라이브러리','quick-format':'퀵포맷',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'AI TTS',sounds:'효과음 라이브러리',mosaic:'모자이크 트래킹','crop-tracking':'크롭 트래킹',silence:'무음 구간 자동 컷'};
   const count=view==='media'?String(libraryAssets().length).padStart(2,'0'):view==='graphics'?String(GRAPHICS.length):view==='captions'?String(CAPTIONS.length):view==='transitions'?String(TRANSITIONS.length):view==='sounds'?String(SOUND_EFFECTS.length):'';
   $('libraryTitle').textContent=titles[view];$('libraryCount').textContent=count;$('libraryCount').hidden=!count;
   const host=$('libraryContent');
   if(['voice','mosaic','silence'].includes(view)){smartTools.render(view,host);return;}
+  if(view==='crop-tracking'){
+    const item=selection?.type==='clip'?selected():null,ready=item?.type==='video';
+    host.innerHTML=`<div class="smart-feature-art crop-feature" aria-hidden="true"><span>⌖</span><strong>대상을 화면의 중심에.</strong></div><p class="preset-intro">사람이나 동물을 선택하면<br>움직임에 맞춰 세로 화면이 따라갑니다.</p><section class="smart-card"><h3>선택 영상</h3><p class="note">${ready?esc(item.name):'타임라인에서 추적할 동영상을 선택하세요.'}</p><button class="button primary wide" data-smart-action="crop-tracking" ${ready?'':'disabled'}>크롭 트래킹 열기</button></section><p class="inspector-note">대상을 박스로 지정하고 추적 결과를 확인한 뒤 적용하세요. 급격한 움직임·가림·장면 전환에서는 다시 지정해야 할 수 있습니다.</p>`;return;
+  }
   if(view==='media'){
     host.innerHTML=`<button class="import-zone" data-action="import"><span class="import-plus">＋</span><strong>파일 가져오기</strong><span>영상 · 이미지 · 오디오를 한곳에</span><small>또는 여기에 파일을 놓아주세요</small></button><div class="filter-tabs" aria-label="라이브러리 파일 종류">${[['all','전체'],['video','영상'],['image','이미지'],['audio','오디오']].map(([key,label])=>`<button data-filter="${key}" class="${mediaFilter===key?'active':''}">${label}</button>`).join('')}</div><label class="search-box"><span>⌕</span><input id="mediaSearch" type="search" placeholder="라이브러리 검색" aria-label="라이브러리 검색" value="${esc(search)}"><kbd>/</kbd></label><div class="asset-tools"><button id="clearAssets" class="button subtle" title="타임라인에서 쓰지 않는 파일만 라이브러리에서 지웁니다">안 쓰는 파일 비우기</button></div><div id="assetGrid" class="asset-grid"></div><p class="library-hint">더블클릭·＋는 재생 막대 위치에 추가합니다.<br>×로 라이브러리에서 삭제할 수 있어요.<br>타임라인에 사용 중인 파일은 기존 클립을 유지합니다.</p>`;
     renderAssets();
@@ -410,7 +422,7 @@ function renderLibraryContent(){
 
   }else if(view==='sounds'){
     host.innerHTML='<p class="preset-intro">컷 사이에 리듬을 더하세요.<br>미리 듣고, ＋ 또는 드래그로 넣을 수 있어요.</p>'+
-      ['전환','클릭','알림','강조'].map(category=>'<div class="section-label">'+category+'</div><div class="sound-list">'+SOUND_EFFECTS.filter(s=>s.category===category).map(s=>'<article class="sound-card" draggable="true" data-preset="sfx:'+s.id+'"><button class="sound-play" data-preview-sound="'+s.id+'" aria-label="'+s.name+' 미리 듣기"><span class="play-symbol" aria-hidden="true"></span></button><div><strong>'+s.name+'</strong><small>'+s.duration.toFixed(2)+'초 · 기본 효과음</small></div><button class="sound-add" data-add-sound="'+s.id+'" aria-label="'+s.name+' 추가">＋</button></article>').join('')+'</div>').join('')+
+      SOUND_CATEGORIES.map(category=>'<div class="section-label">'+category+'</div><div class="sound-list">'+SOUND_EFFECTS.filter(s=>s.category===category).map(s=>'<article class="sound-card" draggable="true" data-preset="sfx:'+s.id+'"><button class="sound-play" data-preview-sound="'+s.id+'" aria-label="'+s.name+' 미리 듣기"><span class="play-symbol" aria-hidden="true"></span></button><div><strong>'+s.name+'</strong><small>'+s.duration.toFixed(2)+'초 · 기본 효과음</small></div><button class="sound-add" data-add-sound="'+s.id+'" aria-label="'+s.name+' 추가">＋</button></article>').join('')+'</div>').join('')+
       '<p class="library-hint">직접 등록한 효과음 37종입니다.<br>공개 배포·상업적 사용 전 각 음원의 이용 권한을 확인하세요.</p><div class="external-sounds"><strong>더 많은 소리를 찾고 있다면</strong><a class="button secondary wide" href="https://www.myinstants.com/ko/instant/app/" target="_blank" rel="noopener noreferrer">Myinstants에서 찾기 ↗</a><p class="inspector-note">외부 사이트입니다. 자동 다운로드·음원 수집은 하지 않습니다. 다운로드 가능 여부와 상업적 재사용 권한은 다르므로, 권리를 확인한 파일만 라이브러리에 가져오세요.</p></div>';
 
   }
@@ -844,18 +856,19 @@ async function loadDemo(){
   const before=captureDocument();clearTimeout(draftTimer);
   try {
   player.pause();project.clips=[];project.overlays=[];project.captions=[];project.audio.tracks=[];project.audio.bgm=null;project.timelineTracks=undefined;project.template.mode='none';
-  setDocumentName('서울의 밤, 짧은 기록');
-  for(let i=1;i<=3;i++){
-    const response=await fetch(`demo/seoul-0${i}.jpg`);if(!response.ok)throw new Error('샘플 사진을 불러오지 못했습니다.');
-    const asset=await addAsset(new File([await response.blob()],`서울의 밤 0${i}.jpg`,{type:'image/jpeg'}),{id:`sample-image-${i}`});
-    const clip=await makeClip(asset.id,{imgDuration:4,ken:i===2?'left':'in',transitionOut:{type:i===3?'cut':'dissolve',duration:.5}});project.clips.push(clip);
+  setDocumentName('움직임을 담은 샘플');
+  let at=0;
+  for(const media of DEMO_MEDIA){
+    toast('예시 영상 준비 중 · '+media.name);
+    const asset=await addAsset(await createDemoMediaFile(media.id),{id:media.id});
+    const result=await insertMediaAsset(asset.id,{time:at,trackId:targetTrack('video',null,true)});
+    const clip=project.clips.find(item=>item.id===result.id);if(clip){clip.fit='contain';clip.bg='black';}
+    at=result.end;
   }
-  const music=await addAsset(demoSound(12),{id:'sample-sound'});project.audio.tracks=[makeAudio(music.id,{volume:.55,trimEnd:11,fadeIn:.5,fadeOut:.8})];
-  project.overlays=[{...newOverlay(0),id:uid(),text:'AFTER\nHOURS',font:'"Black Han Sans"',size:139,x:.5,y:.43,color:'#d1f0a0',anim:'up',end:3.4},{...newOverlay(7.4),...GRAPHICS.find(g=>g.id==='lower'),id:uid(),graphic:'lower',start:7.4,end:10.8,text:'오늘을 기록하다',subtitle:'SEOUL, THROUGH MY EYES'}];
-  project.captions=[{id:uid(),start:.3,end:3.3,text:'익숙한 도시를 새롭게 보는 시간'},{id:uid(),start:4,end:6.8,text:'작은 장면을 모아, 하나의 이야기로'},{id:uid(),start:8,end:10.8,text:'당신의 다음 이야기는 무엇인가요?'}];
-  project.captionStyle={...project.captionStyle,...CAPTIONS.find(c=>c.id==='pill').style};
+  // 새 샘플을 명시적으로 열었을 때만, 더 이상 쓰지 않는 과거 예시 자산을 정리합니다.
+  for(const id of ['sample-image-1','sample-image-2','sample-image-3','sample-sound'])if(assets.has(id))removeAssetFromLibrary(id);
   pinClipPositions();
-  isDemo=true;selectedItems=[];selection={type:'clip',id:project.clips[0].id};history.clear();refresh();player.seek(1.15);$('saveStatus').textContent='샘플 프로젝트';
+  isDemo=true;selectedItems=[];selection={type:'clip',id:project.clips[0].id};history.clear();refresh();player.seek(0);$('saveStatus').textContent='동영상 샘플';toast('동영상 3개와 원음이 준비됐어요.');
   } catch(error){restoreDocument(before);refresh();throw error;}
   });
 }
@@ -964,6 +977,16 @@ function wire(){
     const add=e.target.closest('[data-add-asset]');if(add){e.stopPropagation();placeAsset(add.dataset.addAsset).catch(e=>toast(e.message));return;}
     const remove=e.target.closest('[data-remove-asset]');if(remove){e.preventDefault();e.stopPropagation();removeLibraryAsset(remove.dataset.removeAsset);return;}
     if(e.target.closest('[data-asset-actions]')){e.stopPropagation();return;}
+    const savedQuick=e.target.closest('[data-quick-save],[data-quick-use],[data-quick-remove]');
+    if(savedQuick){
+      if(exportCtrl||importing||smartTools.busy||monitor?.dragging)return;
+      finishQuickFormatControl();
+      try{
+        if(savedQuick.hasAttribute('data-quick-save')){saveQuickFormat(project.template,$('quickFormatName').value);renderLibrary();toast('현재 퀵포맷을 저장했어요. 목록에서 다시 적용할 수 있습니다.');}
+        else if(savedQuick.dataset.quickUse){edit('저장한 퀵포맷 적용',()=>applySavedQuickFormat(project.template,savedQuick.dataset.quickUse));}
+        else{deleteSavedQuickFormat(savedQuick.dataset.quickRemove);renderLibrary();toast('저장한 퀵포맷을 삭제했어요.');}
+      }catch(error){toast(error.message);}return;
+    }
     const quickPreset=e.target.closest('[data-quick-preset]');if(quickPreset){edit('퀵포맷 적용',()=>applyQuickFormatPreset(project.template,quickPreset.dataset.quickPreset));return;}
     const action=e.target.closest('[data-action]');if(action){routeAction(action.dataset.action);return;}
     const filter=e.target.closest('[data-filter]');if(filter){mediaFilter=filter.dataset.filter;renderLibrary();return;}
@@ -1036,6 +1059,7 @@ async function init(){
     layout:mobile=>{if(!mobile){let saved=null;try{saved=localStorage.getItem(STORAGE_KEY);}catch{}const height=readStoredHeight(saved,workbenchHeight());if(height)applyTimelineHeight(height,{store:false});}if(!timeline.dragging&&!monitor?.dragging){timeline.render();player.invalidate();}},
   });
   desktopStudio=new DesktopStudio({setView,view:()=>view,route:routeAction,
+    openTracking:task=>{if(selection?.type==='clip'&&(task==='mosaic'||selected()?.type==='video'))smartTools.action(task).catch(error=>toast(error.message));},
     busy:()=>!!(exportCtrl||importing||smartTools.busy||monitor?.dragging||keyframeEditor?.dragging),
     selection:()=>({type:selection?.type,id:selection?.id,count:editingSelection().length}),
     layout:()=>{if(!timeline.dragging&&!monitor?.dragging){timeline.render();player.invalidate();}},

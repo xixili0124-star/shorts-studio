@@ -6,6 +6,8 @@ import {createHash} from 'node:crypto';
 import {FONTS,ensureFont,ensureFontPreview} from '../public/js/font-catalog.js';
 import * as soundEffectModule from '../public/js/sound-effects.js';
 import {addDecodedAudioAsset,assets} from '../public/js/project-store.js';
+import {DEMO_MEDIA,createDemoMediaFile} from '../public/js/demo-media.js';
+import {Input,BufferSource,ALL_FORMATS,EncodedPacketSink} from '../public/vendor/mediabunny.min.js';
 
 const {SOUND_EFFECTS,createSoundEffect,soundEffectAssetId}=soundEffectModule;
 
@@ -18,6 +20,87 @@ const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 const fontSource=font=>fontSources.fonts.find(item=>item.family===font.family);
 const soundSource=effect=>soundSources.sounds.find(item=>item.id===effect.id);
 const soundBytes=effect=>readFileSync(new URL(soundSource(effect).file,soundRoot));
+const demoRoot=new URL('../public/demo/',import.meta.url);
+const demoSources=JSON.parse(readFileSync(new URL('manifest.json',demoRoot),'utf8'));
+const demoBytes=media=>readFileSync(new URL(media.file,new URL('../public/js/',import.meta.url)));
+
+function mp4Boxes(bytes,start=0,end=bytes.length){
+  const boxes=[];
+  for(let offset=start;offset+8<=end;){
+    const size=bytes.readUInt32BE(offset),type=bytes.toString('ascii',offset+4,offset+8);
+    assert.ok(size>=8&&offset+size<=end,'손상된 MP4 박스 '+type);
+    boxes.push({type,offset,start:offset+8,end:offset+size});offset+=size;
+  }
+  return boxes;
+}
+
+test('new demos contain actual short H.264 video and AAC audio with local CC0 source records',()=>{
+  assert.equal(DEMO_MEDIA.length,3);
+  assert.ok(DEMO_MEDIA.reduce((total,item)=>total+item.bytes,0)<7*1024*1024);
+  for(const name of ['seoul-01.jpg','seoul-02.jpg','seoul-03.jpg'])assert.equal(existsSync(new URL(name,demoRoot)),false);
+  assert.deepEqual(readdirSync(demoRoot).filter(name=>/\.(mp4|jpe?g|wav|webm)$/i.test(name)).sort(),demoSources.videos.map(item=>item.file).sort());
+  for(const media of DEMO_MEDIA){
+    const proof=demoSources.videos.find(item=>item.id===media.id),bytes=demoBytes(media);
+    assert.ok(proof);assert.equal(bytes.length,media.bytes);assert.equal(hash(bytes),media.sha256);
+    assert.equal(media.sha256,proof.sha256);assert.equal(proof.license,'CC0-1.0');assert.equal(proof.hasAudio,true);
+    assert.equal(new URL(proof.sourceUrl).origin,'https://commons.wikimedia.org');
+    assert.equal(new URL(proof.licenseEvidenceUrl).searchParams.get('oldid'),String(proof.sourceRevision));
+    assert.match(proof.licensePageSha256,/^[a-f0-9]{64}$/);assert.ok(credits.includes(proof.sourceUrl));
+    assert.ok(media.duration>=8&&media.duration<=15);assert.equal(proof.fps,30);
+    const top=mp4Boxes(bytes),moov=top.find(box=>box.type==='moov'),mdat=top.find(box=>box.type==='mdat');
+    assert.equal(top[0].type,'ftyp');assert.ok(moov.offset<mdat.offset,'빠른 재생을 위해 moov를 앞에 둡니다');
+    const tracks=mp4Boxes(bytes,moov.start,moov.end).filter(box=>box.type==='trak');
+    const handlers=tracks.map(trak=>{
+      const mdia=mp4Boxes(bytes,trak.start,trak.end).find(box=>box.type==='mdia');
+      const hdlr=mp4Boxes(bytes,mdia.start,mdia.end).find(box=>box.type==='hdlr');
+      return bytes.toString('ascii',hdlr.start+8,hdlr.start+12);
+    });
+    assert.deepEqual(handlers.sort(),['soun','vide']);
+    assert.ok(bytes.includes(Buffer.from('avc1')));assert.ok(bytes.includes(Buffer.from('mp4a')));
+  }
+});
+
+test('demo loading uses local verified videos and rejects stale images, corruption and cancellation',async()=>{
+  await withFetch(async(url,options)=>{
+    const media=DEMO_MEDIA.find(item=>url.pathname.endsWith('/demo/'+demoSources.videos.find(proof=>proof.id===item.id).file));
+    assert.ok(media);assert.equal(options.mode,'same-origin');assert.equal(options.credentials,'omit');assert.equal(options.redirect,'error');
+    assert.equal(url.searchParams.get('v'),media.sha256.slice(0,12));
+    return new Response(demoBytes(media),{headers:{'Content-Length':String(media.bytes)}});
+  },async()=>{
+    for(const media of DEMO_MEDIA){const file=await createDemoMediaFile(media.id);assert.equal(file.name,media.name);assert.equal(file.type,'video/mp4');assert.equal(hash(Buffer.from(await file.arrayBuffer())),media.sha256);}
+  });
+  await withFetch(async()=>{throw new Error('must not fetch');},async()=>{
+    await assert.rejects(()=>createDemoMediaFile('sample-image-1'),/찾지/);
+    const controller=new AbortController();controller.abort();
+    await assert.rejects(()=>createDemoMediaFile(DEMO_MEDIA[0].id,{signal:controller.signal}),error=>error.name==='AbortError');
+  });
+  await withFetch(async()=>new Response('',{status:404}),()=>assert.rejects(()=>createDemoMediaFile(DEMO_MEDIA[0].id),/불러오지/));
+  await withFetch(async()=>new Response(new Uint8Array(30)),()=>assert.rejects(()=>createDemoMediaFile(DEMO_MEDIA[0].id),/완전하지/));
+  if(globalThis.crypto?.subtle){
+    const corrupt=Buffer.from(demoBytes(DEMO_MEDIA[0]));corrupt[100]^=1;
+    await withFetch(async()=>new Response(corrupt),()=>assert.rejects(()=>createDemoMediaFile(DEMO_MEDIA[0].id),/확인하지/));
+  }
+});
+
+test('demo AAC packets form a continuous sample timeline up to the full video duration',async()=>{
+  for(const media of DEMO_MEDIA){
+    const input=new Input({formats:ALL_FORMATS,source:new BufferSource(demoBytes(media))});
+    try{
+      const track=await input.getPrimaryAudioTrack(),config=await track.getDecoderConfig();
+      const sample=1/config.sampleRate,frame=1024/config.sampleRate;
+      assert.ok(await track.getFirstTimestamp()<=sample,media.name+' 처음부터 원음이 있어야 합니다');
+      assert.ok(Math.abs(await track.computeDuration()-media.duration)<=sample,media.name+' 영상 끝까지 원음이 있어야 합니다');
+      const packets=[];
+      for await(const packet of new EncodedPacketSink(track).packets())packets.push(packet);
+      for(let index=0;index<packets.length;index++){
+        const packet=packets[index];
+        assert.ok(packet.duration>0&&packet.duration<=frame+sample,media.name+' AAC 한 프레임보다 긴 패킷 시각이 없어야 합니다');
+        if(index>0){const previous=packets[index-1];assert.ok(Math.abs(packet.timestamp-previous.timestamp-previous.duration)<=sample,media.name+' 중간 원음 시각이 끊기면 안 됩니다');}
+      }
+      const last=packets.at(-1);assert.ok(Math.abs(last.timestamp+last.duration-media.duration)<=sample);
+    }finally{input.dispose();}
+  }
+});
 
 test('font catalog preserves old families and adds verified Korean and Latin previews',()=>{
   assert.ok(FONTS.length>=50&&FONTS.length<=70);
@@ -101,7 +184,7 @@ test('unknown and already cancelled font previews make no network request',async
 
 test('user sound catalog maps all 37 supplied MP3 files without claiming a license',()=>{
   assert.equal(SOUND_EFFECTS.length,37);
-  assert.equal(soundSources.version,3);
+  assert.equal(soundSources.version,4);
   assert.equal(soundSources.origin,'user-supplied');
   assert.equal(soundSources.license,'not-declared');
   assert.equal(soundSources.sounds.length,SOUND_EFFECTS.length);
@@ -132,7 +215,23 @@ test('user sound catalog maps all 37 supplied MP3 files without claiming a licen
 
 test('sound library exposes static files only and has no synthesis fallback',()=>{
   assert.equal('synthesizeEffect' in soundEffectModule,false);
-  assert.deepEqual(Object.keys(soundEffectModule).sort(),['SOUND_EFFECTS','createSoundEffect','soundEffectAssetId']);
+  assert.deepEqual(Object.keys(soundEffectModule).sort(),['SOUND_CATEGORIES','SOUND_EFFECTS','createSoundEffect','soundEffectAssetId']);
+});
+
+test('sound categories cover every file and separate reactions, money, weapons, errors and percussion',()=>{
+  assert.deepEqual(soundEffectModule.SOUND_CATEGORIES,soundSources.categories);
+  assert.equal(soundEffectModule.SOUND_CATEGORIES.length,9);
+  const category=id=>SOUND_EFFECTS.find(effect=>effect.id===id).category;
+  for(const effect of SOUND_EFFECTS)assert.equal(effect.category,soundSource(effect).category);
+  assert.equal(category('reload-1'),category('reload-2'));
+  assert.equal(category('reload-1'),category('gunshot'));
+  assert.notEqual(category('reload-1'),category('mouse-click'));
+  assert.equal(category('cash-register-1'),category('cash-register-2'));
+  assert.notEqual(category('cash-register-1'),category('bell-ding'));
+  assert.equal(category('teemo-laugh'),category('wow'));
+  assert.equal(category('question'),category('error-code'));
+  assert.equal(category('ticking'),category('drum-roll'));
+  assert.notEqual(category('ticking'),category('punch'));
 });
 
 test('replacement sounds cannot reuse a legacy asset with the same catalog name',()=>{

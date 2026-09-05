@@ -17,7 +17,7 @@ import wave
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from unittest.mock import patch, Mock
-from pc_voice import VoiceCloneService, VoiceError, wav_info, MAX_REFERENCE_BODY, local_engine_key, engine_proof
+from pc_voice import VoiceCloneService, VoiceError, wav_info, MAX_REFERENCE_BODY, local_engine_key, engine_proof, reference_registration_lock
 from pc_voice_config import activate_config, provider_of, read_config, settings_path, service_identity
 from vox_voice_engine import VoxEngine, korean_score_text, speech_chunks, validate_request, validate_generation_length
 from pc_voice_engine import EngineASRReservation
@@ -481,7 +481,7 @@ class ServerTests(unittest.TestCase):
         self.call.assert_not_called()
 
     def test_pc_requests_reject_cross_origin_missing_headers_and_consent(self):
-        for route in ('references','delete','synthesize'):
+        for route in ('references','delete','synthesize','prepare'):
             for headers in ({'Origin':'https://evil.test'},{'Origin':'null'},{'Origin':None},
                             {'Host':'evil.test'},{'X-Studio-PC-Voice':None},{'X-Studio-Consent':None},
                             {'Sec-Fetch-Site':'cross-site'}):
@@ -491,6 +491,41 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(self.pc_request(headers={'X-Studio-PC-Voice':None})[0],403)
         self.pc_call.assert_not_called()
         self.assertFalse(self.pc.directory.exists())
+
+    def test_pc_reference_limit_keeps_three_and_allows_replacing_a_deleted_voice(self):
+        profiles = [self.new_reference() for _ in range(3)]
+        with self.assertRaises(VoiceError) as error:
+            self.new_reference()
+        self.assertEqual(error.exception.code, 'PROFILE_LIMIT')
+        self.assertEqual(len(self.pc.profiles()), 3)
+        self.pc.delete(profiles[1]['id'])
+        replacement = self.new_reference()
+        self.assertEqual(len(self.pc.profiles()), 3)
+        self.assertNotIn(replacement['id'], [profile['id'] for profile in profiles])
+
+    def test_reference_registration_limit_is_locked_across_server_instances(self):
+        self.new_reference(); self.new_reference()
+        other = VoiceCloneService(self.pc.directory)
+        data = {'name':'추가 목소리','promptText':'테스트 문장','consent':True,
+                'audio':base64.b64encode(self.pcm_wave()).decode()}
+        with reference_registration_lock(self.pc.directory):
+            with self.assertRaises(VoiceError) as error:
+                other.register(data)
+            self.assertEqual(error.exception.code, 'VOICE_BUSY')
+        other.register(data)
+        with self.assertRaises(VoiceError) as error:
+            self.new_reference()
+        self.assertEqual(error.exception.code, 'PROFILE_LIMIT')
+        self.assertEqual(len(self.pc.profiles()), 3)
+
+    def test_voice_prepare_api_uses_authorized_runtime_without_client_paths(self):
+        runtime = SimpleNamespace(stopping=False, closed=False, prepare=Mock(return_value={'state':'running','active':True}))
+        with patch.object(self.server, 'pc_runtime', runtime, create=True):
+            code, body, _ = self.pc_request('prepare', {'consent':True})
+            self.assertEqual(code, 202)
+            self.assertTrue(json.loads(body)['active'])
+            runtime.prepare.assert_called_once_with({'consent':True})
+        self.pc_call.assert_not_called()
 
     def test_pc_partial_delete_keeps_reference_visible_and_retryable(self):
         original_unlink=Path.unlink

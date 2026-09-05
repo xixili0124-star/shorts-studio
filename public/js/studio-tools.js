@@ -12,11 +12,11 @@ import { clipGeometry, drawClipLayer } from './render.js';
 import { evaluateItem } from './keyframes.js';
 import { withVisualTransform } from './visual-transform.js';
 import { TTS_MODEL, runLocalAI, whisperCaptions, installedVoices, speakInstalled } from './local-ai.js';
-import { isPcVoiceOrigin, pcVoiceStatus, saveVoiceReference, deleteVoiceReference, generatePcVoice, decodeVoiceReference, recordVoiceReference } from './pc-voice.js';
+import { isPcVoiceOrigin, pcVoiceStatus, preparePcVoice, waitForPcVoice, saveVoiceReference, deleteVoiceReference, generatePcVoice, decodeVoiceReference, recordVoiceReference } from './pc-voice.js';
 import { isPcAsrOrigin, pcAsrStatus, pcAsrCaptions, transcribePcAudio } from './pc-asr.js';
 import { transcribeRaw, serverCaptions, isAvailable as sttAvailable } from './transcribe.js';
 import { uid, clamp } from './util.js';
-import {canUsePcEngine,downloadPcVoiceSetup,pcSetupPlatform,pcVoiceSetupRequested,rememberPcVoiceSetupRequest,forgetPcVoiceSetupRequest,PC_VOICE_SETUP_DOWNLOAD} from './pc-connection.js';
+import {canUsePcEngine,isPcSupportedSite,downloadPcVoiceSetup,pcSetupPlatform,pcVoiceSetupRequested,rememberPcVoiceSetupRequest,forgetPcVoiceSetupRequest,PC_VOICE_SETUP_DOWNLOAD} from './pc-connection.js';
 import {PcHelpController} from './pc-help.js';
 import {pcTrackingStatus} from './pc-tracking.js';
 import {browserTrackingModelInfo} from './browser-tracking-models.js';
@@ -215,7 +215,7 @@ export class StudioTools {
   }
   renderVoice(host){
     const v=this.voice,voices=installedVoices();if(!voices.some(x=>x.voiceURI===v.systemVoice))v.systemVoice=voices[0]?.voiceURI||'';
-    const choices=[['local','기본 음성'],['pc','내 목소리'],['device','기기 음성 · 미리듣기']];
+    const choices=[['local','기본 음성'],['pc','내 목소리로 만들기'],['device','기기 음성 · 미리듣기']];
     let settings='';
     if(v.engine==='pc')settings='<div id="pcVoiceSettings">'+this.pcVoiceMarkup()+'</div>';
     else if(v.engine==='local')settings='<div class="voice-card"><div class="voice-avatar">≋</div><div><strong>기본 음성</strong><p>한국어 · 10가지 목소리</p></div></div><label class="field-label">보이스<select data-smart-input="voice-id">'+TTS_MODEL.voices.map(id=>'<option value="'+id+'" '+(id===v.voice?'selected':'')+'>'+(id[0]==='F'?'여성':'남성')+' '+id[1]+'</option>').join('')+'</select></label><label class="field-label">생성 품질<select data-smart-input="voice-steps">'+[[3,'빠르게'],[5,'균형'],[8,'정교하게']].map(([id,label])=>'<option value="'+id+'" '+(id===v.steps?'selected':'')+'>'+label+'</option>').join('')+'</select></label><p class="inspector-note">처음 사용할 때 필요한 파일을 내려받습니다. <a href="vendor/supertonic/MODEL-LICENSE" target="_blank" rel="noopener">이용 조건</a></p>';
@@ -229,20 +229,22 @@ export class StudioTools {
   pcVoiceMarkup(){
     const pc=this.pcVoice,status=pc.status,profiles=status?.profiles||[];
     const state=pc.checking?'checking':status?.state||'unknown';
-    const message=pc.checking?'준비 상태를 확인하는 중…':status?.state==='ready'?'사용할 준비가 됐어요.':status?.state==='starting'?'필요한 기능을 시작하는 중…':status?.state==='busy'?'다른 음성 작업을 마치는 중…':'목소리 등록을 누르면 필요한 준비를 시작합니다.';
-    return '<div class="voice-card"><div class="voice-avatar pc-voice-avatar">♬</div><div><strong>내 목소리</strong><p>등록한 목소리로 음성 만들기</p></div></div><div class="pc-engine-status" data-state="'+state+'" role="status"><span class="status-dot"></span><span>'+message+'</span></div>'+
-      '<label class="field-label">등록한 목소리<select data-smart-input="pc-voice-profile" '+(!profiles.length?'disabled':'')+'>'+(profiles.length?profiles.map(p=>'<option value="'+esc(p.id)+'" '+(pc.profileId===p.id?'selected':'')+'>'+esc(p.name)+(p.audioAvailable===false?' · 다시 등록 필요':'')+'</option>').join(''):'<option>아직 등록한 목소리가 없습니다</option>')+'</select></label><div class="pc-voice-actions">'+button('voice-reference','목소리 등록',pc.checking||state==='busy')+button('delete-voice-reference','목소리 삭제',!pc.profileId||pc.checking||state==='busy')+'</div><p class="inspector-note">잡음 없는 5~10초 음성과 실제로 읽은 문장을 준비해 주세요.</p>';
+    const blocked=pc.checking||['busy','stopping'].includes(state),full=profiles.length>=3;
+    const message=pc.checking?'목소리를 확인하는 중…':status?.state==='ready'?'사용할 준비가 됐어요.':status?.state==='starting'?'필요한 기능을 시작하는 중…':status?.state==='preparing'?'필요한 파일을 준비하는 중…':status?.state==='busy'?'다른 음성 작업을 마치는 중…':'녹음하거나 파일을 올려 나만의 목소리를 만드세요.';
+    return '<div class="pc-voice-actions">'+button('voice-record','녹음',blocked||full,true)+button('voice-upload','파일 업로드',blocked||full)+'</div><div class="voice-list-heading"><strong>저장한 목소리</strong><span>'+profiles.length+' / 3</span></div>'+
+      '<div class="saved-voice-list" role="group" aria-label="저장한 목소리">'+(profiles.length?profiles.map(p=>'<div class="saved-voice-row '+(pc.profileId===p.id?'selected':'')+'"><button class="saved-voice-choice" data-smart-action="select-voice-reference" data-profile-id="'+esc(p.id)+'" aria-pressed="'+(pc.profileId===p.id)+'" '+(blocked?'disabled':'')+'><span class="saved-voice-symbol" aria-hidden="true">♪</span><span><strong>'+esc(p.name)+'</strong><small>'+(p.audioAvailable===false?'파일을 다시 등록해 주세요':Number(p.duration||0).toFixed(1)+'초')+'</small></span></button><button class="saved-voice-delete" data-smart-action="delete-voice-reference" data-profile-id="'+esc(p.id)+'" aria-label="'+esc(p.name)+' 삭제" title="목소리 삭제" '+(blocked?'disabled':'')+'>×</button></div>').join(''):'<p class="voice-list-empty">저장한 목소리가 없습니다.</p>')+'</div>'+
+      (full?'<p class="inspector-note">새 목소리를 저장하려면 목록에서 하나를 삭제해 주세요.</p>':'')+'<div class="pc-engine-status" data-state="'+state+'" role="status"><span class="status-dot"></span><span>'+message+'</span></div>';
   }
   updatePcVoiceStatus(){
     if(this.hooks.view()!=='voice'||this.voice.engine!=='pc')return;
     const host=document.getElementById('pcVoiceSettings');if(!host)return;
     const active=host.contains(document.activeElement)?document.activeElement:null;
-    const input=active?.dataset.smartInput,action=active?.dataset.smartAction;
+    const input=active?.dataset.smartInput,action=active?.dataset.smartAction,profileId=active?.dataset.profileId;
     host.innerHTML=this.pcVoiceMarkup();
-    if(input||action){const next=host.querySelector(input?'[data-smart-input="'+input+'"]':'[data-smart-action="'+action+'"]');if(next&&!next.disabled)next.focus();}
+    if(input||action){const next=host.querySelector(input?'[data-smart-input="'+input+'"]':'[data-smart-action="'+action+'"]'+(profileId?'[data-profile-id="'+profileId+'"]':''));if(next&&!next.disabled)next.focus();}
     const pc=this.pcVoice,profile=pc.status?.profiles?.find(p=>p.id===pc.profileId);
     const create=document.getElementById('libraryContent')?.querySelector('[data-smart-action="voice"]');
-    if(create)create.disabled=pc.checking||pc.status?.state!=='ready'||!profile||profile.audioAvailable===false;
+    if(create)create.disabled=pc.checking||['busy','stopping'].includes(pc.status?.state)||!profile||profile.audioAvailable===false;
   }
   async refreshPcVoice(){
     const pc=this.pcVoice;if(!isPcVoiceOrigin())return pc.status;if(pc.promise)return pc.promise;
@@ -259,8 +261,13 @@ export class StudioTools {
     const status=this.pcVoice.status;
     return status?.localServer===true&&(status.configured===true||status.state==='ready');
   }
+  voiceSetupConsentMarkup(){
+    return '<p class="note">처음 한 번 필요한 파일을 내려받습니다. 약 5GB의 음성 파일과 실행 파일이 필요하며, 저장 공간은 15GB 이상 확보해 주세요. 준비가 끝나면 이어서 사용할 수 있습니다.</p><div class="smart-result-actions">'+button('confirm-voice-setup','동의',false,true)+button('cancel','취소')+'</div>';
+  }
   async beginPcVoiceAction(next){
+    if(['register','record','upload'].includes(next)&&(this.pcVoice.status?.profiles?.length||0)>=3){this.hooks.toast('목소리는 3개까지 저장할 수 있어요. 목록에서 하나를 삭제해 주세요.');return;}
     if(isPcVoiceOrigin()&&!this.pcVoice.status&&!this.pcVoice.checking)await this.refreshPcVoice();
+    if(this.pcVoice.status?.preparation?.active)return this.continuePcVoiceAction(next);
     if(this.pcVoiceInstalled()){forgetPcVoiceSetupRequest();return this.continuePcVoiceAction(next);}
     const platform=pcSetupPlatform(this.navigator);
     if(platform!=='windows'){
@@ -268,8 +275,8 @@ export class StudioTools {
       this.open('내 목소리 기능','<p class="note">내 목소리 기능은 현재 Windows PC에서 준비할 수 있어요. '+device+'에서는 기본 음성으로 바로 만들 수 있습니다.</p><div class="smart-result-actions">'+button('use-browser-voice','기본 음성 사용',false,true)+button('cancel','닫기')+'</div>');
       this.state={kind:'voice-unavailable',next};return;
     }
-    if(!canUsePcEngine()&&pcVoiceSetupRequested()){
-      this.open('내 목소리 준비','<p class="note">앞서 준비한 항목을 이 편집기에서 찾고 있어요.</p>'+progressMarkup);
+    if(!canUsePcEngine()&&(pcVoiceSetupRequested()||isPcSupportedSite())){
+      this.open('내 목소리 준비','<p class="note">이 PC에 준비된 음성 기능을 찾고 있어요.</p>'+progressMarkup);
       this.state={kind:'voice-connect',next};this.progress(NaN,'준비 상태 확인 중…');
       const connected=await this.pcHelp.check(true,{pairStartTimeoutMs:15000});
       if(this.state?.kind!=='voice-connect')return;
@@ -277,12 +284,13 @@ export class StudioTools {
         // 연결 완료 이벤트가 전체 엔진 확인을 이미 시작했어도 같은 요청 결과를 공유합니다.
         await this.refreshPcVoice();
         if(this.pcVoiceInstalled()){forgetPcVoiceSetupRequest();this.close(false);return this.continuePcVoiceAction(next);}
+        if(this.pcVoice.status?.localServer&&this.pcVoice.status?.canPrepare){this.state={kind:'voice-setup',next};this.setBody(this.voiceSetupConsentMarkup());return;}
       }
       this.state={kind:'voice-setup',next};
-      this.setBody('<p class="note">준비 항목을 찾지 못했어요. 받은 준비 파일을 실행했는지 확인하거나 다시 받아 주세요.</p><div class="smart-result-actions">'+button('confirm-voice-setup','준비 파일 다시 받기',false,true)+button('use-browser-voice','기본 음성 사용')+'</div>');
+      this.setBody('<p class="note">이 PC의 연결 프로그램을 찾지 못했어요. 처음 사용한다면 연결 프로그램을 한 번 준비해야 합니다.</p>'+this.voiceSetupConsentMarkup());
       return;
     }
-    this.open('내 목소리 준비','<p class="note">내 목소리 기능을 처음 사용하려면 필요한 파일을 이 기기에 준비해야 합니다. 지금 준비할까요?</p><div class="smart-result-actions">'+button('confirm-voice-setup','동의',false,true)+button('cancel','취소')+'</div>');
+    this.open('내 목소리 준비',this.voiceSetupConsentMarkup());
     this.state={kind:'voice-setup',next};
   }
   async confirmPcVoiceSetup(){
@@ -295,30 +303,48 @@ export class StudioTools {
       this.setBody('<p class="note">설치된 항목을 확인하고 있어요.</p>'+progressMarkup);this.progress(NaN,'준비 상태 확인 중…');
       await this.refreshPcVoice();
     }
+    // 확인 중 창을 닫았다면 늦은 응답으로 설치나 다음 화면을 시작하지 않습니다.
+    if(this.state!==setup||this.dialog?.open===false)return;
     if(this.pcVoiceInstalled()){
+      this.close(false);return this.continuePcVoiceAction(next);
+    }
+    if(this.pcVoice.status?.localServer&&this.pcVoice.status?.canPrepare){
+      await this.run('voice-prepare',async signal=>{
+        this.setBody('<p class="note">필요한 파일을 준비하고 있어요. 완료되면 이어서 열립니다. 창을 닫아도 이 PC의 준비는 계속됩니다.</p>'+progressMarkup);
+        this.progress(NaN,'파일 다운로드 및 준비 중…');
+        const cancel=this.body.querySelector?.('.smart-progress [data-smart-action="cancel"]');if(cancel)cancel.textContent='창 닫기';
+        await preparePcVoice({signal});
+        this.pcVoice.status=await waitForPcVoice({signal,onStatus:status=>{this.pcVoice.status=status;this.progress(NaN,status.state==='starting'?'음성 기능을 시작하는 중…':status.preparation?.message||'파일 다운로드 및 준비 중…');}});
+      });
+      if(this.state!==setup||!this.dialog.open)return;
       this.close(false);return this.continuePcVoiceAction(next);
     }
     if(!downloadPcVoiceSetup(document,this.navigator))throw new Error('이 기기에서는 Windows 준비 파일을 받을 수 없습니다.');
     rememberPcVoiceSetupRequest();
-    this.setBody('<div class="smart-success">준비 파일을 받기 시작했어요.</div><p class="note">브라우저 보안상 받은 파일은 자동으로 실행할 수 없어요. 다운로드가 끝나면 파일을 한 번 실행해 주세요. 준비가 끝난 뒤 목소리 등록을 다시 누르면 자동으로 찾아 시작합니다.</p><a class="button secondary wide" href="'+PC_VOICE_SETUP_DOWNLOAD+'" download="Shorts-Studio-Voice-Setup.cmd">준비 파일 다시 받기</a>'+button('cancel','닫기'));
+    this.setBody('<div class="smart-success">준비 파일을 받기 시작했어요.</div><p class="note">이 PC에 연결 프로그램이 없습니다. 브라우저 보안상 받은 파일을 자동으로 실행할 수 없으므로 처음 한 번 실행해 주세요. 이후에는 설치한 파일을 다시 받지 않고 찾아 실행합니다.</p><a class="button secondary wide" href="'+PC_VOICE_SETUP_DOWNLOAD+'" download="Shorts-Studio-Voice-Setup.cmd">준비 파일 다시 받기</a>'+button('cancel','닫기'));
   }
   async continuePcVoiceAction(next){
-    if(next==='register')return this.openVoiceReference();
+    const reference=['register','record','upload'].includes(next);
+    if(reference&&!this.pcVoice.status?.preparation?.active)return this.openVoiceReference(next);
     if(this.pcVoice.status?.state!=='ready'){
-      await this.refreshPcEngines();
-      if(this.pcVoice.status?.state!=='ready'){this.hooks.toast('내 목소리 기능을 시작하고 있어요. 잠시 후 다시 눌러 주세요.');return;}
+      this.open('내 목소리 준비',progressMarkup);const state={kind:'voice-wait'};this.state=state;
+      await this.run('voice-wait',async signal=>{this.pcVoice.status=await waitForPcVoice({signal,onStatus:status=>{this.pcVoice.status=status;this.progress(NaN,status.preparation?.message||'음성 기능을 시작하는 중…');}});});
+      if(this.state!==state||!this.dialog.open)return;this.close(false);
     }
-    return this.openVoice();
+    return reference?this.openVoiceReference(next):this.openVoice();
   }
-  openVoiceReference(){
-    if(!isPcVoiceOrigin()||!this.pcVoice.status?.localServer)throw new Error('목소리 등록 버튼을 눌러 필요한 준비를 먼저 마쳐 주세요.');
-    this.open('내 목소리 등록','');
-    this.state={kind:'voice-reference',name:'내 목소리',promptText:'안녕하세요. 제 목소리로 새로운 이야기를 들려드릴게요.',consent:false,reference:null};
+  openVoiceReference(mode='record'){
+    if(!isPcVoiceOrigin()||!this.pcVoice.status?.localServer)throw new Error('음성 기능 준비를 먼저 마쳐 주세요.');
+    if((this.pcVoice.status.profiles?.length||0)>=3)throw new Error('목소리는 3개까지 저장할 수 있어요. 목록에서 하나를 삭제해 주세요.');
+    this.open(mode==='upload'?'목소리 파일 업로드':'목소리 녹음','');
+    this.state={kind:'voice-reference',mode:mode==='upload'?'upload':'record',name:'내 목소리 '+((this.pcVoice.status.profiles?.length||0)+1),promptText:mode==='upload'?'':'안녕하세요. 제 목소리로 새로운 이야기를 들려드릴게요.',consent:false,reference:null};
     this.renderVoiceReference();
   }
   renderVoiceReference(){
     const s=this.state;if(s?.kind!=='voice-reference')return;
-    this.setBody('<p class="note">조용한 곳에서 평소 말투로 <strong>3~10초</strong> 녹음하세요. 아래 문장을 읽거나, 파일을 고르면 실제로 읽은 내용으로 바꿔 주세요.</p><label class="field-label">목소리 이름<input data-smart-input="reference-name" maxlength="60" value="'+esc(s.name)+'"></label><label class="field-label">녹음에서 읽은 문장<textarea data-smart-input="reference-prompt" maxlength="500">'+esc(s.promptText)+'</textarea></label><div class="reference-recorder"><span class="record-indicator" aria-hidden="true"></span><p id="referenceRecordingStatus" role="status">마이크는 녹음 버튼을 눌렀을 때만 켜집니다.</p></div><div class="smart-result-actions">'+button('record-voice-reference','마이크로 녹음',false,true)+button('stop-voice-reference','녹음 마치기',true)+'</div><label class="reference-file-label">또는 짧은 음성 파일 선택<input type="file" accept="audio/*,.wav,.mp3,.m4a,.webm" data-smart-input="reference-file"></label>'+(s.reference?'<div class="reference-preview"><strong>'+s.reference.duration.toFixed(2)+'초 · 참고 음성</strong><audio controls src="'+s.previewUrl+'" aria-label="참고 음성 미리듣기"></audio></div>':'')+'<label class="smart-consent"><input type="checkbox" data-smart-input="reference-consent" '+(s.consent?'checked':'')+'><span>본인 또는 사용 허락을 받은 목소리입니다. 참고 녹음과 읽은 문장을 이 기기에 보관하는 데 동의합니다.</span></label>'+progressMarkup+button('save-voice-reference','이 목소리 등록',!s.reference,true)+'<p class="inspector-note">참고 음성은 라이브러리·자동 저장·프로젝트 파일에 포함되지 않으며, 목소리 삭제 시 함께 지워집니다.</p>');
+    const upload=s.mode==='upload';
+    const source=upload?'<label class="reference-file-label">음성 파일 선택<input type="file" accept="audio/*,.wav,.mp3,.m4a,.webm" data-smart-input="reference-file"></label>':'<div class="reference-recorder"><span class="record-indicator" aria-hidden="true"></span><p id="referenceRecordingStatus" role="status">아래 문장을 읽으며 녹음해 주세요.</p></div><div class="smart-result-actions">'+button('record-voice-reference','녹음 시작',false,true)+button('stop-voice-reference','녹음 마치기',true)+'</div>';
+    this.setBody('<p class="note">'+(upload?'잡음 없이 한 사람의 목소리가 담긴 3~10초 파일을 선택하세요.':'조용한 곳에서 평소 말투로 3~10초 녹음하세요.')+'</p>'+source+'<label class="field-label">목소리 이름<input data-smart-input="reference-name" maxlength="60" value="'+esc(s.name)+'"></label><label class="field-label">녹음에서 읽은 문장<textarea data-smart-input="reference-prompt" maxlength="500" placeholder="파일에서 실제로 말한 내용을 그대로 적어 주세요.">'+esc(s.promptText)+'</textarea></label>'+(s.reference?'<div class="reference-preview"><strong>'+s.reference.duration.toFixed(2)+'초 · 참고 음성</strong><audio controls src="'+s.previewUrl+'" aria-label="참고 음성 미리듣기"></audio></div>':'')+'<label class="smart-consent"><input type="checkbox" data-smart-input="reference-consent" '+(s.consent?'checked':'')+'><span>본인 또는 사용 허락을 받은 목소리입니다. 녹음과 읽은 문장을 이 PC에 저장하는 데 동의합니다.</span></label>'+progressMarkup+button('save-voice-reference','목소리 저장',!s.reference,true)+'<p class="inspector-note">목소리는 이 PC에만 저장됩니다. 프로젝트 파일에는 포함되지 않습니다.</p>');
   }
   async loadVoiceReference(file){
     if(!file)return;const s=this.state;if(s?.kind!=='voice-reference'||this.referenceRecording)return;
@@ -346,15 +372,15 @@ export class StudioTools {
       this.hooks.toast(closed?'창은 닫혔지만 PC에 목소리 등록은 완료됐어요. 등록 목록에서 확인·삭제할 수 있습니다.':'내 목소리를 등록했어요. 원고를 입력해 음성을 만들어 보세요.');
     });}finally{await this.refreshPcVoice();}
   }
-  async deleteReference(){
-    const id=this.pcVoice.profileId;if(!id)return;
+  async deleteReference(id=this.pcVoice.profileId){
+    if(!id||!this.pcVoice.status?.profiles?.some(profile=>profile.id===id))return;
     if(!confirm('이 기기에 보관한 참고 녹음과 읽은 문장을 삭제할까요? 이미 만든 음성과 프로젝트는 유지됩니다.'))return;
     this.open('참고 음성 삭제',progressMarkup);
     const state={kind:'reference-delete'};this.state=state;
     try{await this.run('reference-delete',async()=>{
       this.progress(NaN,'참고 음성 삭제 중… 창을 닫아도 삭제는 완료될 수 있습니다.');
       const cancel=this.body.querySelector('.smart-progress [data-smart-action="cancel"]');if(cancel)cancel.textContent='창 닫기';
-      await deleteVoiceReference(id);this.pcVoice.profileId='';this.job=null;
+      await deleteVoiceReference(id);if(this.pcVoice.profileId===id)this.pcVoice.profileId='';this.job=null;
       if(this.state===state&&this.dialog.open)this.close(false);
       this.hooks.toast('PC에 보관한 참고 음성을 삭제했어요.');
     });}finally{await this.refreshPcVoice();}
@@ -370,11 +396,13 @@ export class StudioTools {
     if(action==='use-browser-captions'){this.captionEngine='local';this.captionEngineChosen=true;this.hooks.renderLibrary();return;}
     if(action==='pc-voice-refresh')return this.refreshPcVoice();
     if(action==='use-browser-voice'){if(this.dialog?.open)this.close(false);this.voice.engine='local';this.hooks.renderLibrary();return;}
-    if(action==='voice-reference')return this.beginPcVoiceAction('register');
+    if(action==='voice-reference'||action==='voice-record')return this.beginPcVoiceAction('record');
+    if(action==='voice-upload')return this.beginPcVoiceAction('upload');
+    if(action==='select-voice-reference'){const id=node?.dataset.profileId;if(this.pcVoice.status?.profiles?.some(profile=>profile.id===id)){this.pcVoice.profileId=id;this.updatePcVoiceStatus();}return;}
     if(action==='confirm-voice-setup')return this.confirmPcVoiceSetup();
     if(action==='record-voice-reference')return this.recordVoice();
     if(action==='save-voice-reference')return this.saveReference();
-    if(action==='delete-voice-reference')return this.deleteReference();
+    if(action==='delete-voice-reference')return this.deleteReference(node?.dataset.profileId);
     if(action==='mosaic')return this.openMosaic();
     if(action==='crop-tracking')return this.openCropTracking();
     if(action==='track-crop')return this.analyzeCropTracking();

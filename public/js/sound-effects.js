@@ -2,6 +2,8 @@ import {SOUND_CATALOG} from './sound-catalog.js';
 
 // 사용자가 제공한 정적 MP3만 읽습니다. 실행 중 음원을 합성하거나 외부 API를 호출하지 않습니다.
 export const SOUND_EFFECTS = SOUND_CATALOG;
+// 목록과 분류가 어긋나거나 새 분류의 음원이 누락되지 않도록 한 카탈로그를 공유합니다.
+export const SOUND_CATEGORIES = Object.freeze([...new Set(SOUND_EFFECTS.map(effect=>effect.category))]);
 
 /** 같은 이름의 이전 음원을 새 음원으로 잘못 재사용하지 않도록 원본 해시로 구분합니다. */
 export function soundEffectAssetId(id) {

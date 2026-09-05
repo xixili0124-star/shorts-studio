@@ -1,6 +1,7 @@
 """Install pinned VoxCPM2 in its own Windows environment; never upload voice data."""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
+from contextlib import contextmanager
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,7 @@ import sys
 
 from pc_voice_config import activate_config, read_config, settings_path
 from pc_installation import local_data_dir, register_installation
+from pc_asr_process import WindowsJob
 from setup_pc_voice import download, prepare_uv, sha256, PYTHON_VERSION
 
 ROOT = Path(__file__).resolve().parent
@@ -28,6 +30,29 @@ MODEL_FILES = {
     'special_tokens_map.json': (1632, None),
     'README.md': (7939, None),
 }
+
+
+@contextmanager
+def installation_lock(local):
+    """여러 편집기와 수동 설치가 같은 파일을 동시에 변경하지 못하게 합니다."""
+    import msvcrt
+    local.mkdir(parents=True, exist_ok=True)
+    path = local / '.voice-setup.lock'
+    if path.is_symlink():
+        raise RuntimeError('Invalid voice setup lock.')
+    with path.open('a+b') as stream:
+        if path.stat().st_size == 0:
+            stream.write(b'0'); stream.flush()
+        stream.seek(0)
+        try:
+            msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+        except OSError:
+            raise RuntimeError('Voice preparation is already running. Wait for it to finish.') from None
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
 
 
 def prepare_models(engine):
@@ -102,24 +127,29 @@ def main():
     parser.add_argument('--prepare-only', action='store_true', help='Verify installation without activating it')
     parser.add_argument('--python', type=Path, help='Existing Python 3.11 used to create a separate venv')
     parser.add_argument('--uv', type=Path, help='Existing uv executable')
+    parser.add_argument('--job-name', help=argparse.SUPPRESS)
     args = parser.parse_args()
     if os.name != 'nt':
         raise RuntimeError('This installer supports Windows x64.')
+    if args.job_name:
+        # 하위 다운로드·설치 프로세스도 우리 실행기 종료 시 함께 정리합니다.
+        WindowsJob.join_current(args.job_name)
     if not args.yes and input('Download VoxCPM2 weights (~5 GB) and a separate runtime (several GB)? [y/N] ').strip().lower() != 'y':
         return
     local = args.local_dir.resolve() if args.local_dir else local_data_dir(ROOT)
     engine = (args.engine_dir or local / 'vox-engine').resolve()
-    engine.mkdir(parents=True, exist_ok=True)
-    if shutil.disk_usage(engine).free < 15 * 1024**3:
-        raise RuntimeError('Please make at least 15 GB of free disk space available.')
-    model = prepare_models(engine)
-    if args.download_only:
-        return
-    python = prepare_runtime(engine, args.device, args.python, args.uv)
-    if args.prepare_only:
-        print('VoxCPM2 files and inference imports verified. Existing engine is still active.', flush=True)
-        return
-    write_config(engine, model, python, args.device, local)
+    with installation_lock(local):
+        engine.mkdir(parents=True, exist_ok=True)
+        if shutil.disk_usage(engine).free < 15 * 1024**3:
+            raise RuntimeError('Please make at least 15 GB of free disk space available.')
+        model = prepare_models(engine)
+        if args.download_only:
+            return
+        python = prepare_runtime(engine, args.device, args.python, args.uv)
+        if args.prepare_only:
+            print('VoxCPM2 files and inference imports verified. Existing engine is still active.', flush=True)
+            return
+        write_config(engine, model, python, args.device, local)
     print('VoxCPM2 is installed. Save your project, stop the old PC launcher, then run start-pc-voice.cmd.', flush=True)
 
 

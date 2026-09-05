@@ -434,6 +434,65 @@ class RuntimeTests(unittest.TestCase):
         self.addCleanup(socket.stop)
         self.addCleanup(self.runtime.close)
 
+    def test_voice_preparation_requires_consent_and_never_accepts_paths_or_commands(self):
+        for payload in ({}, {'consent':False}, {'consent':True,'path':'arbitrary'}, {'consent':True,'command':'arbitrary'}):
+            with self.assertRaises(VoiceError) as error:
+                self.runtime.prepare(payload)
+            self.assertEqual(error.exception.code, 'VOICE_SETUP_CONSENT')
+        self.launch.assert_not_called()
+
+    def test_voice_preparation_reuses_an_existing_installation_without_download(self):
+        self.mocks['verified_engine'].return_value = True
+        with patch.object(pc_runtime.threading, 'Thread') as worker:
+            result = self.runtime.prepare({'consent':True})
+            self.assertEqual(result['state'], 'installed')
+            worker.assert_not_called()
+        self.launch.assert_not_called()
+
+    def test_voice_preparation_starts_one_worker_and_rejects_shutdown_during_setup(self):
+        with patch.object(self.runtime, 'ensure_running', return_value=False), patch.object(pc_runtime.threading, 'Thread') as worker:
+            first = self.runtime.prepare({'consent':True})
+            second = self.runtime.prepare({'consent':True})
+            self.assertTrue(first['active'] and second['active'])
+            worker.assert_called_once()
+            worker.return_value.start.assert_called_once()
+            with self.assertRaises(VoiceError) as error:
+                self.runtime.prepare_shutdown(self.asr, self.tracking)
+            self.assertEqual(error.exception.code, 'PC_BUSY')
+
+    def test_voice_preparation_runs_fixed_hidden_installer_and_verifies_before_completion(self):
+        self.process.wait.return_value = 0
+        self.runtime.preparation = {'state':'running','active':True,'message':'preparing'}
+        with patch.object(self.runtime, 'ensure_running', return_value=True) as verify:
+            self.runtime._prepare_work()
+            verify.assert_called_once()
+        arguments, options = self.launch.call_args
+        self.assertEqual(arguments[0], [sys.executable, str(pc_runtime.ROOT/'setup_vox_voice.py'), '--yes', '--local-dir', str(self.local), '--job-name', self.job.name])
+        self.assertEqual(options['creationflags'], getattr(pc_runtime.subprocess, 'CREATE_NO_WINDOW', 0))
+        self.assertEqual(options['stdout'], pc_runtime.subprocess.DEVNULL)
+        self.assertEqual(self.runtime.preparation['state'], 'complete')
+        self.job.close.assert_called_once()
+
+    def test_failed_voice_preparation_is_visible_and_does_not_start_inference(self):
+        self.process.wait.return_value = 1
+        self.runtime.preparation = {'state':'running','active':True,'message':'preparing'}
+        with patch.object(self.runtime, 'ensure_running') as verify:
+            self.runtime._prepare_work()
+            verify.assert_not_called()
+        self.assertEqual(self.runtime.preparation['state'], 'failed')
+        self.assertFalse(self.runtime.preparation['active'])
+
+    def test_voice_setup_cleanup_attempts_both_owned_handles_and_blocks_retry_on_failure(self):
+        self.runtime.setup_process, self.runtime.setup_job = self.process, self.job
+        self.job.close.side_effect = OSError('synthetic cleanup failure')
+        with self.assertRaises(OSError):
+            self.runtime._dispose_setup()
+        self.mocks['stop_process'].assert_called_once_with(self.process)
+        self.assertTrue(self.service.uncertain)
+        self.assertEqual(self.runtime.preparation['state'], 'failed')
+        self.assertIs(self.runtime.setup_job, self.job)
+        self.job.close.side_effect = None
+
     def test_verified_existing_engine_is_never_owned_or_stopped(self):
         self.mocks['verified_engine'].return_value = True
         self.assertTrue(self.runtime.ensure_running())

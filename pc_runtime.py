@@ -4,6 +4,7 @@ from contextlib import ExitStack
 from pathlib import Path
 import socket
 import subprocess
+import sys
 import threading
 import time
 
@@ -30,6 +31,85 @@ class PcVoiceRuntime:
         self.closed = False
         self._shutdown_lease = None
         self._gate_held = False
+        self.preparation = {'state': 'idle', 'active': False, 'message': ''}
+        self.setup_process = self.setup_job = None
+
+    def _dispose_setup(self):
+        """작업 객체 종료가 실패해도 직접 시작한 준비 프로세스는 정리합니다."""
+        failed = False
+        if self.setup_job is not None:
+            try:
+                self.setup_job.close()
+            except Exception:
+                failed = True
+        if self.setup_process is not None:
+            try:
+                stop_process(self.setup_process)
+            except Exception:
+                failed = True
+        if failed:
+            self.service.uncertain = True
+            self.preparation = {'state': 'failed', 'active': False, 'message': '준비 작업의 종료를 확인하지 못했어요. PC 연결 프로그램을 완전히 종료한 뒤 다시 실행해 주세요.'}
+            raise OSError('Voice setup process cleanup was not confirmed.')
+        self.setup_process = self.setup_job = None
+
+    def prepare(self, data):
+        """동의한 사용자의 클릭에 한해 고정된 준비 스크립트를 시작합니다."""
+        if not isinstance(data, dict) or set(data) != {'consent'} or data['consent'] is not True:
+            raise VoiceError('VOICE_SETUP_CONSENT', '필요한 파일 다운로드에 동의해 주세요.', 403)
+        with self.guard:
+            if self.closed or self.stopping or self.service.closed:
+                raise VoiceError('PC_STOPPING', '음성 기능이 종료 중입니다.', 503)
+            if self.preparation['active']:
+                return dict(self.preparation)
+            # 기존 설정을 덮어쓰거나 다른 목소리 엔진을 임의로 교체하지 않습니다.
+            if self.ensure_running():
+                return {'state': 'installed', 'active': False, 'message': '설치한 음성 기능을 시작하고 있어요.'}
+            if os.name != 'nt':
+                raise VoiceError('VOICE_SETUP_PLATFORM', '이 기능은 Windows PC에서 준비할 수 있습니다.', 409)
+            if self.service.lock.locked() or self.service.uncertain:
+                raise VoiceError('VOICE_BUSY', '다른 음성 작업을 마친 뒤 다시 시도해 주세요.', 409)
+            self.preparation = {'state': 'running', 'active': True, 'message': '파일 다운로드 및 준비 중…'}
+            threading.Thread(target=self._prepare_work, daemon=True).start()
+            return dict(self.preparation)
+
+    def _prepare_work(self):
+        """진행 상세·개인 경로·인증 값은 브라우저에 반환하지 않습니다."""
+        try:
+            with self.guard:
+                if self.closed or self.stopping:
+                    return
+                self.setup_job = WindowsJob()
+                arguments = [sys.executable, str(ROOT / 'setup_vox_voice.py'), '--yes', '--local-dir', str(self.local)]
+                if self.setup_job.name:
+                    arguments.extend(['--job-name', self.setup_job.name])
+                environment = os.environ.copy()
+                for name in ('OPENAI_API_KEY', 'HF_TOKEN', 'HUGGING_FACE_HUB_TOKEN', 'ANTHROPIC_API_KEY'):
+                    environment.pop(name, None)
+                self.setup_process = subprocess.Popen(arguments, cwd=ROOT, env=environment,
+                    stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+                process = self.setup_process
+            result = process.wait(timeout=2 * 60 * 60)
+            with self.guard:
+                if self.closed or self.stopping:
+                    return
+                if result != 0:
+                    raise RuntimeError('Voice setup did not complete.')
+                self.preparation = {'state': 'complete', 'active': False, 'message': '준비를 마쳤어요. 음성 기능을 시작합니다.'}
+                if not self.ensure_running():
+                    raise RuntimeError('Voice installation could not be verified.')
+        except (OSError, RuntimeError, subprocess.SubprocessError):
+            with self.guard:
+                self.preparation = {'state': 'failed', 'active': False, 'message': '준비를 마치지 못했어요. 인터넷 연결, 15GB 이상의 여유 공간과 NVIDIA 그래픽카드를 확인한 뒤 다시 시도해 주세요.'}
+        finally:
+            with self.guard:
+                try:
+                    self._dispose_setup()
+                except OSError:
+                    return
+                if self.closed or self.stopping:
+                    self.preparation = {'state': 'cancelled', 'active': False, 'message': '준비를 중단했습니다.'}
 
     def _dispose_owned(self):
         """작업 객체 실패와 무관하게 직접 만든 리디렉터도 정리한다."""
@@ -55,6 +135,8 @@ class PcVoiceRuntime:
     def ensure_running(self):
         with self.guard:
             if self.closed or self.stopping or self.service.closed:
+                return False
+            if self.preparation['active']:
                 return False
             try:
                 path = settings_path(self.local, self.provider)
@@ -121,11 +203,13 @@ class PcVoiceRuntime:
     def status(self):
         configured = self.ensure_running()
         status = self.service.status()
+        if self.preparation['active']:
+            status['state'] = 'preparing'
         if status['state'] == 'offline' and self.message:
             status['message'] = self.message
             if configured and self.process is not None and self.process.poll() is None:
                 status['state'] = 'starting'
-        return {**status, 'configured': configured}
+        return {**status, 'configured': configured, 'canPrepare': os.name == 'nt', 'preparation': dict(self.preparation)}
 
     def prepare_shutdown(self, asr, tracking):
         """새 작업을 막고 다른 서버의 엔진 작업까지 확인한 뒤 종료를 승인한다."""
@@ -134,6 +218,8 @@ class PcVoiceRuntime:
                 raise VoiceError('PC_STOPPING', 'PC 연결 프로그램이 이미 종료 중입니다.', 503)
             if self.service.uncertain:
                 raise VoiceError('ENGINE_RESTART_REQUIRED', '이전 PC 작업의 종료를 확인하지 못했습니다. 실행기를 완전히 종료해 주세요.', 503)
+            if self.preparation['active']:
+                raise VoiceError('PC_BUSY', '음성 기능 준비가 끝난 뒤 다시 실행해 주세요.', 409)
             if not self.service.lock.acquire(blocking=False):
                 raise VoiceError('PC_BUSY', '진행 중인 PC 작업을 완료하거나 취소한 뒤 다시 실행해 주세요.', 409)
             prepared = False
@@ -172,10 +258,12 @@ class PcVoiceRuntime:
 
     def close(self):
         with self.guard:
-            if self.closed and self.job is None and self.process is None and not self._shutdown_lease:
+            if (self.closed and self.job is None and self.process is None
+                    and self.setup_job is None and self.setup_process is None and not self._shutdown_lease):
                 return
             self.closed = self.stopping = True
             self.service.closed = True
+            self._dispose_setup()
             owned = self._dispose_owned()
             if self._shutdown_lease is not None:
                 try:

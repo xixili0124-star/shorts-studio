@@ -3,9 +3,9 @@ import assert from 'node:assert/strict';
 import {desktopGroupForView,desktopInspectorGroup,desktopInspectorTabs} from '../public/js/desktop-studio.js';
 
 test('기존 라이브러리 화면은 새 탐색 묶음으로 모두 연결되고 모르는 화면은 파일로 복귀한다',()=>{
-  const destinations={files:['media'],captions:['captions'],sound:['sounds','voice'],design:['quick-format','graphics','transitions'],tools:['mosaic','silence']};
+  const destinations={files:['media'],captions:['captions'],sound:['sounds','voice','silence'],design:['quick-format','graphics','transitions'],tools:['mosaic','crop-tracking']};
   const routes=Object.entries(destinations).flatMap(([group,views])=>views.map(view=>({view,group})));
-  assert.equal(new Set(routes.map(route=>route.view)).size,9);
+  assert.equal(new Set(routes.map(route=>route.view)).size,10);
   for(const {view,group} of routes)assert.equal(desktopGroupForView(view),group,view);
   for(const unknown of [undefined,null,'','future-tool'])assert.equal(desktopGroupForView(unknown),'files');
 });

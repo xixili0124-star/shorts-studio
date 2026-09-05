@@ -17,12 +17,14 @@
   <link rel="stylesheet" href="studio.css">
   <link rel="stylesheet" href="mobile.css">
   <link rel="stylesheet" href="desktop.css">
+  <link rel="stylesheet" href="voice-library.css">
+  <link rel="stylesheet" href="quick-format-saved.css">
 </head>
 <body>
   <header class="appbar">
-    <a class="brand" href="studio.html" aria-label="숏츠 스튜디오"><span class="brand-mark"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M17 5H9.5C3.5 5 3.5 12 9.5 12h5c6 0 6 7 0 7H7" fill="none" stroke="currentColor" stroke-width="2.7" stroke-linecap="square"/></svg></span><span>Shorts<span class="brand-light"> Studio</span></span></a>
+    <a class="brand" href="studio.html" aria-label="숏츠 스튜디오"><span class="brand-mark"><img src="brand/shorts-bolt.png" width="30" height="30" alt=""></span><span>Shorts<span class="brand-light"> Studio</span></span></a>
     <span class="lab-tag">LAB</span>
-    <div class="project-title"><input id="projectName" aria-label="프로젝트 이름" value="서울의 밤, 짧은 기록"><span id="saveStatus" class="save-status">샘플 프로젝트</span></div>
+    <div class="project-title"><input id="projectName" aria-label="프로젝트 이름" value="움직임을 담은 샘플"><span id="saveStatus" class="save-status">샘플 프로젝트</span></div>
     <div class="app-actions">
       <button id="undo" class="icon-button" title="실행 취소 · Ctrl+Z" aria-label="실행 취소">↶</button>
       <button id="redo" class="icon-button" title="다시 실행 · Ctrl+Shift+Z" aria-label="다시 실행">↷</button>
@@ -114,7 +116,7 @@
 
   <input type="file" id="fileInput" accept="video/*,image/*,audio/*,.mkv,.ts,.srt,.vtt" multiple hidden>
   <input type="file" id="projectInput" accept=".shorts" hidden>
-  <dialog id="exportDialog" class="modal"><form method="dialog" class="modal-heading"><div><span class="eyebrow">READY TO SHARE</span><h2>이야기를 완성하세요.</h2></div><button class="icon-button" aria-label="닫기">×</button></form><div class="modal-body"><div class="export-summary"><span class="export-icon">↗</span><div><strong id="exportProjectName">서울의 밤, 짧은 기록</strong><p id="exportSummary">세로 영상 · 9:16</p></div></div><label class="field-label">해상도<select id="exportResolution"><option value="1080x1920">1080 × 1920 · Full HD</option><option value="720x1280">720 × 1280 · 가볍게</option><option value="1440x2560">1440 × 2560 · 고해상도</option></select></label><div class="field-grid"><label class="field-label">프레임<select id="exportFps"><option value="30">30 fps</option><option value="24">24 fps</option><option value="60">60 fps</option></select></label><label class="field-label">화질<select id="exportQuality"><option value="high">높음</option><option value="very-high">매우 높음</option><option value="medium">보통</option></select></label></div><p class="note">영상은 이 브라우저에서 만들어집니다. 완성 파일은 다운로드만 하며, 외부 플랫폼에 게시하지 않습니다.</p><div id="exportProgress" hidden><progress id="exportBar" value="0" max="1"></progress><p id="exportMessage" role="status"></p></div><video id="exportPreview" controls hidden></video><a id="downloadVideo" class="button primary wide" hidden download>완성 영상 다운로드</a><button id="startExport" class="button primary wide">영상 만들기</button><button id="cancelExport" class="button subtle wide" hidden>내보내기 취소</button></div></dialog>
+  <dialog id="exportDialog" class="modal"><form method="dialog" class="modal-heading"><div><span class="eyebrow">READY TO SHARE</span><h2>이야기를 완성하세요.</h2></div><button class="icon-button" aria-label="닫기">×</button></form><div class="modal-body"><div class="export-summary"><span class="export-icon">↗</span><div><strong id="exportProjectName">움직임을 담은 샘플</strong><p id="exportSummary">세로 영상 · 9:16</p></div></div><label class="field-label">해상도<select id="exportResolution"><option value="1080x1920">1080 × 1920 · Full HD</option><option value="720x1280">720 × 1280 · 가볍게</option><option value="1440x2560">1440 × 2560 · 고해상도</option></select></label><div class="field-grid"><label class="field-label">프레임<select id="exportFps"><option value="30">30 fps</option><option value="24">24 fps</option><option value="60">60 fps</option></select></label><label class="field-label">화질<select id="exportQuality"><option value="high">높음</option><option value="very-high">매우 높음</option><option value="medium">보통</option></select></label></div><p class="note">영상은 이 브라우저에서 만들어집니다. 완성 파일은 다운로드만 하며, 외부 플랫폼에 게시하지 않습니다.</p><div id="exportProgress" hidden><progress id="exportBar" value="0" max="1"></progress><p id="exportMessage" role="status"></p></div><video id="exportPreview" controls hidden></video><a id="downloadVideo" class="button primary wide" hidden download>완성 영상 다운로드</a><button id="startExport" class="button primary wide">영상 만들기</button><button id="cancelExport" class="button subtle wide" hidden>내보내기 취소</button></div></dialog>
   <dialog id="helpDialog" class="modal">
     <form method="dialog" class="modal-heading"><h2>작게, 빠르게, 제대로.</h2><button class="icon-button" aria-label="닫기">×</button></form>
     <div class="modal-body">
@@ -131,7 +133,7 @@
       <div class="shortcut-list"><span>재생 / 정지</span><kbd>Space</kbd><span>이전 / 다음 프레임</span><kbd>← / →</kbd><span>선택 클립 분할 / 선택 공백 닫기</span><kbd>S</kbd><span>삭제 · 빈 공간 유지</span><kbd>Delete</kbd><span>선택 트랙만 당겨 삭제</span><kbd>Shift Delete</kbd><span>실행 취소</span><kbd>Ctrl Z</kbd><span>다시 실행</span><kbd>Ctrl Shift Z</kbd><span>선택 항목 복제</span><kbd>Ctrl D</kbd><span>모든 클립 선택</span><kbd>Ctrl A</kbd><span>설정 복사</span><kbd>Ctrl Alt C</kbd><span>설정 붙여넣기</span><kbd>Ctrl Alt V</kbd><span>드래그 취소</span><kbd>Esc</kbd><span>프로젝트 저장</span><kbd>Ctrl S</kbd><span>스냅 켜기 / 끄기</span><kbd>N</kbd></div>
       <p class="note">프로젝트 파일에는 편집 정보와 라이브러리 파일이 함께 저장됩니다. 모자이크는 왼쪽 메뉴에서 영역을 정한 뒤 추적하세요. 추적이 끊긴 구간은 보정해야 내보낼 수 있습니다. 무음 컷은 삭제 후보를 확인한 뒤 적용하며 같은 트랙만 당깁니다. AI 음성·자동자막은 API 키 없이 기기에서 처리하며 최초 사용 때 필요한 구성 요소를 내려받을 수 있습니다. 생성 음성과 자막의 숫자·고유명사는 직접 확인하세요.</p>
       <button id="newProject" class="button secondary wide">빈 프로젝트 시작</button><button id="resetDemo" class="button subtle wide">샘플 프로젝트 다시 열기</button>
-      <p class="asset-credit">샘플 사진: Stéphan Valentin · Andrea De Santis / Unsplash. 샘플 배경음은 테스트용 합성음입니다.<br>기본 효과음 37종은 사용자가 등록한 파일이며, 공개 배포·상업적 사용 전 권리 확인이 필요합니다. 폰트·외부 파일의 출처와 사용 조건은 <a href="https://github.com/xixili0124-star/shorts-studio/blob/main/CREDITS.md" target="_blank" rel="noopener noreferrer">CREDITS</a>를 확인하세요.</p>
+      <p class="asset-credit">동영상 샘플: Wikimedia Commons · CC0. 원본 촬영 영상과 소리를 사용합니다.<br>기본 효과음 37종은 사용자가 등록한 파일이며, 공개 배포·상업적 사용 전 권리 확인이 필요합니다. 폰트·외부 파일의 출처와 사용 조건은 <a href="https://github.com/xixili0124-star/shorts-studio/blob/main/CREDITS.md" target="_blank" rel="noopener noreferrer">CREDITS</a>를 확인하세요.</p>
     </div>
   </dialog>
   <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>

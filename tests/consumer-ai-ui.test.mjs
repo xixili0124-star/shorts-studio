@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {StudioTools} from '../public/js/studio-tools.js';
+import {preparePcVoice,waitForPcVoice} from '../public/js/pc-voice.js';
 import {downloadPcSetup,downloadPcVoiceSetup,pcSetupPlatform,pcVoiceSetupRequested,rememberPcVoiceSetupRequest,forgetPcVoiceSetupRequest,PC_SETUP_DOWNLOAD,PC_VOICE_SETUP_DOWNLOAD} from '../public/js/pc-connection.js';
 
 const loopback={protocol:'http:',hostname:'127.0.0.1',origin:'http://127.0.0.1:8791'};
@@ -113,6 +114,54 @@ test('an installed custom-voice feature is discovered and opens registration dir
   });
   try{await owner.beginPcVoiceAction('register');assert.equal(opened,1);assert.equal(owner.state,undefined);}
   finally{globalThis.location=saved;}
+});
+
+test('closing while readiness is checked never starts a later setup or reopens the dialog',async()=>{
+  const saved=globalThis.location;globalThis.location=loopback;
+  const owner=Object.assign(Object.create(StudioTools.prototype),{
+    navigator:{platform:'Win32',userAgent:'Windows'},state:{kind:'voice-setup',next:'record'},
+    dialog:{open:true},pcVoice:{status:null},setBody(){},progress(){},
+    async refreshPcVoice(){this.state=null;this.dialog.open=false;this.pcVoice.status={localServer:true,configured:true,state:'ready'};},
+    continuePcVoiceAction(){assert.fail('must not resume after the user closes');},
+  });
+  try{await owner.confirmPcVoiceSetup();assert.equal(owner.state,null);}
+  finally{globalThis.location=saved;}
+});
+
+test('saved voice controls offer recording, upload and three selectable rows with independent delete buttons',()=>{
+  const owner=Object.assign(Object.create(StudioTools.prototype),{pcVoice:{status:{state:'ready',profiles:[
+    {id:'a',name:'차분한 목소리',duration:4},{id:'b',name:'밝은 목소리',duration:5},{id:'c',name:'<테스트>',duration:6},
+  ]},profileId:'b',checking:false}});
+  const html=owner.pcVoiceMarkup();
+  assert.match(html,/data-smart-action="voice-record" disabled>녹음/);assert.match(html,/data-smart-action="voice-upload" disabled>파일 업로드/);
+  assert.equal((html.match(/data-smart-action="select-voice-reference"/g)||[]).length,3);
+  assert.equal((html.match(/data-smart-action="delete-voice-reference"/g)||[]).length,3);
+  assert.match(html,/data-profile-id="b" aria-pressed="true"/);assert.match(html,/&lt;테스트&gt;/);assert.match(html,/3 \/ 3/);
+  assert.doesNotMatch(html,/<select|>목소리 등록<|>목소리 삭제</);
+});
+
+test('a fourth voice is blocked before opening the reference dialog or downloading files',async()=>{
+  const owner=Object.assign(Object.create(StudioTools.prototype),{pcVoice:{status:{profiles:[{},{},{}]}},hooks:{toast(message){assert.match(message,/3개/);}},open(){assert.fail('must not open');}});
+  for(const action of ['record','upload'])await owner.beginPcVoiceAction(action);
+});
+
+test('preparing a reachable PC uses only the fixed consent endpoint with no reference audio',async()=>{
+  const requests=[];
+  const result=await preparePcVoice({location:loopback,fetchImpl:async(url,options)=>{
+    requests.push({url,options});return new Response(JSON.stringify({state:'running',active:true}),{headers:{'Content-Type':'application/json'}});
+  }});
+  assert.equal(result.state,'running');assert.equal(requests[0].url,'/api/voice-clone/prepare');
+  assert.equal(requests[0].options.method,'POST');assert.deepEqual(JSON.parse(requests[0].options.body),{consent:true});
+  assert.equal(requests[0].options.credentials,'omit');assert.equal(requests[0].options.redirect,'error');
+});
+
+test('voice waiting tracks real readiness, surfaces setup failure and supports cancellation',async()=>{
+  const states=[{state:'preparing',preparation:{active:true}},{state:'starting',configured:true},{state:'ready'}],seen=[];
+  const result=await waitForPcVoice({interval:0,status:async()=>states.shift(),onStatus:value=>seen.push(value.state)});
+  assert.equal(result.state,'ready');assert.deepEqual(seen,['preparing','starting','ready']);
+  await assert.rejects(waitForPcVoice({status:async()=>({state:'offline',preparation:{state:'failed',message:'준비 실패'}})}),/준비 실패/);
+  const controller=new AbortController();controller.abort();
+  await assert.rejects(waitForPcVoice({signal:controller.signal,status:()=>assert.fail('no status request after cancellation')}),{name:'AbortError'});
 });
 
 test('an explicitly chosen PC caption path waits for readiness instead of switching modes',async()=>{

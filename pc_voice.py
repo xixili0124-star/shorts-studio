@@ -8,6 +8,7 @@ import hmac
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 import re
 import threading
@@ -21,9 +22,39 @@ from pc_voice_config import PROVIDERS
 MAX_REFERENCE_BODY = 2 * 1024 * 1024
 MAX_REFERENCE_BYTES = 1024 * 1024
 MAX_RESULT_BYTES = 32 * 1024 * 1024
-MAX_PROFILES = 12
+MAX_PROFILES = 3
 PROFILE_ID = re.compile(r'^[a-f0-9]{32}$')
 ASR_LEASE_TOKEN = re.compile(r'^[a-f0-9]{64}$')
+
+
+@contextmanager
+def reference_registration_lock(directory):
+    """여러 로컬 서버에서도 목소리 개수 검사와 저장을 한 번에 수행합니다."""
+    path = Path(directory).parent / '.voice-reference-registration.lock'
+    path.parent.mkdir(parents=True, exist_ok=True)
+    if path.is_symlink():
+        raise VoiceError('REFERENCE_STORAGE', '목소리 저장소를 확인해 주세요.', 500)
+    with path.open('a+b') as stream:
+        if path.stat().st_size == 0:
+            stream.write(b'0'); stream.flush()
+        stream.seek(0)
+        if os.name == 'nt':
+            import msvcrt
+            acquire = lambda: msvcrt.locking(stream.fileno(), msvcrt.LK_NBLCK, 1)
+            release = lambda: msvcrt.locking(stream.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+            acquire = lambda: fcntl.flock(stream.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            release = lambda: fcntl.flock(stream.fileno(), fcntl.LOCK_UN)
+        try:
+            acquire()
+        except OSError:
+            raise VoiceError('VOICE_BUSY', '다른 창에서 목소리를 저장하고 있어요. 잠시 후 다시 시도해 주세요.', 409) from None
+        try:
+            yield
+        finally:
+            stream.seek(0)
+            release()
 
 
 def validate_asr_reservation(data):
@@ -194,7 +225,8 @@ class VoiceCloneService:
     def profiles(self):
         profiles = []
         if self.directory.exists():
-            for path in sorted(self.directory.glob('*.json'))[:MAX_PROFILES + 1]:
+            # 이전 버전에서 저장한 목소리는 숨기거나 지우지 않습니다.
+            for path in sorted(self.directory.glob('*.json'))[:100]:
                 try:
                     row = self._load(path.stem, require_audio=False)
                     profiles.append({key: row[key] for key in ('id', 'name', 'duration', 'promptText', 'audioAvailable')})
@@ -233,10 +265,10 @@ class VoiceCloneService:
         except (ValueError, binascii.Error):
             raise VoiceError('INVALID_REFERENCE', '참고 음성을 다시 선택해 주세요.') from None
         info = wav_info(content, reference=True)
-        with self.exclusive():
+        with self.exclusive(), reference_registration_lock(self.directory):
             self.directory.mkdir(parents=True, exist_ok=True)
             if len(list(self.directory.glob('*.json'))) >= MAX_PROFILES:
-                raise VoiceError('PROFILE_LIMIT', '목소리는 12개까지 보관할 수 있습니다. 사용하지 않는 목소리를 먼저 지워 주세요.', 409)
+                raise VoiceError('PROFILE_LIMIT', '목소리는 3개까지 보관할 수 있습니다. 사용하지 않는 목소리를 먼저 지워 주세요.', 409)
             profile_id = uuid.uuid4().hex
             row = {'id': profile_id, 'name': name.strip(), 'promptText': prompt.strip(), 'language': 'ko', **info}
             try:

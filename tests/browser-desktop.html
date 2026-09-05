@@ -9,7 +9,7 @@
 <body>
 <main>
   <h1>PC 스튜디오 DOM 통합 검사</h1>
-  <p>별도 검수 주소의 빈 편집기를 사용합니다. 테스트 자막만 추가·수정하며 AI 처리, 다운로드, 사용자 프로젝트 교체는 실행하지 않습니다.</p>
+  <p>별도 검수 주소의 빈 편집기를 사용합니다. 테스트 자막과 퀵포맷을 추가·수정한 뒤 정리하며 AI 처리, 다운로드, 사용자 프로젝트 교체는 실행하지 않습니다.</p>
   <p>실제 앱 DOM과 합성 클릭·입력 이벤트로 UI 연결을 검사합니다. 390px 전환은 브라우저 레이아웃 검증이며 실제 휴대전화의 터치·OS 검증을 대신하지 않습니다.</p>
   <div class="actions"><button id="runAll" disabled>전체 검사 실행</button><span id="status">편집기 준비 중…</span></div>
   <ol id="checks"></ol>
@@ -27,6 +27,7 @@ const visible=node=>!!node?.isConnected&&node.getClientRects().length>0&&win.get
 const q=selector=>{const node=doc.querySelector(selector);assert(node,'찾을 수 없는 요소: '+selector);return node;};
 async function until(check,message,timeout=3000){const end=performance.now()+timeout;while(performance.now()<end){if(check())return;await wait(40);}throw new Error(message);}
 async function click(selector){const node=typeof selector==='string'?q(selector):selector;assert(visible(node),'보이지 않는 버튼: '+(node.id||node.outerHTML.slice(0,150)));assert(!node.disabled,'비활성 버튼: '+(node.id||node.textContent));node.click();await settle();}
+async function input(selector,value){const node=q(selector);assert(visible(node),'보이지 않는 입력: '+selector);node.focus();node.value=value;node.dispatchEvent(new win.Event('input',{bubbles:true}));node.dispatchEvent(new win.Event('change',{bubbles:true}));await settle();}
 function uniqueIds(){const seen=new Set();for(const node of doc.querySelectorAll('[id]')){assert(!seen.has(node.id),'중복 ID: '+node.id);seen.add(node.id);}}
 const group=key=>click('[data-desktop-group="'+key+'"]');
 const tab=key=>click('[data-desktop-tab="'+key+'"]');
@@ -38,24 +39,44 @@ const captionSections=()=>[...q('#inspectorContent').children].filter(node=>node
 const tests={
   async navigation(){
     assert(doc.querySelectorAll('[data-desktop-group]').length===5,'상위 탐색이 다섯 작업으로 정리되지 않았습니다.');
-    const routes=[['files',null,'media'],['captions',null,'captions'],['sound','sounds','sounds'],['sound','voice','voice'],['design','quick-format','quick-format'],['design','graphics','graphics'],['design','transitions','transitions'],['tools','mosaic','mosaic'],['tools','silence','silence']];
+    const routes=[['files',null,'media'],['captions',null,'captions'],['sound','sounds','sounds'],['sound','voice','voice'],['sound','silence','silence'],['design','quick-format','quick-format'],['design','graphics','graphics'],['design','transitions','transitions'],['tools','mosaic','mosaic'],['tools','crop-tracking','crop-tracking']];
     for(const [destination,subview,view] of routes){await group(destination);if(subview)await tab(subview);assert(doc.body.dataset.desktopView===view,view+' 화면으로 연결되지 않았습니다.');assert(q('[data-desktop-group="'+destination+'"]').getAttribute('aria-pressed')==='true',view+'의 상위 탐색 선택이 틀립니다.');assert(visible(q('#libraryContent')),view+' 화면을 볼 수 없습니다.');}
-    uniqueIds();return '다섯 작업에서 기존 아홉 화면 모두 접근 가능 · 중복 ID 없음';
+    assert(q('[data-desktop-group="tools"]').textContent.trim()==='트래킹','트래킹의 상위 이름이 다릅니다.');
+    assert([...q('#desktopLibraryTabs').children].map(node=>node.textContent.trim()).join('|')==='모자이크|크롭','트래킹에 모자이크와 크롭만 표시되지 않습니다.');
+    await group('sound');assert([...q('#desktopLibraryTabs').children].map(node=>node.textContent.trim()).join('|')==='효과음|AI TTS|무음 컷','소리 탭의 작업 이름이나 순서가 다릅니다.');
+    uniqueIds();return '다섯 작업에서 열 화면 접근 · AI TTS/무음 컷과 모자이크/크롭 분리 · 중복 ID 없음';
+  },
+  async trackLabels(){
+    assert(iframe.clientWidth===1280,'트랙 이름은 1280px PC 폭에서 검사해야 합니다.');
+    const selectors=[...q('#trackHeaders').querySelectorAll('.track-selector')];assert(selectors.length>=5,'기본 트랙 다섯 개가 표시되지 않습니다.');
+    assert(!doc.querySelector('.track-selector small'),'트랙에 의미 없는 순서 숫자가 남았습니다.');
+    const labels=selectors.map(node=>node.querySelector('strong').textContent.trim());
+    for(const label of ['자막','그래픽','영상','오디오','보이스'])assert(labels.includes(label),label+' 전체 이름을 찾을 수 없습니다.');
+    for(const selector of selectors){
+      const label=selector.querySelector('strong'),badge=selector.querySelector('.track-code'),box=selector.getBoundingClientRect(),textBox=label.getBoundingClientRect(),badgeBox=badge.getBoundingClientRect();
+      assert(visible(label)&&label.scrollWidth<=label.clientWidth+1,'트랙명이 잘립니다: '+label.textContent);
+      assert(textBox.right<=box.right+1&&textBox.left>=box.left,'트랙명이 선택 버튼 밖으로 넘칩니다: '+label.textContent);
+      assert(Math.abs(badgeBox.width-24)<.5&&Math.abs(badgeBox.height-24)<.5,'트랙 배지 크기가 24×24가 아닙니다: '+badge.textContent);
+    }
+    return '1280px에서 자막·그래픽·영상·오디오·보이스 전체 이름, 동일한 24px 배지, 순서 숫자 제거';
   },
   async captionPanels(){
-    await group('captions');await tab('create');const host=q('#libraryContent'),children=[...host.children];
-    assert(visible(q('#libraryContent .smart-card'))&&visible(q('[data-action="add-caption"]')),'만들기에 자동/직접 자막 버튼이 없습니다.');
-    assert(!visible(q('#libraryContent .preset-grid'))&&!visible(q('#captionList')),'만들기에 스타일이나 목록이 섞여 보입니다.');
-    await tab('styles');assert(visible(q('#libraryContent .preset-grid'))&&visible(q('#libraryContent .segmented')),'스타일이나 적용 대상이 보이지 않습니다.');assert(!visible(q('#libraryContent .smart-card'))&&!visible(q('#captionList'))&&!visible(q('[data-action="add-caption"]')),'스타일 탭의 작업 분리가 깨졌습니다.');
+    await group('captions');const host=q('#libraryContent'),children=[...host.children];
+    assert(q('[data-desktop-tab="styles"]').getAttribute('aria-pressed')==='true','자막 작업의 첫 화면이 직접 자막/스타일이 아닙니다.');
+    assert([...q('#desktopLibraryTabs').children].map(node=>node.dataset.desktopTab+':'+node.textContent.trim()).join('|')==='styles:자막|create:자동자막|list:자막 목록','자막 세부 탭의 이름이나 순서가 다릅니다.');
+    assert(visible(q('#libraryContent .preset-grid'))&&visible(q('#libraryContent .segmented'))&&visible(q('[data-action="add-caption"]')),'자막 탭에 현재 위치 자막/스타일/적용 대상이 함께 표시되지 않습니다.');
+    assert(!visible(q('#libraryContent .smart-card'))&&!visible(q('#captionList')),'자막 탭에 자동자막이나 목록이 섞여 보입니다.');
+    await tab('create');assert(visible(q('#libraryContent .smart-card'))&&!visible(q('[data-action="add-caption"]')),'자동자막에 직접 추가 버튼이 섞여 있거나 인식 기능이 없습니다.');
+    assert(!visible(q('#libraryContent .preset-grid'))&&!visible(q('#captionList')),'자동자막에 스타일이나 목록이 섞여 보입니다.');
     await tab('list');assert(visible(q('#captionList'))&&visible(q('#libraryContent > .field-grid')),'자막 목록/SRT 메뉴에 접근할 수 없습니다.');assert(!visible(q('#libraryContent .preset-grid'))&&!visible(q('#libraryContent .smart-card')),'목록에 다른 작업 패널이 노출됩니다.');
     assert(children.length===host.children.length&&children.every((node,index)=>node===host.children[index]),'탭 변경이 공유 라이브러리 노드를 복제하거나 재배치했습니다.');
-    await tab('create');return '만들기·스타일·목록 분리, 공유 직계 노드와 명령 유지';
+    await tab('styles');return '자막(직접 추가·스타일) → 자동자막 → 목록 분리, 공유 직계 노드와 명령 유지';
   },
   async captionEdit(){
     const before=captions().length;await click('[data-action="add-caption"]');assert(captions().length===before+1,'직접 추가한 자막이 타임라인에 없습니다.');assert(activeInspector()==='basic','새 자막의 기본 편집이 열리지 않았습니다.');
     const text=q('#inspectorContent textarea[data-prop="text"]');assert(visible(text),'기본 탭에서 문구를 바로 편집할 수 없습니다.');text.focus();text.value=captionText;text.dispatchEvent(new win.Event('input',{bubbles:true}));text.dispatchEvent(new win.Event('change',{bubbles:true}));await settle();
     assert(q('#inspectorContent textarea[data-prop="text"]').value===captionText,'문구 변경이 속성 재렌더 후 사라졌습니다.');assert(captions().some(node=>node.textContent.includes(captionText)),'문구 변경이 실제 타임라인 클립에 반영되지 않았습니다.');
-    await tab('list');assert(q('#captionList').textContent.includes(captionText),'자막 목록에 변경 내용이 반영되지 않았습니다.');await tab('create');return '자막 추가 → 기본 문구 입력 → 실제 타임라인·목록 반영';
+    await tab('list');assert(q('#captionList').textContent.includes(captionText),'자막 목록에 변경 내용이 반영되지 않았습니다.');await tab('styles');return '자막 추가 → 기본 문구 입력 → 실제 타임라인·목록 반영';
   },
   async inspectorState(){
     await inspectorTab('style');const decorations=captionSections().filter(visible);assert(decorations.length===3&&decorations.every(node=>['테두리','텍스트 박스','그림자'].includes(titleOf(node))),'꾸미기 속성이 누락되거나 다른 작업 속성이 섞였습니다.');
@@ -69,9 +90,37 @@ const tests={
     await click('#desktopEditMore > summary');for(const id of ['rippleDeleteClip','copyClipSettings','pasteClipSettings']){assert(q('#'+id)===originals.get(id)&&visible(q('#'+id)),id+' 원래 버튼이 추가 도구에 연결되지 않았습니다.');}await click('#copyClipSettings');assert(!q('#desktopEditMore').open,'설정 복사 후 메뉴가 닫히지 않습니다.');assert(!q('#pasteClipSettings').disabled,'실제 설정 복사 명령이 연결되지 않았습니다.');
     await click('#desktopTrackMore > summary');assert(visible(q('#trackRoleSelect'))&&visible(q('#addTrack')),'트랙 추가의 종류와 실행 버튼에 접근할 수 없습니다.');await click('#desktopTrackMore > summary');return '편집 패널 재개방 · 프로젝트/추가 편집/트랙 메뉴의 원래 버튼 연결';
   },
+  async savedQuickFormat(){
+    await group('design');await tab('quick-format');
+    const previousIds=[...doc.querySelectorAll('[data-quick-use]')].map(node=>node.dataset.quickUse);
+    const name='PC 검수 포맷 '+Date.now(),copy='검수 *강조*\n다시 쓰는 상단 문구';let savedId;
+    try{
+      await click('[data-quick-preset="balanced"]');
+      await input('[data-quick-text="top"]',copy);
+      await input('[data-quick-position="top"][data-quick-style="background"]','#234567');
+      await input('#quickFormatName',name);await click('[data-quick-save]');
+      const saved=[...doc.querySelectorAll('[data-quick-use]')].find(node=>node.textContent.startsWith(name));
+      assert(saved,'이름으로 저장한 퀵포맷이 목록에 표시되지 않았습니다.');savedId=saved.dataset.quickUse;
+      assert(!previousIds.includes(savedId),'새 포맷이 기존 저장 항목을 덮어썼습니다.');
+      await group('files');await group('design');await tab('quick-format');
+      assert(visible(q('[data-quick-use="'+savedId+'"]')),'라이브러리를 다시 열자 저장한 퀵포맷이 사라졌습니다.');
+      await click('[data-quick-preset="wide"]');await input('[data-quick-text="top"]','다른 문구');
+      await input('[data-quick-position="top"][data-quick-style="background"]','#765432');
+      await click('[data-quick-use="'+savedId+'"]');
+      assert(q('[data-quick-enabled]').checked,'저장한 포맷 적용 후 사용 상태가 꺼졌습니다.');
+      assert(q('[data-quick-preset="balanced"]').getAttribute('aria-pressed')==='true','저장한 상하단 여백이 복원되지 않았습니다.');
+      assert(q('[data-quick-text="top"]').value===copy,'저장한 줄바꿈/강조 문구가 복원되지 않았습니다.');
+      assert(q('[data-quick-position="top"][data-quick-style="background"]').value==='#234567','저장한 상단 배경색이 복원되지 않았습니다.');
+    }finally{
+      if(savedId&&doc.querySelector('[data-quick-remove="'+savedId+'"]'))await click('[data-quick-remove="'+savedId+'"]');
+    }
+    assert(!doc.querySelector('[data-quick-use="'+savedId+'"]'),'테스트 퀵포맷 삭제가 목록에 반영되지 않았습니다.');
+    assert([...doc.querySelectorAll('[data-quick-use]')].map(node=>node.dataset.quickUse).join('|')===previousIds.join('|'),'기존 저장 포맷 목록이 변경됐습니다.');
+    return '현재 퀵포맷 저장 → 라이브러리 재개방 → 여백·문구·배경색 복원 → 테스트 저장 항목 삭제';
+  },
   async mobileRoundTrip(){
     const nodes=new Map(['library','inspector'].map(id=>[id,q('#'+id)]));nodes.set('viewer',q('.viewer'));nodes.set('timeline',q('.timeline-panel'));const parents=new Map([...nodes].map(([key,node])=>[key,node.parentElement]));
-    await inspectorTab('motion');await tab('styles');await click('.desktop-project-menu > summary');
+    await group('captions');await inspectorTab('motion');await tab('styles');await click('.desktop-project-menu > summary');
     iframe.style.width='390px';iframe.style.height='844px';await until(()=>doc.body.classList.contains('mobile-ui'),'390px에서 모바일 전용 화면으로 전환되지 않았습니다.');await settle();
     assert(!doc.body.classList.contains('desktop-ui'),'모바일에 데스크톱 활성 상태가 남았습니다.');assert([...doc.querySelectorAll('.desktop-only')].every(node=>!visible(node)),'모바일에 PC 전용 메뉴가 보입니다.');assert(!doc.querySelector('.desktop-only[open]'),'모바일 전환 뒤 PC 팝오버가 열린 채 남았습니다.');
     await click('#mobileActionDock [data-mobile-action="inspector:text"]');const text=q('#inspectorContent textarea[data-prop="text"]');assert(visible(text)&&text.value===captionText,'PC 움직임 필터가 모바일 문구 편집을 숨기거나 데이터를 바꿨습니다.');assert(q('#inspectorContent').parentElement===q('#inspector'),'공유 속성 노드가 복제됐습니다.');assert([...doc.querySelectorAll('.desktop-only')].every(node=>!visible(node)),'모바일 편집 패널에 PC 탭/안내가 노출됩니다.');await click('#mobilePanelDone');
@@ -80,7 +129,7 @@ const tests={
     for(const [key,node] of nodes)assert(node.isConnected&&node.parentElement===parents.get(key),key+' 원래 PC 위치가 복원되지 않았습니다.');assert(!doc.querySelector('[data-mobile-filtered]'),'PC 복귀 후 모바일 속성 필터가 남았습니다.');assert(activeInspector()==='motion','모바일 왕복 후 PC 움직임 탭이 사라졌습니다.');assert(visible(q('#desktopNav'))&&visible(q('#desktopInspectorTabs')),'PC 탐색/속성 탭이 복원되지 않았습니다.');uniqueIds();return '1280 → 390 → 1280 전환, 모바일 문구/폰트 편집, 공유 DOM 복원 및 필터 격리';
   },
   async cleanup(){
-    for(let count=0;captions().length&&count<4;count++){assert(!q('#undo').disabled,'테스트 자막 작업을 되돌릴 수 없습니다.');await click('#undo');}
+    for(let count=0;captions().length&&count<12;count++){assert(!q('#undo').disabled,'테스트 자막 작업을 되돌릴 수 없습니다.');await click('#undo');}
     assert(captions().length===0,'되돌리기 뒤 테스트 자막이 남았습니다.');await group('files');uniqueIds();return '실행 취소로 테스트 자막 정리 · 빈 편집기 복구';
   },
 };
@@ -95,7 +144,7 @@ try{
   await until(()=>iframe.contentDocument?.documentElement.dataset.studioReady==='true','편집기 초기화/폰트 준비가 20초 안에 완료되지 않았습니다.',20000);doc=iframe.contentDocument;win=iframe.contentWindow;
   win.addEventListener('error',event=>{if(running)errors.push(event.error?.stack||event.message);});win.addEventListener('unhandledrejection',event=>{if(running)errors.push(event.reason?.stack||String(event.reason));});
   assert(doc.body.classList.contains('desktop-ui'),'처음부터 PC 전용 레이아웃이 아닙니다.');assert(captions().length===0,'빈 프로젝트가 아닌 기존 자막을 감지했습니다.');for(const id of ['saveProject','openProject','rippleDeleteClip','copyClipSettings','pasteClipSettings'])originals.set(id,q('#'+id));
-  ready=true;document.body.dataset.result='ready';$('runAll').disabled=false;$('status').textContent='준비 완료 · 7개 검사';$('result').textContent='전체 검사 실행을 누르세요.';
+  ready=true;document.body.dataset.result='ready';$('runAll').disabled=false;$('status').textContent='준비 완료 · '+Object.keys(tests).length+'개 검사';$('result').textContent='전체 검사 실행을 누르세요.';
 }catch(error){document.body.dataset.result='fail';$('status').textContent='초기화 실패';$('result').textContent='FIXTURE FAIL: '+error.stack;}
 </script>
 </body>

@@ -202,7 +202,7 @@ class StudioHandler(PcHttpMixin, SimpleHTTPRequestHandler):
         if self.headers.get('X-Studio-Consent') != 'voice-clone-local':
             self.error_response(403, 'VOICE_CONSENT_REQUIRED', '참고 음성의 PC 저장·처리 안내를 확인해 주세요.')
             return
-        if route not in ('/api/voice-clone/references', '/api/voice-clone/delete', '/api/voice-clone/synthesize'):
+        if route not in ('/api/voice-clone/references', '/api/voice-clone/delete', '/api/voice-clone/synthesize', '/api/voice-clone/prepare'):
             self.error_response(404, 'NOT_FOUND', '지원하지 않는 PC 음성 기능입니다.')
             return
         maximum = MAX_REFERENCE_BODY if route.endswith('/references') else 32 * 1024
@@ -225,7 +225,12 @@ class StudioHandler(PcHttpMixin, SimpleHTTPRequestHandler):
             if not isinstance(data, dict):
                 raise ValueError()
             service = self.pc_voice_service()
-            if route.endswith('/references'):
+            if route.endswith('/prepare'):
+                runtime = getattr(self.server, 'pc_runtime', None)
+                if runtime is None:
+                    raise VoiceError('VOICE_SETUP_UNAVAILABLE', '연결 프로그램을 한 번 실행한 뒤 다시 시도해 주세요.', 503)
+                self.json_response(202, runtime.prepare(data))
+            elif route.endswith('/references'):
                 self.json_response(201, {'profile': service.register(data)})
             elif route.endswith('/delete'):
                 if data.get('consent') is not True:

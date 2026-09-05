@@ -380,7 +380,8 @@ function finishQuickFormatControl(){
   prepareFonts();player.invalidate();
 }
 
-function renderLibrary(){
+function renderLibrary(){renderLibraryContent();mobileStudio?.refreshPanel();}
+function renderLibraryContent(){
   presetPreviewObserver?.disconnect();cancelAnimationFrame(presetAnimation);
   const titles={media:'라이브러리','quick-format':'퀵포맷',captions:'자막 스튜디오',graphics:'모션 그래픽',transitions:'장면 전환',voice:'AI 음성 스튜디오',sounds:'효과음 라이브러리',mosaic:'트래킹 모자이크',silence:'무음 구간 자동 컷'};
   const count=view==='media'?String(libraryAssets().length).padStart(2,'0'):view==='graphics'?String(GRAPHICS.length):view==='captions'?String(CAPTIONS.length):view==='transitions'?String(TRANSITIONS.length):view==='sounds'?String(SOUND_EFFECTS.length):'';
@@ -534,7 +535,8 @@ function renderBatchInspector(host,entries){
   }
 }
 
-function renderInspector(){
+function renderInspector(){renderInspectorContent();mobileStudio?.refreshPanel();}
+function renderInspectorContent(){
   const host=$('inspectorContent'),item=selected(),type=selection?.type;
   if(!item){$('selectionBadge').textContent='프로젝트';host.innerHTML='<div class="inspector-empty">라이브러리에서 파일을 불러오거나<br>타임라인에서 편집할 항목을<br>선택해 주세요.</div><button class="button secondary wide" data-action="import">＋ 파일 가져오기</button>';return;}
   if(type==='asset'){
@@ -1024,8 +1026,10 @@ async function init(){
   wire();
   mobileStudio=new MobileStudio({timeline,setView,view:()=>view,pause:()=>player.pause(),
     busy:()=>!!(exportCtrl||importing||smartTools.busy||monitor?.dragging||keyframeEditor?.dragging),
-    selection:()=>{const item=selected(),refs=editingSelection();return {count:refs.length,editable:!!item&&!['asset','gap'].includes(selection?.type),name:selection?.type==='gap'?'빈 공간':item?.name||item?.text||assets.get(item?.assetId)?.name||({clip:'영상',caption:'자막',graphic:'그래픽',audio:'오디오',transition:'장면 전환'}[selection?.type])};},
-    tracks:()=>timelineTracks().map(track=>({...track,label:trackLabel(track.id),active:timeline.activeHeaderId===track.id})),
+    selection:()=>{const item=selected(),refs=editingSelection();return {type:selection?.type,id:selection?.id,trackId:selection&&(itemRange(selection.type,selection.id)?.trackId||item?.trackId),count:refs.length,editable:!!item&&!['asset','gap'].includes(selection?.type),name:selection?.type==='gap'?'빈 공간':item?.name||item?.text||assets.get(item?.assetId)?.name||({clip:'영상',caption:'자막',graphic:'그래픽',audio:'오디오',transition:'장면 전환'}[selection?.type])};},
+    tracks:()=>{const counts=new Map();for(const [type,items] of [['clip',project.clips],['caption',project.captions],['graphic',project.overlays],['audio',project.audio.tracks]])for(const item of items){const id=trackIdFor(type,item);counts.set(id,(counts.get(id)||0)+1);}return timelineTracks().map(track=>({...track,label:trackLabel(track.id),count:counts.get(track.id)||0,active:timeline.activeHeaderId===track.id}));},
+    clearSelection:()=>select(null,null),addCaption:()=>addCaption(),route:routeAction,menuItems:timelineMenuItems,menuAction:runTimelineMenu,
+    rename:name=>{setDocumentName(name);$('projectName').value=documentName;dirty=true;scheduleDraft();},
     trackAction:(id,action)=>{if(action==='select')timeline.activateTrack(id);else if(action==='add')addTrackByRole(null,id);else if(action==='remove')edit('빈 트랙 삭제',()=>removeTimelineTrack(id));else toggleTrackSwitch(id,action);},
     layout:mobile=>{if(!mobile){let saved=null;try{saved=localStorage.getItem(STORAGE_KEY);}catch{}const height=readStoredHeight(saved,workbenchHeight());if(height)applyTimelineHeight(height,{store:false});}if(!timeline.dragging&&!monitor?.dragging){timeline.render();player.invalidate();}},
   });

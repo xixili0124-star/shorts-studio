@@ -6,16 +6,15 @@
 <link rel="stylesheet" href="/studio.css">
 <link rel="stylesheet" href="/mobile.css">
 <style>
-body.mobile-ui.qa-mobile{display:block;height:auto;min-height:100dvh;min-width:0;overflow:auto;padding:18px;background:#111719}
-#qaMain{width:min(960px,100%);margin:auto}#qaMain h1{font-size:21px;margin-bottom:10px}#qaMain p{line-height:1.7;margin:8px 0;color:#b5c3c8}
+body.qa-mobile{display:block;height:auto;min-height:100dvh;min-width:0;overflow:auto;padding:18px;background:#111719}
+#qaMain{display:block!important;width:min(960px,100%);margin:auto}#qaMain h1{font-size:21px;margin-bottom:10px}#qaMain p{line-height:1.7;margin:8px 0;color:#b5c3c8}
 .qa-actions{display:flex;flex-wrap:wrap;gap:8px;margin:14px 0}.qa-actions button{padding:10px 12px;min-height:44px;border-radius:5px;background:#2d3b32}
 .qa-actions #runAll{background:#c0ef73;color:#15200c;font-weight:700}
-body.mobile-ui.qa-mobile .timeline-panel{height:320px;width:100%;display:flex;position:relative;grid-column:auto;grid-row:auto;overflow:hidden;border:1px solid #4f645a}
-body.mobile-ui.qa-mobile .timeline-toolbar{display:flex;flex:0 0 48px;height:48px;padding:5px;gap:6px;overflow:hidden}
+body.qa-mobile #mobileEditDeck{display:block;grid-area:auto}
+body.qa-mobile #mobileEditDeck .timeline-panel{height:280px;min-height:280px;max-height:280px;width:100%;display:flex;position:relative;grid-column:auto;grid-row:auto;overflow:hidden;border:1px solid #4f645a}
+body.qa-mobile #mobileEditDeck .timeline-toolbar{display:flex;flex:0 0 48px;height:48px;padding:5px;gap:6px;overflow:hidden}
 body.mobile-ui.qa-mobile .timeline-toolbar .timeline-zoom{display:flex;margin-left:auto;gap:3px}.timeline-zoom input{width:50px}
 body.mobile-ui.qa-mobile .timeline-body{flex:1;min-height:0;overflow:hidden}body.mobile-ui.qa-mobile .timeline-notice{display:block;min-height:24px;max-height:42px;white-space:normal;overflow:hidden;font-size:11px}
-body.mobile-ui.qa-mobile .track-heads{width:88px;flex:0 0 88px}body.mobile-ui.qa-mobile .track,body.mobile-ui.qa-mobile .track-head{height:52px}
-body.mobile-ui.qa-mobile .ruler,body.mobile-ui.qa-mobile .ruler-spacer{height:32px;min-height:32px}
 body.mobile-ui.qa-mobile #timelineCanvas,body.mobile-ui.qa-mobile .timeline-block{touch-action:none}
 .qa-results{padding-left:24px;line-height:1.8;font-size:13px}.qa-results [data-result=pass]{color:#c0ef73}.qa-results [data-result=fail]{color:#ffafa3}
 #result{white-space:pre-wrap;font:12px/1.6 Consolas,monospace;color:#dde9df;background:#1a2521;padding:12px;overflow-wrap:anywhere}
@@ -25,15 +24,17 @@ body.mobile-ui.qa-mobile #timelineCanvas,body.mobile-ui.qa-mobile .timeline-bloc
 <main id="qaMain">
   <h1>모바일 타임라인 DOM 통합 검사</h1>
   <span id="qaMode">실제 DOM + 합성 PointerEvent</span>
-  <p>별도 테스트 프로젝트의 이미지 클립만 사용합니다. 편집기 앱·사용자 파일·자동 저장을 불러오지 않습니다.</p>
+  <p>별도 테스트 프로젝트의 이미지와 테스트 자막만 사용합니다. 편집기 앱·사용자 파일·자동 저장을 불러오지 않습니다.</p>
   <p>이 검사는 브라우저 레이아웃과 터치 제스처 코드 연결을 확인합니다. 포인터 캡처는 합성 이벤트용으로 모사하며, 실제 휴대전화의 터치 하드웨어·OS 제스처 검증과는 다릅니다.</p>
   <div class="qa-actions">
     <button id="runAll" disabled>전체 검사 실행</button>
-    <button data-case="tap" disabled>탭·설정 버튼</button><button data-case="pan" disabled>스와이프</button>
+    <button data-case="tap" disabled>탭·중복 방지</button><button data-case="pan" disabled>스와이프</button>
     <button data-case="hold" disabled>길게 누르기 메뉴</button><button data-case="drag" disabled>길게 누르고 이동</button>
     <button data-case="trim" disabled>트림</button><button data-case="pinch" disabled>핀치</button>
     <button data-case="multi" disabled>다중선택</button><button data-case="cancel" disabled>취소·두 번째 손가락</button>
+    <button data-case="focus" disabled>트랙 집중·숨은 행</button><button data-case="empty" disabled>빈 트랙·전체 보기</button><button data-case="restore" disabled>재렌더·PC 복귀</button>
   </div>
+  <section id="mobileEditDeck" aria-label="독립 타임라인 검사 영역">
   <section class="timeline-panel" aria-label="테스트 타임라인">
     <div class="timeline-toolbar">
       <span id="sequenceInfo"></span><button id="snap" aria-pressed="false">스냅</button>
@@ -44,6 +45,7 @@ body.mobile-ui.qa-mobile #timelineCanvas,body.mobile-ui.qa-mobile .timeline-bloc
       <div id="timelineScroll" class="timeline-scroll"><div id="timelineCanvas" class="timeline-canvas" tabindex="0"><div id="ruler" class="ruler"></div><div id="timelineRows"></div><div id="playhead" class="playhead"><span></span></div></div></div>
     </div>
     <div id="timelineNotice" class="timeline-notice" role="status"></div>
+  </section>
   </section>
   <ol id="checks" class="qa-results"></ol>
   <pre id="result" role="status">테스트 이미지 준비 중…</pre>
@@ -57,7 +59,7 @@ import {addAsset,makeClip,captureDocument} from '/js/project-store.js';
 const $=id=>document.getElementById(id),assert=(condition,message)=>{if(!condition)throw new Error(message);};
 const frame=()=>new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)));
 const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
-const active=new Set(),captures=new Map();let nextPointer=1000,fixtureClips,timeline,running=false,lastDown=null;
+const active=new Set(),captures=new Map();let nextPointer=1000,fixtureClips,fixtureTracks,timeline,running=false,lastDown=null;
 const calls={select:0,multi:0,commit:0,copy:0,paste:0,menu:0,errors:[]};
 // dispatchEvent 내부의 리스너 예외는 호출자에게 다시 던져지지 않으므로 별도로 수집합니다.
 addEventListener('error',event=>{if(running)calls.errors.push(event.error?.stack||event.message);});
@@ -101,16 +103,17 @@ async function waitHeld(){
 const first=()=>project.clips.find(clip=>clip.id==='qa-a');
 function clearCalls(){for(const key of Object.keys(calls))calls[key]=key==='errors'?[]:0;}
 async function reset(){
+  document.body.classList.add('mobile-ui');
   timeline.cancelMobileGestures();timeline.cancelPointerDrag?.();timeline.closeMenu();captures.clear();active.clear();
-  project.clips=fixtureClips.map(clip=>({...clip}));project.captions=[];project.overlays=[];project.audio.tracks=[];
+  project.clips=fixtureClips.map(clip=>({...clip}));project.timelineTracks=fixtureTracks.map(track=>({...track}));project.captions=[];project.overlays=[];project.audio.tracks=[];
   timeline.mobileMultiSelect=false;timeline.selectMany([],null);timeline.zoom=80;timeline.snapping=false;timeline.time=0;
-  timeline.render();timeline.scroll.scrollLeft=0;timeline.scroll.scrollTop=0;$('timelineZoom').value='80';clearCalls();await frame();
+  timeline.render();timeline.setMobileTrackView({all:true,trackId:'v1'});timeline.scroll.scrollLeft=0;timeline.scroll.scrollTop=0;$('timelineZoom').value='80';clearCalls();await frame();
 }
 const tests={
   async tap(){
     await tap(block('qa-a'));assert(timeline.selection?.id==='qa-a','탭으로 클립을 선택하지 못했습니다.');assert(calls.select===1,'탭에서 선택 신호가 중복됐습니다.');assert(!timeline.dragging,'탭 이후 이동 상태가 남았습니다.');
-    const copy=block('qa-a').querySelector('[data-clip-setting="copy"]');await tap(copy);assert(calls.copy===1,'설정 복사 버튼이 한 번만 실행되어야 합니다.');assert(calls.commit===0,'탭이 클립을 이동시켰습니다.');
-    return '클립 선택 1회 + 설정 복사 1회, 뒤따르는 클릭 중복 없음';
+    const copy=block('qa-a').querySelector('[data-clip-setting="copy"]');assert(!copy.getClientRects().length,'모바일에서 사용하지 않는 클립 상단 설정 버튼이 계속 표시됩니다.');assert(calls.copy===0&&calls.commit===0,'탭이 숨겨진 버튼이나 이동을 실행했습니다.');
+    return '클립 선택 1회, 숨긴 설정 버튼 오작동·뒤따르는 클릭 중복 없음';
   },
   async pan(){
     const before=JSON.stringify(captureDocument()),node=block('qa-a'),at=await point(node),id=++nextPointer;
@@ -159,6 +162,48 @@ const tests={
     const pending=++nextPointer;emit('pointerdown',pending,at,block('qa-a'));timeline.cancelMobileGestures();emit('pointercancel',pending,at,timeline.canvas);await wait(350);
     assert(!timeline.menu&&!timeline.mobileGestures.points.size&&!timeline.mobileGestures.listening&&!timeline.dragging,'취소 후 타이머·메뉴·리스너가 남았습니다.');return '이동 → 두 손가락 취소 및 모드 종료 정리';
   },
+  async focus(){
+    project.captions=[{id:'qa-hidden-caption',text:'가려진 트랙의 테스트 자막',start:1,end:3,trackId:'v3'}];timeline.render();
+    const before=JSON.stringify(captureDocument());timeline.setMobileTrackView({all:false,trackId:'v1'});await frame();
+    const rows=[...timeline.canvas.querySelectorAll('.track')],visible=rows.filter(row=>row.getClientRects().length),caption=block('qa-hidden-caption');
+    assert(visible.length===1&&visible[0].dataset.track==='v1','집중 보기에서 영상 한 행만 표시되어야 합니다.');
+    assert(rows.filter(row=>row.dataset.mobileVisible==='false').every(row=>getComputedStyle(row).display==='none'),'표시 속성만 있고 숨은 행이 실제 레이아웃에 남아 있습니다.');
+    assert(caption&&!caption.getClientRects().length,'집중 보기에서 다른 트랙의 자막이 화면에 남았습니다.');
+    const headers=document.querySelector('.track-heads');assert(!headers.getClientRects().length,'집중 보기에서 PC 트랙 헤더 공간이 남았습니다.');
+    const panel=document.querySelector('.timeline-panel').getBoundingClientRect(),scroll=timeline.scroll.getBoundingClientRect();
+    assert(Math.abs(scroll.left-panel.left)<4,'집중 트랙이 왼쪽 끝부터 가로 공간을 사용하지 않습니다.');
+    const at=await point(block('qa-a'));assert(document.elementFromPoint(at.x,at.y)?.closest('.timeline-block')?.dataset.id==='qa-a','보이는 클립의 실제 hit-test가 틀립니다.');
+    for(let y=scroll.top+8;y<scroll.bottom-4;y+=16){const row=document.elementFromPoint(scroll.left+30,y)?.closest('.track');assert(!row||row.dataset.mobileVisible!=='false','보이지 않는 트랙이 터치 hit-test에 잡혔습니다.');}
+    const hiddenEvent=new PointerEvent('pointerdown',{pointerId:++nextPointer,pointerType:'touch',bubbles:true,cancelable:true});caption.dispatchEvent(hiddenEvent);
+    assert(hiddenEvent.defaultPrevented&&!timeline.mobileGestures.points.size,'숨겨진 클립의 오래된 이벤트를 거절하지 못했습니다.');
+    assert(JSON.stringify(captureDocument())===before,'집중 보기가 문서의 클립이나 숨김 설정을 바꿨습니다.');
+    return '영상 한 행·전체 가로폭, 다른 자막 행의 레이아웃·hit-test·오래된 이벤트 차단';
+  },
+  async empty(){
+    const before=JSON.stringify(captureDocument());timeline.setMobileTrackView({all:false,trackId:'v2'});await frame();
+    const empty=$('track-v2'),rect=empty.getBoundingClientRect(),visible=[...timeline.canvas.querySelectorAll('.track')].filter(row=>row.getClientRects().length);
+    assert(visible.length===1&&visible[0]===empty&&rect.height>=44,'빈 트랙도 집중할 수 있는 행으로 표시되어야 합니다.');
+    assert(!empty.querySelector('.timeline-block')&&[...timeline.canvas.querySelectorAll('.timeline-block')].every(node=>!node.getClientRects().length),'빈 트랙 집중 중 다른 트랙 클립이 보입니다.');
+    const at={x:rect.left+80,y:rect.top+rect.height/2},id=++nextPointer;emit('pointerdown',id,at,empty);emit('pointerup',id,at,empty);
+    assert(timeline.activeHeaderId==='v2'&&timeline.time>0,'빈 트랙을 눌러 작업 행·재생 위치를 선택하지 못했습니다.');
+    timeline.setMobileTrackView({all:true,trackId:'v2'});await frame();
+    assert([...timeline.canvas.querySelectorAll('.track')].filter(row=>row.getClientRects().length).length===fixtureTracks.length,'전체 보기에서 빈 행을 포함한 모든 트랙이 복원되지 않았습니다.');
+    assert(document.querySelector('.track-heads').getClientRects().length>0,'전체 트랙 보기에서 헤더가 돌아오지 않았습니다.');
+    assert(JSON.stringify(captureDocument())===before,'빈 트랙/전체 보기 전환이 문서를 바꿨습니다.');return '빈 그래픽 행 집중·탭, 전체 트랙 및 헤더 복원';
+  },
+  async restore(){
+    const before=JSON.stringify(captureDocument());timeline.setMobileTrackView({all:false,trackId:'v2'});timeline.render();await frame();
+    assert($('track-v2').getClientRects().length>0&&!$('track-v1').getClientRects().length,'재렌더 후 집중 행이 유지되지 않았습니다.');
+    project.timelineTracks=project.timelineTracks.filter(track=>track.id!=='v2');timeline.render();await frame();
+    assert(timeline.mobileTrackView.trackId==='v1'&&$('track-v1').getClientRects().length>0,'집중한 트랙 삭제 후 영상 행으로 복귀하지 못했습니다.');
+    project.timelineTracks=fixtureTracks.map(track=>({...track}));timeline.render();
+    document.body.classList.remove('mobile-ui');timeline.restoreMobileTrackView();timeline.render();await frame();
+    assert(timeline.mobileTrackView===null&&!document.querySelector('.timeline-panel').hasAttribute('data-mobile-track-view'),'PC 복귀 후 모바일 집중 상태가 남았습니다.');
+    assert(!document.querySelector('[data-mobile-visible]'),'PC 복귀 후 트랙 표시 속성이 남았습니다.');
+    assert([...timeline.canvas.querySelectorAll('.track')].every(row=>row.getClientRects().length>0),'PC 복귀 후 숨겨진 트랙이 남았습니다.');
+    assert(JSON.stringify(captureDocument())===before,'트랙 복원 검사 후 원래 문서가 달라졌습니다.');
+    document.body.classList.add('mobile-ui');return '집중 보기 재렌더 유지·삭제 트랙 대체·PC 복귀 시 모든 표시 속성 제거';
+  },
 };
 async function run(names){
   if(running)return;running=true;document.body.dataset.result='running';$('checks').replaceChildren();$('result').textContent='검사 중…';document.querySelectorAll('.qa-actions button').forEach(button=>button.disabled=true);
@@ -178,7 +223,7 @@ try{
   const file=new File([await new Promise(resolve=>image.toBlob(resolve,'image/png'))],'qa-fixture.png',{type:'image/png'}),asset=await addAsset(file);
   fixtureClips=await Promise.all([['qa-a','클립 A',1,2],['qa-b','클립 B',6,2],['qa-tail','끝 클립',18,2]].map(([id,name,start,imgDuration])=>makeClip(asset.id,{id,name,start,imgDuration,trackId:'v1'})));
   project.clips=fixtureClips.map(clip=>({...clip}));project.audio.tracks=[];project.captions=[];project.overlays=[];
-  project.timelineTracks=[{id:'v3',kind:'visual',role:'caption'},{id:'v2',kind:'visual',role:'graphic'},{id:'v1',kind:'visual',role:'video'},{id:'a1',kind:'audio',role:'audio'},{id:'a2',kind:'audio',role:'voice'}];migrateTimeline();
+  fixtureTracks=[{id:'v3',kind:'visual',role:'caption'},{id:'v2',kind:'visual',role:'graphic'},{id:'v1',kind:'visual',role:'video'},{id:'a1',kind:'audio',role:'audio'},{id:'a2',kind:'audio',role:'voice'}];project.timelineTracks=fixtureTracks.map(track=>({...track}));migrateTimeline();
   timeline=new Timeline({busy:()=>false,pause(){},select(){calls.select++;},selectMany(){calls.multi++;},seek(time){timeline.tick(time);},commit(){calls.commit++;},error:message=>calls.errors.push(message),
     copySettings(){calls.copy++;},pasteSettings(){calls.paste++;},canPasteSettings:()=>true,gap(){},transition(){},menuItems:()=>[{id:'qa-menu',label:'테스트 메뉴 실행'}],menuAction(){calls.menu++;}});
   await reset();$('runAll').onclick=()=>run(Object.keys(tests));document.querySelectorAll('[data-case]').forEach(button=>button.onclick=()=>run([button.dataset.case]));

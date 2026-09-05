@@ -114,3 +114,63 @@ test('mobile multi-select taps toggle a clip without starting a desktop drag',()
     owner.mobileTap(pointer(1,100,100,hit));assert.deepEqual(selections[1],[]);assert.equal(owner.dragging,false);
   }finally{globalThis.document=saved.document;project.captions=saved.captions;}
 });
+
+function trackViewFixture(run){
+  const savedDocument=globalThis.document,saved=Object.fromEntries(['clips','captions','overlays','audio','timelineTracks'].map(key=>[key,project[key]]));
+  const registry=[{id:'v1',kind:'visual',role:'video',hidden:true},{id:'v4',kind:'visual',role:'video'},{id:'v2',kind:'visual',role:'graphic'},{id:'a1',kind:'audio',role:'audio',muted:true}];
+  Object.assign(project,{clips:[],captions:[],overlays:[],audio:{...project.audio,tracks:[]},timelineTracks:registry});
+  const body={classList:classes()};body.classList.add('mobile-ui');
+  const nodes=new Map(),panel={dataset:{}},rows=[],heads=[];
+  const row=id=>({dataset:{track:id},querySelector:()=>null});
+  const head=id=>({dataset:{},querySelector:()=>({dataset:{trackSelect:id}})});
+  const host=id=>{if(!nodes.has(id))nodes.set(id,{dataset:{},style:{},querySelectorAll:()=>[]});return nodes.get(id);};
+  Object.defineProperty(host('timelineRows'),'innerHTML',{set(value){rows.splice(0,rows.length,...[...value.matchAll(/class="track [^"]*" data-track="([^"]+)"/g)].map(match=>row(match[1])));}});
+  Object.defineProperty(host('trackHeaders'),'innerHTML',{set(value){heads.splice(0,heads.length,...[...value.matchAll(/data-track-select="([^"]+)"/g)].map(match=>head(match[1])));}});
+  host('trackHeaders').querySelectorAll=selector=>selector==='.track-head'?heads:[];
+  globalThis.document={body,getElementById:host,activeElement:null};
+  const effects={cancel:0,preview:0,scroll:0},canvas={style:{},closest:()=>panel,querySelectorAll:selector=>selector==='.track'?rows:[]};
+  const owner=Object.assign(Object.create(Timeline.prototype),{canvas,scroll:{clientWidth:600,scrollTop:40,scrollLeft:120},zoom:80,time:0,dragging:false,
+    activeTrackId:'v1',activeRoleTracks:{video:'v4'},activeHeaderId:'v1',selections:[],explicit:[],callbacks:{},
+    closeMenu(){},cancelMobileGestures(){effects.cancel++;},clearPreview(){effects.preview++;},stopScroll(){effects.scroll++;}});
+  try{owner.render();return run({owner,body,panel,rows,heads,effects,registry});}
+  finally{globalThis.document=savedDocument;Object.assign(project,saved);}
+}
+
+test('mobile focus filters matching rows and heads without changing document visibility or rendering again',()=>trackViewFixture(({owner,rows,heads,panel,effects})=>{
+  const before=JSON.stringify(project),originalRows=rows.slice();
+  assert.deepEqual(owner.setMobileTrackView({all:false}),{all:false,trackId:'v4'});
+  assert.equal(panel.dataset.mobileTrackView,'focus');
+  assert.deepEqual(rows.filter(node=>node.dataset.mobileVisible==='true').map(node=>node.dataset.track),['v4']);
+  assert.equal(heads.filter(node=>node.dataset.mobileVisible==='true').length,1);
+  assert.equal(heads.find(node=>node.dataset.mobileVisible==='true').querySelector().dataset.trackSelect,'v4');
+  assert.deepEqual(rows,originalRows,'행 DOM을 다시 만들지 않습니다');assert.equal(owner.scroll.scrollLeft,120);assert.equal(owner.scroll.scrollTop,0);
+  owner.setMobileTrackView({all:false,trackId:'v4'});assert.equal(effects.cancel,1,'같은 트랙 동기화가 진행 중 제스처를 취소하지 않습니다');
+  owner.setMobileTrackView({all:true,trackId:'v4'});assert.ok([...rows,...heads].every(node=>node.dataset.mobileVisible==='true'));
+  owner.scroll.scrollTop=26;owner.setMobileTrackView({all:true,trackId:'a1'});
+  assert.equal(effects.cancel,2,'전체 보기에서 다른 행 선택은 이동을 취소하지 않습니다');assert.equal(owner.scroll.scrollTop,26);
+  assert.equal(JSON.stringify(project),before,'미리보기·내보내기에 쓰는 문서의 hidden/muted와 클립 데이터를 바꾸지 않습니다');
+}));
+
+test('mobile focus survives render, recovers a removed track and restores every row on desktop',()=>trackViewFixture(({owner,rows,heads,panel,body})=>{
+  owner.setMobileTrackView({all:false,trackId:'v2'});const oldRows=rows.slice();owner.render();
+  assert.notEqual(rows[0],oldRows[0]);assert.equal(rows.find(node=>node.dataset.track==='v2').dataset.mobileVisible,'true');
+  project.timelineTracks=project.timelineTracks.filter(track=>track.id!=='v2');owner.render();
+  assert.deepEqual(owner.mobileTrackView,{all:false,trackId:'v4'});assert.equal(rows.find(node=>node.dataset.track==='v4').dataset.mobileVisible,'true');
+  owner.restoreMobileTrackView();assert.equal(owner.mobileTrackView,null);assert.equal(panel.dataset.mobileTrackView,undefined);
+  assert.ok([...rows,...heads].every(node=>node.dataset.mobileVisible===undefined));
+  owner.setMobileTrackView({all:false,trackId:'a1'});body.classList.remove('mobile-ui');owner.render();
+  assert.equal(owner.mobileTrackView,null);assert.equal(panel.dataset.mobileTrackView,undefined);assert.ok([...rows,...heads].every(node=>node.dataset.mobileVisible===undefined));
+  assert.equal(owner.setMobileTrackView({all:false,trackId:'v1'}),null,'PC에서는 표시 필터를 켜지 않습니다');
+}));
+
+test('a filtered mobile row cannot become a stale touch, menu or external drop target',()=>trackViewFixture(({owner,rows,body})=>{
+  owner.setMobileTrackView({all:false,trackId:'v4'});
+  const hidden=rows.find(node=>node.dataset.track==='v1'),shown=rows.find(node=>node.dataset.track==='v4');
+  const target=row=>({isConnected:true,closest:selector=>selector==='.track'?row:null});
+  assert.equal(owner.isMobileTargetVisible(target(hidden)),false);assert.equal(owner.isMobileTargetVisible(target(shown)),true);
+  assert.equal(owner.mobileTouchEvent(pointer(1,100,100,target(hidden))),null);
+  const event=pointer(1,100,100,target(hidden));owner.pointerDown(event);assert.equal(event.prevented,true);assert.equal(owner.dragging,false);
+  owner.external={kind:'preset',id:'g:qa'};owner.snapTime=t=>t;owner.xTime=()=>1;
+  assert.equal(owner.externalPlan(100,'v1'),null);assert.equal(owner.externalPlan(100,'v4')?.lane,'v4');
+  body.classList.remove('mobile-ui');assert.equal(owner.isMobileTargetVisible(target(hidden)),true);assert.equal(owner.externalPlan(100,'v1')?.lane,'v1');
+}));

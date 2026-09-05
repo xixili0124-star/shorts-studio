@@ -39,7 +39,7 @@ export class Timeline {
     this.activeRoleTracks=Object.fromEntries(TRACK_ROLES.map(role=>[role.id,timelineTracks().find(t=>t.role===role.id)?.id]));
     this.activeHeaderId='v1';
     this.scroll=$('timelineScroll');this.canvas=$('timelineCanvas');this.external=null;this.preview=null;
-    this.mobileMultiSelect=false;this.mobileGestures=new MobileTimelineGestures(this);
+    this.mobileMultiSelect=false;this.mobileTrackView=null;this.mobileGestures=new MobileTimelineGestures(this);
     $('timelineZoom').oninput=e=>this.setZoom(Number(e.target.value));
     $('zoomIn').onclick=()=>this.setZoom(this.zoom*1.25);
     $('zoomOut').onclick=()=>this.setZoom(this.zoom/1.25);
@@ -47,6 +47,7 @@ export class Timeline {
     this.canvas.addEventListener('pointerdown',e=>this.pointerDown(e));
     this.canvas.addEventListener('contextmenu',e=>{if(this.mobileGestures.consumeContextMenu(e)){e.preventDefault();return;}this.openMenu(e);});
     this.canvas.addEventListener('click',e=>{
+      if(!this.isMobileTargetVisible(e.target)){e.preventDefault();return;}
       if(this.mobileGestures.consumeClick(e)){e.preventDefault();e.stopPropagation();return;}
       const warn=e.target.closest('[data-mosaic-warn]');
       if(warn){
@@ -75,6 +76,7 @@ export class Timeline {
     });
     this.scroll.addEventListener('scroll',()=>{$('trackHeaders').style.transform='translateY(-'+this.scroll.scrollTop+'px)';});
     this.canvas.addEventListener('keydown',e=>{
+      if(!this.isMobileTargetVisible(e.target))return;
       if(!['Enter',' '].includes(e.key)||this.callbacks.busy?.())return;
       if(e.target.closest('[data-clip-setting]'))return;
       const button=e.target.closest('.timeline-block,.timeline-gap,.transition-chip');
@@ -125,6 +127,52 @@ export class Timeline {
       const active=n.dataset.trackSelect===id;
       n.classList.toggle('active',active);n.setAttribute('aria-pressed',String(active));
     });
+  }
+  /** 모바일의 행 표시는 편집 문서의 숨김·음소거와 별개로 관리합니다. */
+  setMobileTrackView({all=this.mobileTrackView?.all??false,trackId=this.mobileTrackView?.trackId}={}){
+    if(!document.body?.classList.contains('mobile-ui')){this.restoreMobileTrackView();return null;}
+    const next=this.resolveMobileTrackView({all:all===true,trackId}),previous=this.mobileTrackView;
+    const changed=!previous||previous.all!==next.all||(!next.all&&previous.trackId!==next.trackId);
+    if(changed){
+      this.cancelMobileGestures();this.cancelPointerDrag?.();this.closeMenu();this.clearPreview();this.stopScroll();
+    }
+    this.mobileTrackView=next;this.applyMobileTrackView();
+    if(changed){this.scroll.scrollTop=0;const headers=$('trackHeaders');if(headers)headers.style.transform='translateY(0px)';}
+    return {...this.mobileTrackView};
+  }
+  resolveMobileTrackView(view){
+    const tracks=timelineTracks(),video=id=>tracks.find(track=>track.id===id&&track.role==='video');
+    const selected=tracks.find(track=>track.id===view.trackId)||video(this.activeRoleTracks?.video)||video(this.activeTrackId)||tracks.find(track=>track.role==='video')||tracks[0];
+    return {all:view.all===true,trackId:selected?.id||null};
+  }
+  applyMobileTrackView(){
+    const headers=$('trackHeaders'),panel=this.canvas.closest?.('.timeline-panel');
+    const nodes=[...this.canvas.querySelectorAll('.track'),...(headers?.querySelectorAll('.track-head')||[])];
+    if(!document.body?.classList.contains('mobile-ui')||!this.mobileTrackView){
+      this.mobileTrackView=null;
+      for(const node of nodes)delete node.dataset.mobileVisible;
+      if(panel)delete panel.dataset.mobileTrackView;
+      return null;
+    }
+    this.mobileTrackView=this.resolveMobileTrackView(this.mobileTrackView);
+    const {all,trackId}=this.mobileTrackView;
+    if(panel)panel.dataset.mobileTrackView=all?'all':'focus';
+    for(const node of nodes){
+      const id=node.dataset.track||node.querySelector('[data-track-select]')?.dataset.trackSelect;
+      const visible=String(all||id===trackId);if(node.dataset.mobileVisible!==visible)node.dataset.mobileVisible=visible;
+    }
+    return {...this.mobileTrackView};
+  }
+  restoreMobileTrackView(){
+    const previous=this.mobileTrackView;this.mobileTrackView=null;
+    if(previous){this.cancelMobileGestures();this.cancelPointerDrag?.();this.closeMenu();this.clearPreview();this.stopScroll();}
+    this.applyMobileTrackView();
+  }
+  isMobileTrackVisible(id){
+    return !document.body?.classList.contains('mobile-ui')||!this.mobileTrackView||this.mobileTrackView.all||id===this.mobileTrackView.trackId;
+  }
+  isMobileTargetVisible(target){
+    const row=target?.closest?.('.track');return !row||this.isMobileTrackVisible(row.dataset.track);
   }
   select(type,id,rightId){
     const gap=type==='gap'?timelineTracks().flatMap(t=>trackGaps(t.id)).find(g=>g.id===id):null;
@@ -219,7 +267,7 @@ export class Timeline {
     }).join('');
     $('trackHeaders').style.transform='translateY(-'+this.scroll.scrollTop+'px)';
     $('totalDuration').textContent=stamp(layout.total);$('sequenceInfo').textContent=layout.items.length+' 클립 · '+layout.total.toFixed(1)+'초';
-    this.tick(this.time);this.paintSelection();this.updateSettingButtons();
+    this.applyMobileTrackView();this.tick(this.time);this.paintSelection();this.updateSettingButtons();
   }
   transitionButton(pair){
     const name=TRANSITIONS.find(transition=>transition.id===pair.type)?.name||'전환';
@@ -258,7 +306,7 @@ export class Timeline {
   beginExternalDrag(kind,id){this.external={kind,id};this.callbacks.pause();}
   endExternalDrag(){this.external=null;this.clearPreview();this.stopScroll();}
   externalPlan(clientX,lane){
-    if(!this.external)return null;
+    if(!this.external||!this.isMobileTrackVisible(lane))return null;
     const track=timelineTracks().find(t=>t.id===lane);if(!track)return null;
     const {kind,id}=this.external;let duration,type,name;
     if(kind==='asset'){
@@ -286,7 +334,7 @@ export class Timeline {
   }
   showPreview(plan,label){
     this.clearPreview();if(!plan)return;
-    const track=$('track-'+(plan.trackId||plan.lane));if(!track)return;
+    const track=$('track-'+(plan.trackId||plan.lane));if(!track||!this.isMobileTrackVisible(plan.trackId||plan.lane))return;
     const invalid=plan.placement?.ok===false,swap=plan.placement?.swap;
     track.classList.add('drop-target');this.ensureWidth(Math.max(plan.end,swap?.end||0));
     const ghost=document.createElement('div');ghost.className='timeline-insert-preview '+(invalid?'invalid ':'')+(plan.type==='transition'?'connection-preview':'');
@@ -366,7 +414,7 @@ export class Timeline {
     const mode=event.ctrlKey||event.metaKey?'toggle':event.shiftKey?'add':'replace';
     const point=e=>{const rect=this.canvas.getBoundingClientRect();return{x:Math.max(0,e.clientX-rect.left),y:Math.max(27,e.clientY-rect.top)};};
     const origin=point(event),rect=this.canvas.getBoundingClientRect();
-    const boxes=[...this.canvas.querySelectorAll('.track:not(.is-locked) .timeline-block')].map(node=>{
+    const boxes=[...this.canvas.querySelectorAll('.track:not(.is-locked) .timeline-block')].filter(node=>this.isMobileTargetVisible(node)).map(node=>{
       const r=node.getBoundingClientRect();return{type:node.dataset.type,id:node.dataset.id,left:r.left-rect.left,right:r.right-rect.left,top:r.top-rect.top,bottom:r.bottom-rect.top};
     });
     let last=event,moved=false,done=false,chosen=initial;
@@ -435,6 +483,7 @@ export class Timeline {
    * 빈 곳에서는 브라우저 기본 메뉴를 그대로 두어 새로고침·검사를 막지 않습니다.
    */
   openMenu(event){
+    if(!this.isMobileTargetVisible(event.target))return;
     const hit=event.target.closest('.timeline-block');
     if(!hit)return;
     event.preventDefault();
@@ -511,6 +560,7 @@ export class Timeline {
         if(child){target=[...target.querySelectorAll(selector)].find(node=>node.dataset[key]===child.dataset[key])||target;break;}
       }
     }else if(target.isConnected===false)target=this.canvas;
+    if(!this.isMobileTargetVisible(target))return null;
     return {target,button:0,isPrimary:true,pointerType:'touch',pointerId:event.pointerId,clientX:event.clientX,clientY:event.clientY,
       ctrlKey:false,metaKey:false,shiftKey:false,preventDefault:()=>event.preventDefault(),stopPropagation:()=>event.stopPropagation()};
   }
@@ -535,6 +585,7 @@ export class Timeline {
     else{this.select(ref.type,ref.id);this.callbacks.select(ref.type,ref.id);}
   }
   pointerDown(event,mobileHandoff=false){
+    if(!this.isMobileTargetVisible(event.target)){event.preventDefault();return;}
     if(!mobileHandoff&&this.mobileGestures?.pointerDown(event))return;
     // 모바일의 명시적 선택 모드는 연결한 마우스나 펜으로도 같은 동작을 합니다.
     if(!mobileHandoff&&this.mobileMultiSelect&&document.body.classList.contains('mobile-ui')&&event.button===0&&event.target.closest('.timeline-block')&&!event.target.closest('[data-edge],[data-clip-setting],[data-mosaic-warn]')){event.preventDefault();this.mobileTap(event);return;}

@@ -1,343 +1,397 @@
+/* 모바일 전용 작업대. PC에서는 전용 셸만 숨깁니다. */
 .mobile-only{display:none}
 
-/* 모바일 모드에서만 작업 공간을 재배치합니다. PC 규칙은 바꾸지 않습니다. */
+/* 밝은 작업대와 어두운 영상 영역은 모바일 모드 안에서만 적용합니다. */
 body.mobile-ui{
-  --bg:#111315;--surface:#1a1d20;--surface-2:#23272b;--surface-3:#2b3034;
-  --line:#34393e;--text:#f0f1ed;--muted:#a8aeb1;--faint:#939b9e;
-  --accent:#bbdf7c;--accent-dark:#2a3521;
-  --mobile-safe-top:env(safe-area-inset-top,0px);
-  --mobile-safe-bottom:env(safe-area-inset-bottom,0px);
-  --mobile-header-height:calc(56px + var(--mobile-safe-top));
-  --mobile-dock-height:calc(72px + var(--mobile-safe-bottom));
-  --mobile-timeline-height:min(280px,36dvh);
-  margin:0;min-width:0;width:100%;height:var(--mobile-vh,100dvh);overflow:hidden;
-  background:var(--bg);color:var(--text);font-size:14px;
-  -webkit-text-size-adjust:100%;overscroll-behavior:none;
+  --bg:#efeee9;--surface:#fafaf7;--surface-2:#f2f1eb;--surface-3:#e7e6df;--line:#dcdcd4;
+  --text:#202421;--muted:#696c65;--faint:#797c74;--accent:#e77539;--accent-dark:#f7e6da;
+  --violet:#71776e;--blue:#71776e;--mint:#71776e;--orange:#e77539;
+  --mobile-header-height:56px;--mobile-deck-height:232px;--mobile-dock-height:88px;
+  --mobile-panel-height:min(62dvh,calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - 12px));
+  color-scheme:light;min-width:0;width:100%;height:var(--mobile-vh,100dvh);overflow:hidden;
+  background:var(--bg);color:var(--text);font-size:14px;overscroll-behavior:none;
 }
-body.mobile-ui .mobile-only{display:flex}
-body.mobile-ui:not(.mobile-sheet-open) #mobileBackdrop{display:none}
-body.mobile-ui button,body.mobile-ui a,body.mobile-ui input,body.mobile-ui select,body.mobile-ui textarea{-webkit-tap-highlight-color:transparent}
+body.mobile-ui .appbar,body.mobile-ui #workbench{display:none}
+body.mobile-ui #mobileStudioShell{
+  display:grid;grid-template-columns:minmax(0,1fr);
+  grid-template-rows:calc(var(--mobile-header-height) + env(safe-area-inset-top,0px)) minmax(140px,1fr) var(--mobile-deck-height) calc(var(--mobile-dock-height) + env(safe-area-inset-bottom,0px));
+  width:100%;height:var(--mobile-vh,100dvh);min-width:0;overflow:hidden;background:var(--bg);
+}
+body.mobile-ui[data-mobile-timeline="all"]{--mobile-deck-height:320px}
+body.mobile-ui #mobileStudioShell:has(.timeline-panel[data-mobile-track-view="all"]){--mobile-deck-height:320px}
+body.mobile-ui .mobile-icon{display:block;width:24px;height:24px;flex:0 0 24px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
 body.mobile-ui button{touch-action:manipulation}
-body.mobile-ui .button,body.mobile-ui .icon-button{min-height:44px;border-radius:8px}
-body.mobile-ui .icon-button{width:44px;min-width:44px;height:44px;flex-basis:44px}
-body.mobile-ui .button{padding:10px 14px;font-size:14px}
-body.mobile-ui .button.primary{background:var(--accent);color:#17200e}
-body.mobile-ui .button.secondary{background:#282d30;border-color:#444b50}
-body.mobile-ui .mobile-icon{display:block;flex:0 0 24px;width:24px;height:24px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}
-body.mobile-ui button:focus-visible,body.mobile-ui a:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+body.mobile-ui button:focus-visible,body.mobile-ui a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+body.mobile-ui button:disabled{opacity:.32}
+body.mobile-ui .mobile-header{grid-column:1;grid-row:1;display:flex;align-items:center;gap:8px;min-width:0;padding:env(safe-area-inset-top,0px) max(12px,env(safe-area-inset-right,0px)) 0 max(8px,env(safe-area-inset-left,0px));background:var(--surface);border-bottom:1px solid var(--line)}
+body.mobile-ui #mobileProjectMenu,body.mobile-ui #mobileUndo,body.mobile-ui #mobileRedo,body.mobile-ui #mobileZoomMinus,body.mobile-ui #mobileZoomFit,body.mobile-ui #mobileZoomPlus,body.mobile-ui #mobilePanelBack,body.mobile-ui #mobilePanelDone{display:inline-flex;align-items:center;justify-content:center;flex:0 0 44px;min-width:44px;height:44px;padding:0;background:transparent;color:var(--text);border:0;border-radius:8px}
+body.mobile-ui .mobile-project-title{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+body.mobile-ui .mobile-project-title strong{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:14px;font-weight:650;letter-spacing:-.3px}
+body.mobile-ui .mobile-project-title small{color:var(--muted);font-size:11px;line-height:1.2}
+body.mobile-ui #mobileExport{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:44px;min-height:44px;min-width:62px;padding:0 15px;border-radius:8px;background:var(--accent);color:#241b16;font-size:13px;font-weight:750}
+body.mobile-ui #mobileExport .mobile-icon{width:16px;height:16px;flex-basis:16px}
 
-/* 헤더는 이름과 주요 작업만 남기고 나머지는 메뉴에서 엽니다. */
-body.mobile-ui .appbar{
-  position:relative;z-index:40;height:var(--mobile-header-height);min-height:var(--mobile-header-height);
-  padding:var(--mobile-safe-top) max(8px,env(safe-area-inset-right,0px)) 0 max(8px,env(safe-area-inset-left,0px));
-  gap:6px;background:#171a1c;border-bottom:1px solid #303539;
-}
-body.mobile-ui .brand{flex:0 0 28px;width:28px;gap:0}
-body.mobile-ui .brand-mark{width:26px;height:28px;border-radius:6px;background:#c0db8a;font-size:20px}
-body.mobile-ui .brand>span:not(.brand-mark),body.mobile-ui .lab-tag,body.mobile-ui .save-status{display:none}
-body.mobile-ui .project-title{flex:1;min-width:0;margin:0;gap:0}
-body.mobile-ui .project-title input{display:block;width:100%;max-width:none;min-width:0;min-height:44px;padding:6px 2px;font-size:16px;text-overflow:ellipsis}
-body.mobile-ui .app-actions{flex:0 0 auto;gap:0}
-body.mobile-ui .app-actions>.divider,body.mobile-ui #saveProject,body.mobile-ui #openProject{display:none}
-body.mobile-ui .app-actions .icon-button{font-size:25px}
-body.mobile-ui #openExport{min-height:44px;padding:9px 12px;margin-left:4px;font-size:12px;font-weight:700;gap:4px}
-body.mobile-ui #openExport>span{display:none}
-body.mobile-ui #mobileTopMore{display:grid;place-items:center;width:44px;min-width:44px;height:44px;padding:0;background:transparent;border:0;color:#dce0db}
+/* 영상은 남은 공간을 전부 사용하고 재생 조작부는 움직이지 않습니다. */
+body.mobile-ui #mobileViewerHost{grid-column:1;grid-row:2;display:flex;min-width:0;min-height:0;background:#101211;overflow:hidden}
+body.mobile-ui #mobileViewerHost .viewer{display:flex;flex:1;grid-area:auto;position:relative;min-width:0;min-height:0;width:100%;height:100%;background:#101211;color:#f4f4ef}
+body.mobile-ui #mobileViewerHost .viewer-heading,body.mobile-ui #mobileViewerHost .preview-label{display:none}
+body.mobile-ui #mobileViewerHost .viewer-stage{flex:1;min-height:0;min-width:0;padding:8px;overflow:hidden;background:#101211;touch-action:none}
+body.mobile-ui #mobileViewerHost .viewer-stage:has(.monitor-tools:not([hidden])){padding-top:58px}
+body.mobile-ui #mobileViewerHost .viewer-stage canvas{width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;box-shadow:none;background:#000;touch-action:none}
+body.mobile-ui #mobileViewerHost .transport-bar{display:grid;grid-template-columns:minmax(72px,1fr) auto minmax(44px,1fr);gap:0;flex:0 0 50px;height:50px;margin:0;padding:0 8px;border-top:1px solid #292c29;background:#171a18}
+body.mobile-ui #mobileViewerHost .timecode{min-width:0;font:11px/1.2 Consolas,monospace;color:#e8eae4;white-space:nowrap;letter-spacing:-.5px}
+body.mobile-ui #mobileViewerHost .timecode span{color:#8e968c}
+body.mobile-ui #mobileViewerHost .play-controls{justify-content:center;gap:0}
+body.mobile-ui #mobileViewerHost .play-controls .icon-button,body.mobile-ui #mobileViewerHost .play-button,body.mobile-ui #mobileViewerHost .viewer-options .icon-button{width:44px;height:44px;min-width:44px;flex:0 0 44px;padding:0;display:inline-flex;align-items:center;justify-content:center;color:#eef0e9;background:transparent}
+body.mobile-ui #mobileViewerHost .play-button{border-radius:50%;color:#fff}
+body.mobile-ui #mobileViewerHost .viewer-options{justify-self:end}
+body.mobile-ui #mobileViewerHost .viewer-options #loop,body.mobile-ui #mobileViewerHost .zoom-label{display:none}
+body.mobile-ui #mobileViewerHost .viewer-options .icon-button[aria-pressed="true"]{color:var(--accent)}
+body.mobile-ui #mobileViewerHost .empty-preview{gap:10px;padding:12px;color:#eceee7}
+body.mobile-ui #mobileViewerHost .empty-preview>span{display:none}
+body.mobile-ui #mobileViewerHost .empty-preview h2{font-size:18px;letter-spacing:-.6px}
+body.mobile-ui #mobileViewerHost .empty-preview p{font-size:12px;line-height:1.6;color:#a6aea2}
+body.mobile-ui #mobileViewerHost .empty-preview .button{min-height:44px;margin:0}
+body.mobile-ui #mobileViewerHost .empty-preview .button.subtle{color:#d1d8cc}
+body.mobile-ui .monitor-tools{left:50%!important;top:6px!important;transform:translateX(-50%);max-width:calc(100% - 12px);gap:0;padding:2px;border:1px solid #41463f;border-radius:8px;background:#252a25f5;box-shadow:0 2px 8px #0003;color:#eef0e9}
+body.mobile-ui .monitor-tools button{height:44px;min-height:44px;min-width:44px;padding:0 9px;font-size:12px;color:#dfe5d9;border-radius:5px}
+body.mobile-ui .monitor-tools button.active{background:#f0eee5;color:#202421}
+body.mobile-ui .monitor-tools .divider{background:#50574b;margin:0 3px}
+body.mobile-ui .monitor-tools small{display:none}
+body.mobile-ui #monitorOutline polygon,body.mobile-ui #monitorOutline .center-guide{stroke:var(--accent)}
+body.mobile-ui .monitor-handle,body.mobile-ui .monitor-handle.crop-handle{width:44px;height:44px;border:17px solid transparent;background:var(--accent);background-clip:padding-box;border-radius:0;box-shadow:none;touch-action:none}
+body.mobile-ui .monitor-handle.rotate-handle{width:44px;height:44px;border:8px solid transparent;border-radius:50%;background:#fafaf7;background-clip:padding-box;color:#202421;font-size:20px;line-height:28px;box-shadow:none}
+body.mobile-ui .monitor-handle:hover,body.mobile-ui .monitor-handle:focus-visible{background-color:#ffa674;outline:0}
+body.mobile-ui .monitor-handle:focus-visible::after{content:'';position:absolute;inset:-3px;border:2px solid #fff;border-radius:3px;pointer-events:none}
 
-/* 세로 화면은 미리보기, 선택 작업, 타임라인 순서로 배치합니다. */
-body.mobile-ui #workbench{
-  height:calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - var(--mobile-dock-height));
-  min-height:0;display:grid;grid-template-columns:minmax(0,1fr);
-  grid-template-rows:minmax(0,1fr) 44px var(--mobile-timeline-height);
-  gap:0;background:var(--bg);overflow:hidden;
-}
-body.mobile-ui .tool-rail{display:none}
-body.mobile-ui .viewer{grid-column:1;grid-row:1;min-width:0;min-height:0;position:relative;background:#0c0e10;overflow:hidden}
-body.mobile-ui .viewer-heading{display:none}
-body.mobile-ui .viewer-stage{
-  flex:1;min-width:0;min-height:0;padding:8px 14px;display:flex;align-items:center;justify-content:center;
-  overflow:hidden;background:#0c0e10;touch-action:none;
-}
-body.mobile-ui .viewer-stage canvas{display:block;width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;box-shadow:0 0 0 1px #ffffff12}
-body.mobile-ui .viewer-stage:has(.monitor-tools:not([hidden])){padding-top:54px}
-body.mobile-ui .preview-label{display:none}
-body.mobile-ui .transport-bar{height:48px;min-height:48px;flex:0 0 48px;padding:0 8px;margin:0;gap:4px;border-top:1px solid #25292d;background:#141719}
-body.mobile-ui .timecode{font:12px/1.2 Consolas,monospace;letter-spacing:-.35px;min-width:94px}
-body.mobile-ui .timecode span{font-size:11px;color:var(--muted)}
-body.mobile-ui .play-controls{position:static;transform:none;display:flex;justify-content:center;gap:0;margin:0 auto}
-body.mobile-ui .play-controls .icon-button{width:44px;min-width:44px;flex-basis:44px;height:44px}
-body.mobile-ui .play-button{width:44px;height:44px;min-height:44px;display:grid;place-items:center;background:transparent}
-body.mobile-ui .viewer-options{gap:0;margin-left:0}
-body.mobile-ui .viewer-options #loop,body.mobile-ui .zoom-label{display:none}
-body.mobile-ui .monitor-tools{top:5px!important;left:50%!important;transform:translateX(-50%);max-width:calc(100% - 12px);padding:2px;gap:0;border-color:#434c40;border-radius:8px;background:#1b211df2;box-shadow:0 4px 16px #0004}
-body.mobile-ui .monitor-tools button{min-width:44px;min-height:44px;padding:7px 9px;font-size:12px}
-body.mobile-ui .monitor-tools .divider,body.mobile-ui #monitorSelectionCount{display:none}
-body.mobile-ui .monitor-handle:not(.rotate-handle){width:44px;height:44px;border:0;background:transparent;box-shadow:none;outline:none}
-body.mobile-ui .monitor-handle:not(.rotate-handle)::after{content:'';position:absolute;width:10px;height:10px;left:17px;top:17px;border:1px solid #1a2415;background:var(--accent);box-shadow:0 0 0 1px #bbdf7c77;border-radius:1px}
-body.mobile-ui .monitor-handle.crop-handle::after{width:14px;height:14px;left:15px;top:15px;background:#172310dd;border:2px solid var(--accent)}
-body.mobile-ui .monitor-handle:focus-visible::after{outline:2px solid #fff;outline-offset:2px}
-body.mobile-ui .monitor-handle.rotate-handle{width:44px;height:44px;border-width:1px;font-size:22px}
-body.mobile-ui .empty-preview{inset:8px;padding:12px;gap:6px}
-body.mobile-ui .empty-preview>span{font-size:10px;letter-spacing:2px}
-body.mobile-ui .empty-preview h2{font-size:19px}
-body.mobile-ui .empty-preview p{font-size:12px;line-height:1.5}
-body.mobile-ui .empty-preview .button{margin:0;min-height:44px}
-body.mobile-ui #loadDemo{font-size:12px}
+/* 트랙 탭 하나와 크게 보이는 필름 한 줄이 기본 편집 화면입니다. */
+body.mobile-ui #mobileEditDeck{grid-column:1;grid-row:3;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:var(--bg);border-top:1px solid #333930}
+body.mobile-ui .mobile-edit-heading{display:flex;align-items:center;flex:0 0 44px;min-width:0;gap:2px;padding:0 8px 0 16px}
+body.mobile-ui .mobile-edit-heading>strong,body.mobile-ui .mobile-edit-heading>span,body.mobile-ui .mobile-edit-heading>h2{font-size:13px;font-weight:700;white-space:nowrap;margin-right:auto}
+body.mobile-ui .mobile-history{display:flex;align-items:center;flex:0 0 auto}
+body.mobile-ui #mobileOverview{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:44px;padding:0 10px;background:transparent;color:var(--muted);font-size:12px;font-weight:500;white-space:nowrap;border-radius:6px}
+body.mobile-ui #mobileOverview .mobile-icon{width:18px;height:18px;flex-basis:18px}
+body.mobile-ui #mobileOverview[aria-pressed="true"]{color:var(--accent)}
+body.mobile-ui #mobileUndo,body.mobile-ui #mobileRedo{color:var(--muted)}
+body.mobile-ui #mobileUndo .mobile-icon,body.mobile-ui #mobileRedo .mobile-icon{width:20px;height:20px}
+body.mobile-ui #mobileLayerBar{display:flex;align-items:center;gap:6px;flex:0 0 44px;min-width:0;padding:0 12px 4px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain}
+body.mobile-ui #mobileLayerBar::-webkit-scrollbar{display:none}
+body.mobile-ui .mobile-layer-chip{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;min-height:40px;padding:0 14px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--muted);font-size:12px;font-weight:550;white-space:nowrap}
+body.mobile-ui .mobile-layer-chip .mobile-icon{width:17px;height:17px;flex-basis:17px}
+body.mobile-ui .mobile-layer-chip[aria-pressed="true"],body.mobile-ui .mobile-layer-chip.active{border-color:#c9cbc2;background:var(--surface);color:var(--text);box-shadow:0 1px 2px #222a1e07}
+body.mobile-ui .mobile-layer-chip small{font-size:11px;color:var(--faint)}
+body.mobile-ui #mobileTrackManager{display:flex;align-items:center;justify-content:center;flex:0 0 44px;min-width:44px;min-height:44px;padding:0;background:transparent;color:var(--muted);border:0;border-radius:6px}
+body.mobile-ui #mobileTimelineHost{display:flex;flex:1;min-width:0;min-height:0;overflow:hidden}
+body.mobile-ui #mobileEditDeck .timeline-panel{position:relative;grid-area:auto;display:flex;flex:1;min-height:0;min-width:0;overflow:hidden;background:var(--bg);border:0}
+body.mobile-ui #mobileEditDeck .timeline-toolbar,body.mobile-ui #mobileEditDeck .statusbar,body.mobile-ui #mobileEditDeck .timeline-resizer{display:none}
+body.mobile-ui #mobileEditDeck .timeline-body{flex:1;min-height:0;min-width:0;overflow:hidden;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+body.mobile-ui #mobileEditDeck .timeline-scroll{flex:1;min-width:0;min-height:0;background:#e7e7e0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#bfc3b8 transparent;touch-action:pan-x pan-y}
+body.mobile-ui #mobileEditDeck .timeline-canvas{min-height:100%;background:#e7e7e0;touch-action:none;outline-offset:-2px}
+body.mobile-ui #mobileEditDeck .ruler,body.mobile-ui #mobileEditDeck .ruler-spacer{height:26px;min-height:26px;flex:0 0 26px;background:var(--bg);border-bottom:1px solid #d7d9cf}
+body.mobile-ui #mobileEditDeck .ruler-mark{background:#cdd0c6}
+body.mobile-ui #mobileEditDeck .ruler-mark>span{top:6px;left:7px;font:10px Consolas,monospace;color:#73786e}
+body.mobile-ui #mobileEditDeck .ruler-mark.minor{height:4px;top:21px;background:#c0c4b9}
+body.mobile-ui #mobileEditDeck .track-heads{width:44px;flex:0 0 44px;min-height:0;background:var(--bg);border-right:1px solid #d4d7cb}
+body.mobile-ui #mobileEditDeck .ruler-spacer{font-size:0;padding:0}
+body.mobile-ui #mobileEditDeck .ruler-spacer small{display:none}
+body.mobile-ui #mobileEditDeck #trackHeaders>.track-head,body.mobile-ui #mobileEditDeck #timelineRows>.track{height:52px;min-height:52px;border-bottom:1px solid #d2d5c8;background:transparent;padding:0}
+body.mobile-ui #mobileEditDeck .track-head{gap:0;justify-content:center}
+body.mobile-ui #mobileEditDeck .track-selector{height:100%;min-height:44px;min-width:0;width:44px;flex:1;justify-content:center;padding:0;gap:0;color:var(--muted);background:transparent}
+body.mobile-ui #mobileEditDeck .track-code{display:grid;place-items:center;width:30px;height:30px;min-width:0;padding:0;border:0;border-radius:5px;color:var(--muted);background:transparent;font:600 10px Consolas,monospace}
+body.mobile-ui #mobileEditDeck .track-head.active .track-code,body.mobile-ui #mobileEditDeck .track-selector[aria-pressed="true"] .track-code{background:var(--surface);color:var(--text)}
+body.mobile-ui #mobileEditDeck .track-selector strong,body.mobile-ui #mobileEditDeck .track-selector small,body.mobile-ui #mobileEditDeck .track-switches,body.mobile-ui #mobileEditDeck .add-track,body.mobile-ui #mobileEditDeck .remove-track,body.mobile-ui #mobileEditDeck .track-count{display:none}
+body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] .track-heads{display:none}
+body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] #timelineRows>.track{height:78px;min-height:78px}
+body.mobile-ui #mobileEditDeck .track[data-mobile-visible="false"],body.mobile-ui #mobileEditDeck .track-head[data-mobile-visible="false"]{display:none}
+body.mobile-ui #mobileEditDeck .timeline-block{top:5px;height:calc(100% - 10px);border:1px solid #b2b7aa;border-radius:5px;background:#d4d7ce;color:#30352b;min-width:12px;box-shadow:none;touch-action:none}
+body.mobile-ui #mobileEditDeck .timeline-block.selected{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent);z-index:5}
+body.mobile-ui #mobileEditDeck .timeline-block.timeline-overview-block{min-width:0;border-radius:1px}
+body.mobile-ui #mobileEditDeck .timeline-block .block-label{font-size:11px;padding:0 10px;color:#30372b;text-shadow:none}
+body.mobile-ui #mobileEditDeck .timeline-block.video-block .thumb-strip{opacity:.85}
+body.mobile-ui #mobileEditDeck .thumb-strip img{width:62px;height:100%;object-fit:cover;filter:saturate(.8)}
+body.mobile-ui #mobileEditDeck .timeline-block.video-block .block-label{color:#fff;background:#20261dcc;border-radius:0 0 4px 0;margin-top:0;padding:4px 8px;max-width:calc(100% - 8px);font-size:11px}
+body.mobile-ui #mobileEditDeck .timeline-block.caption-block{background:#dcded6;border-color:#babfb1}
+body.mobile-ui #mobileEditDeck .timeline-block.audio-block{background:#cdd2c6;border-color:#abb3a2}
+body.mobile-ui #mobileEditDeck .waveform i{background:#78816e;opacity:.7}
+body.mobile-ui #mobileEditDeck .clip-settings,body.mobile-ui #mobileEditDeck .timeline-block .clip-actions{display:none}
+body.mobile-ui #mobileEditDeck .block-grip{width:14px;background:#e775394d;opacity:0;touch-action:none}
+body.mobile-ui #mobileEditDeck .timeline-block.selected .block-grip{opacity:1}
+body.mobile-ui #mobileEditDeck .block-grip::after{content:'';position:absolute;left:6px;top:calc(50% - 9px);width:2px;height:18px;background:#fdf6ee;border-radius:1px}
+body.mobile-ui #mobileEditDeck .timeline-overview-block .block-grip{display:none}
+body.mobile-ui #mobileEditDeck .playhead{width:1px;background:#30372c;box-shadow:none}
+body.mobile-ui #mobileEditDeck .playhead>span{width:10px;height:13px;left:-4px;background:var(--accent)}
+body.mobile-ui #mobileEditDeck .transition-chip{min-width:28px;width:28px;height:34px;top:calc(50% - 17px);background:#fafaf0e8;color:#525c4c;border:1px solid #aeb49e;border-radius:5px;font-size:15px}
+body.mobile-ui #mobileEditDeck .transition-chip.selected{border-color:var(--accent);outline:2px solid var(--accent);color:#8e441c}
+body.mobile-ui #mobileEditDeck .track.drop-target{background:#e7753912;box-shadow:inset 0 0 0 1px #e7753977}
+body.mobile-ui #mobileEditDeck .timeline-gap:hover{border-color:#bbc2af;color:#737d67;background:#fafaf71a}
+body.mobile-ui #mobileEditDeck .timeline-gap.selected{border:1px dashed var(--accent);background:#e7753912;color:#965b32;box-shadow:none}
+body.mobile-ui #mobileEditDeck .timeline-marquee{border-color:var(--accent);background:#e7753920;box-shadow:none}
+body.mobile-ui #mobileEditDeck .timeline-insert-preview{border-color:var(--accent);background:#e7753924;color:#7b4c2c}
+body.mobile-ui #mobileEditDeck .timeline-insert-preview.invalid{border-color:#a76551;background:#a7655124;color:#864b38}
+body.mobile-ui #mobileEditDeck .timeline-notice{background:var(--surface);color:var(--muted);border-color:var(--line);font-size:11px;line-height:1.45;padding:0 10px}
+body.mobile-ui #mobileEditDeck .timeline-notice:empty{display:none}
+body.mobile-ui #mobileEditDeck #timelineCanvas.mobile-touch-hold .timeline-block.selected{outline-width:3px}
+body.mobile-ui #mobileEditDeck #timelineCanvas.mobile-touch-pan,body.mobile-ui #mobileEditDeck #timelineCanvas.mobile-touch-pinch{cursor:grabbing}
+body.mobile-ui #mobileTimelineFooter{display:flex;align-items:center;min-height:44px;flex:0 0 44px;gap:0;padding:0 8px 0 16px;background:var(--bg)}
+body.mobile-ui #mobileTimelineFooter .mobile-selection-name{flex:1;min-width:0;margin-right:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted)}
+body.mobile-ui .mobile-zoom-controls{display:flex;align-items:center;flex:0 0 auto}
+body.mobile-ui #mobileTimelineFooter button{color:#666c5d;font-size:18px}
+body.mobile-ui #mobileZoomFit{font-size:11px!important}
+body.mobile-ui #mobileTimelineFooter .mobile-icon{width:20px;height:20px}
 
-/* 선택한 클립의 작업 버튼은 미리보기 바로 아래에 모읍니다. */
-body.mobile-ui #mobileContextBar{
-  grid-column:1;grid-row:2;min-width:0;height:44px;display:flex;align-items:center;gap:2px;padding:0 8px;
-  border-top:1px solid #303539;border-bottom:1px solid #303539;background:#1a1e21;overflow:hidden;
-}
-body.mobile-ui .mobile-selection-name{flex:1;min-width:0;padding:0 6px 0 2px;font-size:12px;line-height:1.3;color:#c3cbc9;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-body.mobile-ui #mobileContextBar button{display:flex;align-items:center;justify-content:center;gap:5px;flex:0 0 44px;min-width:44px;height:44px;padding:0 6px;background:transparent;border-radius:6px;color:#c6cece;font-size:11px}
-body.mobile-ui #mobileContextBar button[aria-pressed=true]{color:var(--accent);background:#2a3524}
-body.mobile-ui #mobileContextBar button:disabled{opacity:.28}
-body.mobile-ui #mobileContextBar .mobile-icon{width:20px;height:20px;flex-basis:20px}
-body.mobile-ui #mobileDelete{color:#d8a49c}
-body.mobile-ui #mobileContextBar button{flex-direction:column;gap:1px}
-body.mobile-ui #mobileContextBar button>span{font-size:9px;white-space:nowrap;line-height:12px}
-body.mobile-ui #mobileCloseMenu>span{display:none}
+/* 도구는 한 줄만 두고 클립을 고르면 같은 줄에서 편집 동작을 고릅니다. */
+body.mobile-ui #mobileActionDock{grid-column:1;grid-row:4;display:flex;align-items:stretch;gap:0;min-width:0;min-height:0;padding:7px max(8px,env(safe-area-inset-right,0px)) calc(9px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));background:var(--surface);border-top:1px solid var(--line);overflow:hidden}
+body.mobile-ui #mobileActionDock>button,body.mobile-ui #mobileActionDock .mobile-action-button{display:flex;flex:1 1 0;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:6px 3px;border-radius:8px;background:transparent;color:var(--text);font-size:12px;font-weight:500;line-height:1.2;white-space:nowrap}
+body.mobile-ui #mobileActionDock .mobile-action-button[aria-pressed="true"]{color:var(--accent);background:#f6eade}
+body.mobile-ui #mobileActionDock .mobile-action-scroll{display:flex;flex:1;min-width:0;gap:3px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain}
+body.mobile-ui #mobileActionDock .mobile-action-scroll::-webkit-scrollbar{display:none}
+body.mobile-ui #mobileActionDock .mobile-action-scroll .mobile-action-button{flex:0 0 68px;min-width:68px}
+body.mobile-ui #mobileActionDock .mobile-action-back{flex:0 0 44px;min-width:44px;margin-right:5px;border-right:1px solid var(--line);border-radius:0}
+body.mobile-ui #mobileActionDock .mobile-action-back .mobile-icon{width:21px;height:21px}
+body.mobile-ui[data-mobile-sheet] #mobileActionDock{visibility:hidden;pointer-events:none}
 
-/* 트랙 이름과 추가 버튼만 남겨 타임라인의 가로 작업 폭을 확보합니다. */
-body.mobile-ui .timeline-panel{grid-column:1;grid-row:3;display:flex;flex-direction:column;position:relative;min-width:0;min-height:0;height:auto;border-top:0;background:#15191c;overflow:hidden}
-body.mobile-ui #timelineResizer,body.mobile-ui .timeline-title,body.mobile-ui .edit-tools,body.mobile-ui .statusbar{display:none}
-body.mobile-ui .timeline-toolbar{height:44px;min-height:44px;flex:0 0 44px;display:flex;justify-content:flex-end;align-items:center;gap:0;padding:0 8px;background:#171b1e;border-bottom:1px solid #30373b}
-body.mobile-ui .timeline-zoom{width:100%;display:flex;align-items:center;justify-content:flex-end;gap:1px}
-body.mobile-ui .timeline-zoom #totalDuration{display:block;flex:1;padding-left:4px;color:#919ba0;font:11px Consolas,monospace}
-body.mobile-ui .timeline-zoom .icon-button{min-width:44px;width:44px;height:44px;flex-basis:44px;font-size:22px}
-body.mobile-ui .timeline-zoom input{display:block;width:88px;max-width:28vw;height:44px;min-height:44px;accent-color:var(--accent)}
-body.mobile-ui #fitTimeline{display:flex;min-width:48px;min-height:44px;padding:7px 9px;font-size:12px;color:#d1d8d5}
-body.mobile-ui .timeline-body{flex:1;min-width:0;min-height:0;display:flex;overflow:hidden}
-body.mobile-ui .track-heads{width:88px;min-width:88px;flex:0 0 88px;min-height:0;border-right:1px solid #373e42;background:#202529}
-body.mobile-ui .ruler-spacer{height:32px;min-height:32px;line-height:32px;padding:0 10px;font-size:11px;color:#9da7aa;border-bottom:1px solid #363d41}
-body.mobile-ui .ruler-spacer small{display:none}
-body.mobile-ui .track-head-viewport{min-height:0;overflow:hidden}
-body.mobile-ui #trackHeaders>.track-head,body.mobile-ui #timelineRows>.track{height:52px;min-height:52px;max-height:52px}
-body.mobile-ui #trackHeaders>.track-head{display:flex;align-items:center;gap:0;padding:0;border-bottom:1px solid #343b40}
-body.mobile-ui .track-head .track-selector{flex:0 0 44px;min-width:44px;max-width:44px;height:52px;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:2px;padding:4px 1px;background:transparent;border:0;border-radius:0}
-body.mobile-ui .track-head .track-selector.active{background:#303d29;color:var(--accent)}
-body.mobile-ui .track-selector .track-code{width:23px;min-width:23px;height:20px;padding:0;line-height:18px;font-size:11px;border-radius:4px}
-body.mobile-ui .track-selector strong{max-width:42px;font-size:10px;line-height:13px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-body.mobile-ui .track-selector small,body.mobile-ui .track-switches,body.mobile-ui .track-head .remove-track{display:none}
-body.mobile-ui .track-head>button.add-track{flex:0 0 44px;width:44px;min-width:44px;height:52px;min-height:44px;padding:0;background:transparent;color:#9fae9a;font-size:20px}
-body.mobile-ui #timelineScroll{min-width:0;min-height:0;flex:1;overflow:auto;overscroll-behavior:contain;scrollbar-width:none;touch-action:pan-x pan-y}
-body.mobile-ui #timelineScroll::-webkit-scrollbar{display:none}
-body.mobile-ui #timelineCanvas{min-height:100%;touch-action:none;-webkit-user-select:none;user-select:none}
-body.mobile-ui #ruler{height:32px;min-height:32px;background:#1a1f22;touch-action:none}
-body.mobile-ui .ruler-mark{height:11px}
-body.mobile-ui .ruler-mark span{font-size:10px;color:#9ca8ad;top:3px}
-body.mobile-ui #timelineRows>.track{background-color:#171d21;border-bottom:1px solid #2e363b}
-body.mobile-ui .timeline-block{top:5px;bottom:5px;border-radius:5px;touch-action:none;-webkit-touch-callout:none;user-select:none}
-body.mobile-ui .timeline-block.selected{border-color:#c4e28e;outline:1px solid #c4e28e;outline-offset:0;box-shadow:0 0 0 1px #151c12}
-body.mobile-ui .block-label{padding:0 17px;font-size:11px;line-height:40px}
-body.mobile-ui .audio-block .block-label,body.mobile-ui .video-block .block-label{line-height:16px}
-body.mobile-ui .block-grip,body.mobile-ui .short-block .block-grip{width:14px;touch-action:none}
-body.mobile-ui .timeline-block.selected .block-grip{background:#bddf8240}
-body.mobile-ui .clip-settings{display:none}
-body.mobile-ui .timeline-block.selected:not(.short-block) .clip-settings{display:flex;top:-1px;right:14px;height:44px;max-width:calc(100% - 28px);overflow:hidden;background:#172016ed;border-radius:0 4px 4px 0}
-body.mobile-ui .clip-settings button{display:grid;place-items:center;flex:0 0 44px;width:44px;height:44px;min-height:44px;padding:0}
-body.mobile-ui .timeline-gap{touch-action:none}
-body.mobile-ui .timeline-gap span{font-size:10px}
-body.mobile-ui .transition-chip{min-width:44px;width:44px;height:44px;padding:0}
-body.mobile-ui .playhead>span{width:18px;height:20px;left:-8px}
-body.mobile-ui #timelineNotice{min-height:22px;max-height:22px;flex:0 0 22px;padding:0 9px;font-size:10px;line-height:22px;text-overflow:ellipsis;white-space:nowrap}
-body.mobile-ui #timelineCanvas.mobile-touch-hold .timeline-block.selected{outline:2px solid var(--accent);outline-offset:1px}
-body.mobile-ui #timelineCanvas.mobile-touch-pan{cursor:grabbing}
-body.mobile-ui #timelineCanvas.mobile-touch-pinch .timeline-block{pointer-events:none}
-body.mobile-ui .timeline-insert-preview{padding:3px 5px;font-size:10px}
-body.mobile-ui .insertion-label{max-width:calc(100% - 8px);font-size:10px;padding:5px 7px}
+/* 열린 패널의 헤더와 내용은 별개이며 키보드가 올라와도 완료가 보입니다. */
+body.mobile-ui #mobileBackdrop,body.mobile-ui #mobilePanel{display:none}
+body.mobile-ui[data-mobile-sheet] #mobileBackdrop{display:block;position:fixed;inset:0 0 auto;height:var(--mobile-vh,100dvh);width:100%;z-index:70;background:#171b1747;border:0;padding:0;touch-action:none}
+body.mobile-ui[data-mobile-sheet] #mobilePanel{display:flex;flex-direction:column;position:fixed;z-index:71;left:0;right:0;bottom:var(--mobile-keyboard-inset,0px);height:var(--mobile-panel-height);min-height:0;max-height:calc(var(--mobile-vh,100dvh) - 12px);border:1px solid #d9ddd0;border-bottom:0;border-radius:17px 17px 0 0;background:var(--surface);box-shadow:0 -6px 24px #20241b14;overflow:hidden;color:var(--text)}
+/* 세로 패널을 열면 편집대를 접고 영상 전체를 패널 위 영역에 다시 맞춥니다.
+   화면 높이는 실제 보이는 영역을 기준으로 하므로 키보드 높이를 두 번 빼지 않습니다. */
+body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet]{--mobile-panel-height:min(calc(var(--mobile-vh,100dvh) * .62),calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - env(safe-area-inset-top,0px) - 110px))}
+body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet="inspector"]{--mobile-panel-height:min(calc(var(--mobile-vh,100dvh) * .52),calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - env(safe-area-inset-top,0px) - 110px))}
+body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet] #mobileStudioShell{grid-template-rows:calc(var(--mobile-header-height) + env(safe-area-inset-top,0px)) minmax(0,1fr) var(--mobile-panel-height)}
+body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet] #mobileEditDeck,body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet] #mobileActionDock{display:none}
+body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet] #mobileViewerHost #viewerStage{padding:8px}
+body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet] #mobileViewerHost #monitorTools,body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet] #mobileViewerHost #monitorOverlay{display:none}
+body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet] #mobileViewerHost .transport-bar{display:none}
+body.mobile-ui[data-mobile-sheet="inspector"] #mobileBackdrop{background:transparent}
+body.mobile-ui .mobile-panel-header{display:flex;align-items:center;gap:7px;flex:0 0 62px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--surface)}
+body.mobile-ui #mobilePanelTitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:650;letter-spacing:-.3px}
+body.mobile-ui #mobilePanelDone{flex-basis:auto;min-width:52px;padding:0 8px;color:#a84c1d;font-weight:650;font-size:13px}
+body.mobile-ui #mobilePanelTabs{display:flex;flex:0 0 48px;align-items:center;gap:6px;padding:0 12px;overflow-x:auto;overflow-y:hidden;border-bottom:1px solid var(--line);scrollbar-width:none;background:var(--surface)}
+body.mobile-ui #mobilePanelTabs button{flex:0 0 auto;min-height:44px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:12px;white-space:nowrap}
+body.mobile-ui #mobilePanelTabs button[aria-selected="true"],body.mobile-ui #mobilePanelTabs button[aria-pressed="true"],body.mobile-ui #mobilePanelTabs button.active{color:#a65326;background:#f7e8dc}
+body.mobile-ui #mobilePanelBody{min-height:0;min-width:0;flex:1;overflow:auto;padding:16px 16px max(24px,env(safe-area-inset-bottom,0px));overscroll-behavior:contain;scroll-padding-block:12px;-webkit-overflow-scrolling:touch;background:var(--surface)}
+body.mobile-ui #mobilePanelBody #library,body.mobile-ui #mobilePanelBody #inspector,body.mobile-ui #mobilePanelBody #mobileMenu{display:flex;position:static;grid-area:auto;flex-direction:column;width:100%;height:auto;max-height:none;min-width:0;min-height:0;overflow:visible;border:0;border-radius:0;padding:0;margin:0;background:transparent;box-shadow:none;transform:none}
+body.mobile-ui #mobilePanelBody .section-heading,body.mobile-ui #mobilePanelBody .library-footer,body.mobile-ui #mobilePanelBody .mobile-sheet-heading,body.mobile-ui #mobilePanelBody .mobile-sheet-close{display:none}
+body.mobile-ui #mobilePanelBody .library-content,body.mobile-ui #mobilePanelBody .inspector-content,body.mobile-ui #mobilePanelBody .mobile-menu-content{flex:none;min-height:0;padding:0;overflow:visible}
+body.mobile-ui #mobilePanelBody .selected-item{display:none}
+body.mobile-ui #mobilePanelBody [data-mobile-filtered="true"]{display:none!important}
+body.mobile-ui .mobile-option-list{display:flex;flex-direction:column;gap:0}
+body.mobile-ui .mobile-option-row{display:flex;align-items:center;gap:14px;width:100%;min-height:64px;text-align:left;padding:12px 4px;background:transparent;color:var(--text);border-bottom:1px solid var(--line);font-size:14px}
+body.mobile-ui .mobile-option-row>.mobile-icon{color:#707665}
+body.mobile-ui .mobile-option-row>div,body.mobile-ui .mobile-option-row>span{flex:1;min-width:0}
+body.mobile-ui .mobile-option-row>.mobile-option-arrow{flex:0 0 16px;min-width:16px;text-align:center;font-size:25px;line-height:1;color:#878c7f}
+body.mobile-ui .mobile-option-row strong{display:block;font-size:14px;font-weight:550;line-height:1.4}
+body.mobile-ui .mobile-option-row small{display:block;margin-top:4px;font-size:12px;color:var(--muted);line-height:1.4}
+body.mobile-ui .mobile-option-row>.mobile-icon:last-child{width:18px;height:18px;flex-basis:18px;color:#858c7b}
+body.mobile-ui .mobile-option-row[aria-pressed="true"]{color:#a44d22}
+body.mobile-ui .mobile-row-switch{width:36px!important;height:22px;flex:0 0 36px!important;min-width:36px;border-radius:12px;background:#d6d9cf;position:relative}
+body.mobile-ui .mobile-row-switch::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fffefa;box-shadow:0 1px 2px #0002}
+body.mobile-ui .mobile-option-row[aria-pressed="true"] .mobile-row-switch{background:var(--accent)}
+body.mobile-ui .mobile-option-row[aria-pressed="true"] .mobile-row-switch::after{left:17px}
+body.mobile-ui .mobile-name-field{display:flex;flex-direction:column;gap:8px;margin-bottom:20px;font-size:12px;color:var(--muted)}
+body.mobile-ui .mobile-category-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
+body.mobile-ui .mobile-category-grid .mobile-option-row{min-height:100px;align-items:flex-start;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--line);border-radius:9px;background:#f1f2eb}
+body.mobile-ui .mobile-menu-section{margin:0 0 20px}
+body.mobile-ui .mobile-menu-section h3{font-size:12px;font-weight:550;color:var(--muted);margin:0 0 6px}
+body.mobile-ui .mobile-gesture-hint{font-size:12px;line-height:1.7;color:var(--muted);margin:16px 0 0}
+body.mobile-ui .mobile-track-row{padding:12px 0;border-bottom:1px solid var(--line)}
+body.mobile-ui .mobile-track-row>strong{display:block;margin-bottom:8px;font-size:14px}
+body.mobile-ui .mobile-track-actions{display:flex;gap:6px;flex-wrap:wrap}
+body.mobile-ui .mobile-track-actions button{min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);color:var(--muted);font-size:12px}
+body.mobile-ui .mobile-track-actions button[aria-pressed="true"]{border-color:#be7951;background:#f8e8dc;color:#93471f}
 
-/* 하단 도구는 시트를 연 상태에서도 다른 항목으로 전환할 수 있습니다. */
-body.mobile-ui .mobile-dock{
-  position:fixed;z-index:100;left:0;right:0;bottom:var(--mobile-keyboard-inset,0px);height:var(--mobile-dock-height);
-  display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;
-  padding:4px max(6px,env(safe-area-inset-right,0px)) var(--mobile-safe-bottom) max(6px,env(safe-area-inset-left,0px));
-  border-top:1px solid #373d40;background:#1a1e21;
-}
-body.mobile-ui .mobile-nav-button{position:relative;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;min-width:0;min-height:56px;padding:5px 2px;border-radius:8px;background:transparent;color:#9ea8ab;font-size:11px;font-weight:500;line-height:1.2}
-body.mobile-ui .mobile-nav-button .mobile-icon{width:23px;height:23px}
-body.mobile-ui .mobile-nav-button[aria-pressed=true],body.mobile-ui .mobile-nav-button.active{color:var(--accent);background:#273124}
-body.mobile-ui .mobile-nav-button[aria-pressed=true]::before{content:'';position:absolute;top:0;width:18px;height:2px;border-radius:1px;background:var(--accent)}
-
-/* 라이브러리와 속성은 같은 하단 시트 위치를 공유합니다. */
-body.mobile-ui #mobileBackdrop{position:fixed;z-index:80;inset:var(--mobile-header-height) 0 calc(var(--mobile-dock-height) + var(--mobile-keyboard-inset,0px));width:auto;height:auto;padding:0;border:0;border-radius:0;background:#0005;backdrop-filter:none;touch-action:manipulation}
-body.mobile-ui #library,body.mobile-ui #inspector,body.mobile-ui #mobileMenu{
-  display:none;position:fixed;z-index:90;left:0;right:0;top:auto;bottom:calc(var(--mobile-dock-height) + var(--mobile-keyboard-inset,0px));width:100%;
-  height:min(58dvh,calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - var(--mobile-dock-height) - 20px));
-  min-height:0;max-height:78dvh;margin:0;padding:0;transform:none;visibility:visible;
-  flex-direction:column;overflow:hidden;border:1px solid #41484c;border-bottom:0;border-radius:18px 18px 0 0;
-  background:#1c2023;box-shadow:0 -16px 48px #0005;
-}
-body.mobile-ui[data-mobile-sheet=library] #library,body.mobile-ui[data-mobile-sheet=inspector] #inspector,body.mobile-ui[data-mobile-sheet=menu] #mobileMenu{display:flex}
-body.mobile-ui #library::before,body.mobile-ui #inspector::before,body.mobile-ui #mobileMenu::before{content:'';position:absolute;z-index:2;top:7px;left:50%;transform:translateX(-50%);width:32px;height:3px;border-radius:2px;background:#5d676b;pointer-events:none}
-body.mobile-ui .section-heading,body.mobile-ui .mobile-sheet-heading{display:flex;align-items:center;gap:8px;flex:0 0 62px;min-height:62px;padding:12px 16px 4px;border-bottom:1px solid #383f43;background:#202529}
-body.mobile-ui .section-heading h1,body.mobile-ui .section-heading h2,body.mobile-ui .mobile-sheet-heading h2{flex:1;min-width:0;font-size:16px;line-height:1.3;font-weight:650;letter-spacing:-.25px}
-body.mobile-ui .section-heading .small-tag{margin-left:auto;font-size:11px;background:#30383d;color:#aab8b5}
-body.mobile-ui .mobile-sheet-close{display:grid;place-items:center;width:44px;min-width:44px;height:44px;padding:0;flex:0 0 44px;border:0;border-radius:8px;background:transparent;color:#b8c1c2;font-size:25px}
-body.mobile-ui .library-content,body.mobile-ui .inspector-content,body.mobile-ui .mobile-menu-content{flex:1;min-height:0;overflow:auto;overscroll-behavior:contain;padding:16px max(16px,env(safe-area-inset-right,0px)) 24px max(16px,env(safe-area-inset-left,0px));-webkit-overflow-scrolling:touch;scroll-padding-top:12px;scroll-padding-bottom:24px}
-body.mobile-ui .library-footer{flex:0 0 auto;padding:10px 16px;font-size:11px;color:#959fa3;border-color:#333b40}
-body.mobile-ui .mobile-menu-section{margin:0 0 22px}
-body.mobile-ui .mobile-menu-section h3,body.mobile-ui .mobile-menu-heading{font-size:11px;line-height:1.4;font-weight:600;letter-spacing:.45px;color:#939fa2;margin:0 0 10px}
-body.mobile-ui .mobile-menu-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
-body.mobile-ui .mobile-menu-item{display:flex;flex-direction:column;align-items:flex-start;justify-content:center;gap:10px;min-width:0;min-height:84px;padding:14px 12px;border:1px solid #3b4448;border-radius:10px;background:#252b2f;color:#e1e7e3;font-size:12px;text-align:left}
-body.mobile-ui .mobile-menu-item .mobile-icon{color:#bbccb4}
-body.mobile-ui .mobile-menu-item span{line-height:1.3}
-body.mobile-ui .mobile-menu-item small{font-size:10px;color:#94a0a4;line-height:1.4}
-body.mobile-ui .mobile-menu-list{display:flex;flex-direction:column;gap:5px}
-body.mobile-ui .mobile-menu-list .mobile-menu-item{min-height:52px;flex-direction:row;align-items:center;justify-content:flex-start}
-body.mobile-ui .mobile-track-list{display:flex;flex-direction:column;gap:8px}
-body.mobile-ui .mobile-track-row{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:9px 10px;margin-bottom:8px;border:1px solid #394247;border-radius:9px;background:#242b2f}
-body.mobile-ui .mobile-track-row strong{flex:1;min-width:50px;font-size:13px;line-height:1.4}
-body.mobile-ui .mobile-track-actions{display:flex;gap:3px;flex-wrap:wrap;max-width:100%}
-body.mobile-ui .mobile-track-actions button{display:grid;place-items:center;min-width:44px;min-height:44px;padding:7px;border:1px solid #424c51;border-radius:7px;background:#2b3338;color:#c9d1d0;font-size:11px}
-body.mobile-ui .mobile-track-actions button[aria-pressed=true]{background:#36432c;color:var(--accent);border-color:#718555}
-
-/* 입력 글씨를 16px로 유지해 모바일 브라우저의 불필요한 확대를 막습니다. */
-body.mobile-ui input:not([type=hidden]):not([type=range]):not([type=checkbox]):not([type=color]),body.mobile-ui select,body.mobile-ui textarea{min-height:44px;font-size:16px!important;line-height:1.4;border-color:#41494e;border-radius:7px;background:#171c20;padding:10px 12px}
-body.mobile-ui textarea{min-height:88px;resize:vertical}
-body.mobile-ui input[type=range]{height:44px;min-height:44px;padding:0;touch-action:pan-y}
-body.mobile-ui input[type=color]{min-width:44px;width:100%;height:44px;min-height:44px;padding:4px}
-body.mobile-ui input[type=checkbox]{width:22px;height:22px;flex:0 0 22px;margin:0}
-body.mobile-ui .field-label{display:block;margin-top:12px;font-size:13px;line-height:1.6;color:#b4c0c2}
-body.mobile-ui .check-label{display:flex;align-items:center;gap:10px;min-height:44px;font-size:13px}
-body.mobile-ui .property-row{display:grid;grid-template-columns:78px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:48px;margin-bottom:8px;font-size:13px}
-body.mobile-ui .property-row>span:first-child{width:auto;min-width:0;font-size:12px;color:#a9b5b8}
-body.mobile-ui .property-row input,body.mobile-ui .property-row select{min-width:0;width:100%}
-body.mobile-ui .property-row output{width:auto;min-width:42px;font:12px Consolas,monospace;text-align:right;color:#d8e1dc}
-body.mobile-ui .property-row select{grid-column:2/-1}
-body.mobile-ui .property-section{padding-bottom:18px;margin-bottom:18px;border-color:#394146}
-body.mobile-ui .property-section h3{font-size:13px;line-height:1.5;margin-bottom:12px;color:#e0e7e2}
-body.mobile-ui .property-section h3>span{font-size:10px;color:#839397}
-body.mobile-ui .field-grid{gap:12px}
-body.mobile-ui .note,body.mobile-ui .inspector-note{font-size:12px;line-height:1.7;color:#9eacaf;overflow-wrap:anywhere}
-body.mobile-ui .keyframe-actions{gap:7px}
-body.mobile-ui .keyframe-actions button{min-height:44px;min-width:44px}
-body.mobile-ui .keyframe-ruler{min-height:44px;margin:12px 0;touch-action:none}
-body.mobile-ui .keyframe-point{min-width:44px;min-height:44px;padding:0;touch-action:none}
-body.mobile-ui .keyframe-row{min-height:48px;gap:8px}
-body.mobile-ui .keyframe-row button{width:44px;min-width:44px;min-height:44px}
-body.mobile-ui .font-trigger{min-height:52px;padding:10px 12px;background:#232b2b}
-body.mobile-ui .font-trigger>span:first-child{font-size:19px}
-body.mobile-ui .font-popup{position:relative;width:100%;max-width:none;padding:8px;border-color:#465446}
-body.mobile-ui .font-search{min-height:44px;font-size:16px!important;padding:10px!important}
-body.mobile-ui .font-filters button{min-height:44px;font-size:12px}
-body.mobile-ui .font-options{max-height:30dvh;overscroll-behavior:contain}
-body.mobile-ui .font-option{min-height:68px}
-body.mobile-ui .font-option-name{font-size:21px}
-
-/* 라이브러리 파일과 프리셋은 손가락으로 선택할 수 있는 크기로 맞춥니다. */
-body.mobile-ui .import-zone{min-height:88px;padding:13px;border-color:#55624e;border-radius:10px;background:#252d23}
-body.mobile-ui .import-zone strong{font-size:14px}
-body.mobile-ui .import-zone .import-plus{font-size:25px;line-height:24px}
-body.mobile-ui .import-zone>span:not(.import-plus),body.mobile-ui .import-zone small{font-size:11px}
-body.mobile-ui .filter-tabs{gap:0;margin:14px 0 12px}
-body.mobile-ui .filter-tabs button{flex:1;min-height:44px;padding:8px 5px;font-size:13px}
-body.mobile-ui .search-box{padding:0 10px;border-radius:8px;margin-bottom:8px}
-body.mobile-ui .search-box input{background:transparent!important;border:0!important;padding-left:4px!important}
+/* 속성 폼 크기를 통일하고 실제 글꼴·색상 미리보기는 보존합니다. */
+body.mobile-ui input:not([type="range"]):not([type="checkbox"]):not([type="color"]),body.mobile-ui select,body.mobile-ui textarea{min-height:44px;max-width:100%;font-size:16px;padding:10px 12px;color:var(--text);background:#fffefa;border:1px solid #cfd2c7;border-radius:7px;line-height:1.4}
+body.mobile-ui input:focus,body.mobile-ui select:focus,body.mobile-ui textarea:focus{border-color:var(--accent);outline:1px solid var(--accent);outline-offset:0}
+body.mobile-ui input[type="range"]{height:44px;min-height:44px;min-width:32px;accent-color:var(--accent);background:transparent;touch-action:pan-y}
+body.mobile-ui input[type="color"]{width:44px;height:44px;min-height:44px;padding:4px;background:var(--surface);border:1px solid #cbd0c0;border-radius:7px}
+body.mobile-ui input[type="checkbox"]{width:20px;height:20px;flex:0 0 20px;accent-color:var(--accent)}
+body.mobile-ui .check-label{display:flex;align-items:center;min-height:44px;gap:10px;font-size:13px;color:var(--text)}
+body.mobile-ui .button{min-height:44px;padding:10px 14px;font-size:13px;border-radius:7px;line-height:1.45;white-space:normal}
+body.mobile-ui .button.primary,body.mobile-ui .button.primary:hover{background:var(--accent);color:#241d17}
+body.mobile-ui .button.secondary{background:var(--surface-2);color:var(--text);border:1px solid #cdd1c4}
+body.mobile-ui .button.subtle,body.mobile-ui .button.subtle:hover{color:#626a58;background:transparent}
+body.mobile-ui .icon-button{width:44px;height:44px;min-width:44px;flex-basis:44px;color:var(--muted)}
+body.mobile-ui .icon-button:hover{color:var(--text);background:var(--surface-2)}
+body.mobile-ui .property-section,body.mobile-ui .inspector-section{padding:12px 0;border-color:var(--line)}
+body.mobile-ui .property-section:first-child,body.mobile-ui .inspector-section:first-child{padding-top:0}
+body.mobile-ui .property-section h3,body.mobile-ui .inspector-section h3{font-size:14px;color:var(--text);margin-bottom:14px}
+body.mobile-ui .property-section h3 span{font-size:12px;color:var(--muted)}
+body.mobile-ui .property-section .reset-small{min-width:44px;min-height:44px;color:var(--muted)}
+body.mobile-ui .property-row{min-height:44px;margin:9px 0;gap:10px;font-size:12px;color:var(--muted)}
+body.mobile-ui .property-row>span:first-child{width:62px;font-size:12px;color:#5b6453}
+body.mobile-ui .property-row output{min-width:51px;min-height:36px;display:flex;align-items:center;justify-content:center;padding:6px;background:#f0f1e9;border:1px solid #d7dbce;color:#48513f;font:12px Consolas,monospace;border-radius:5px}
+body.mobile-ui .property-row input[type="number"],body.mobile-ui .property-row input[type="text"],body.mobile-ui .property-row select{font-size:16px;min-height:44px}
+body.mobile-ui .property-section .field-grid{gap:10px}
+body.mobile-ui .property-section .field-grid .button{min-height:44px;padding:8px;font-size:12px}
+body.mobile-ui .field-label{font-size:13px;color:var(--muted)}
+body.mobile-ui .field-label input,body.mobile-ui .field-label select,body.mobile-ui .property-section .field-label select{font-size:16px;color:var(--text)}
+body.mobile-ui .segmented{border-color:#cfd3c3;border-radius:7px}
+body.mobile-ui .segmented button{min-height:44px;font-size:12px;background:#f2f2ea;color:var(--muted)}
+body.mobile-ui .segmented button.active{background:#f7e4d5;color:#954720}
+body.mobile-ui .note,body.mobile-ui .inspector-note,body.mobile-ui .preset-intro,body.mobile-ui .library-hint,body.mobile-ui .asset-credit{font-size:12px;line-height:1.7;color:var(--muted)}
+body.mobile-ui .note strong{color:#4a5442}
+body.mobile-ui .note.warning{color:#946129}
+body.mobile-ui .small-tag{background:#ebede3;color:#6a735d;font-size:11px}
+body.mobile-ui .section-label{color:#616c55;font-size:12px}
+body.mobile-ui .search-box{min-height:44px;padding:0 11px;margin-bottom:16px;background:#f1f2eb;border:1px solid #d7dbce;border-radius:7px}
+body.mobile-ui .search-box input{border:0!important;background:transparent!important;padding:8px 0!important}
 body.mobile-ui .search-box kbd{display:none}
-body.mobile-ui .asset-tools{margin-bottom:12px}
-body.mobile-ui .asset-tools .button{min-height:44px;font-size:12px;padding:8px}
-body.mobile-ui .asset-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:17px 12px}
-body.mobile-ui .asset-image{height:116px;border-radius:8px;background:#2a3135}
-body.mobile-ui .asset-card{cursor:default;touch-action:pan-y;-webkit-touch-callout:none;user-select:none}
-body.mobile-ui .asset-card h3{font-size:12px;font-weight:550;margin-top:8px;line-height:1.5}
-body.mobile-ui .asset-card p{font-size:10px;margin-top:2px}
-body.mobile-ui .asset-actions{top:5px;right:5px;padding:2px;gap:2px;border-radius:7px;opacity:1;pointer-events:auto;transform:none;background:#101517ed}
-body.mobile-ui .asset-actions .asset-add,body.mobile-ui .asset-actions .asset-remove{width:44px;height:44px;min-width:44px;min-height:44px;padding:0;border-color:transparent;border-radius:5px;font-size:22px}
-body.mobile-ui .asset-duration,body.mobile-ui .asset-kind{font-size:10px}
-body.mobile-ui .library-hint{font-size:11px;line-height:1.65;margin-top:18px}
-body.mobile-ui .section-label{margin:18px 0 10px;font-size:12px}
-body.mobile-ui .preset-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:15px 12px}
-body.mobile-ui .preset-art{min-height:110px;border-radius:8px}
-body.mobile-ui .preset-card strong,body.mobile-ui .preset-card h3{font-size:12px;margin-top:8px}
-body.mobile-ui .sound-card{display:grid;grid-template-columns:44px minmax(0,1fr) 44px;gap:10px;min-height:64px;padding:9px 0;border-bottom:1px solid #333d41}
-body.mobile-ui .sound-play,body.mobile-ui .sound-add{width:44px;height:44px;min-height:44px;border-radius:9px}
-body.mobile-ui .sound-card strong{font-size:13px;line-height:1.4}
-body.mobile-ui .sound-card small{font-size:11px}
-body.mobile-ui .sound-card>div{min-width:0}
-body.mobile-ui .sound-card strong{display:block;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-body.mobile-ui .quick-format-summary p{font-size:12px}
-body.mobile-ui .quick-format-toggle{font-size:13px;min-height:44px}
-body.mobile-ui .quick-format-preset{min-height:64px;padding:10px;grid-template-columns:28px minmax(0,1fr)}
+body.mobile-ui .filter-tabs{gap:18px;overflow:auto;scrollbar-width:none;margin:12px 0 16px;border-color:var(--line)}
+body.mobile-ui .filter-tabs button{flex:0 0 auto;min-height:44px;padding:8px 0;font-size:12px;white-space:nowrap;color:var(--muted)}
+body.mobile-ui .filter-tabs button.active{color:var(--text)}
+body.mobile-ui .import-zone{min-height:100px;padding:14px;gap:5px;border:1px dashed #b2b9a7;background:#f1f2eb;color:#515c46;border-radius:9px}
+body.mobile-ui .import-zone:hover{border-color:#be825c;background:#f4eee5}
+body.mobile-ui .import-zone strong{font-size:14px}
+body.mobile-ui .import-zone>span:not(.import-plus),body.mobile-ui .import-zone small{font-size:12px;color:var(--muted)}
+body.mobile-ui .asset-grid,body.mobile-ui .preset-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 12px}
+body.mobile-ui .asset-image{height:auto;min-height:96px;aspect-ratio:4/3;border-radius:7px;background:#dde0d5}
+body.mobile-ui .asset-card h3,body.mobile-ui .preset-card strong{font-size:13px;color:var(--text);margin-top:8px;line-height:1.5}
+body.mobile-ui .asset-card p,body.mobile-ui .preset-card small{font-size:11px;color:var(--muted)}
+body.mobile-ui .asset-kind,body.mobile-ui .asset-duration{font-size:11px;color:#fff}
+body.mobile-ui .asset-actions{top:4px;right:4px;gap:0;padding:0;opacity:1;pointer-events:auto;transform:none;background:#fafaf7f2;border:1px solid #dce0d3;border-radius:6px;box-shadow:0 1px 4px #17221226}
+body.mobile-ui .asset-actions .asset-add,body.mobile-ui .asset-actions .asset-remove{width:44px;height:44px;min-height:44px;min-width:44px;background:transparent;border:0;border-radius:0;color:#47523d;font-size:21px;padding:0}
+body.mobile-ui .asset-actions .asset-add{border-left:1px solid #daddcf;color:#a64d20}
+body.mobile-ui .asset-actions .asset-add:hover,body.mobile-ui .asset-actions .asset-remove:hover{background:#efeee7;color:#282f23}
+body.mobile-ui .asset-tools .button{min-height:44px;font-size:12px}
+body.mobile-ui .audio-thumb{background:#d8ddcd}
+body.mobile-ui .audio-thumb i{background:#889475}
+body.mobile-ui .preset-art{min-height:128px;height:128px;border-color:#d4d8c9;border-radius:8px;background:#282d26}
+body.mobile-ui .preset-art.caption-preview{height:144px;min-height:144px}
+body.mobile-ui .preset-card.active .preset-art{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+body.mobile-ui .caption-list button{min-height:54px;padding:10px 12px;background:#f1f3eb;color:var(--text);border-color:#d7dccb;font-size:14px}
+body.mobile-ui .caption-list button.selected{border-color:var(--accent)}
+body.mobile-ui .caption-list button small{font-size:11px;color:var(--muted)}
+body.mobile-ui .font-trigger{min-height:48px;background:#fffefa;color:var(--text);border-color:#cdd3c3;border-radius:7px}
+body.mobile-ui .font-trigger>span:first-child{font-size:19px}
+body.mobile-ui .font-popup{background:#f6f7f0;border-color:#ccd2c0;border-radius:8px;padding:10px;box-shadow:0 5px 15px #27321914}
+body.mobile-ui .font-search{font-size:16px}
+body.mobile-ui .font-filters button{min-height:44px;font-size:12px;background:transparent;color:var(--muted)}
+body.mobile-ui .font-filters button.active,body.mobile-ui .font-filters button[aria-pressed="true"]{color:#a65329;background:#f8e9dd}
+body.mobile-ui .font-options{max-height:280px;overscroll-behavior:contain}
+body.mobile-ui .font-option{min-height:60px;padding:10px;background:transparent;color:var(--text);border-color:#dfe3d7}
+body.mobile-ui .font-option:hover,body.mobile-ui .font-option.selected,body.mobile-ui .font-option[aria-selected="true"]{background:#eeefe2;color:var(--text)}
+body.mobile-ui .font-option-name{font-size:20px;color:var(--text)}
+body.mobile-ui .font-load-state,body.mobile-ui .font-picker-note{font-size:12px;color:var(--muted)}
+body.mobile-ui .font-option-sample,body.mobile-ui .font-option small{color:var(--muted);font-size:12px}
+body.mobile-ui .keyframe-actions .button{min-height:44px}
+body.mobile-ui .keyframe-ruler{height:48px;margin:14px 18px;border-color:#adb69f;background:linear-gradient(90deg,#b7bea933 1px,transparent 1px) 0 100%/10% 7px repeat-x}
+body.mobile-ui .keyframe-point{top:4px;min-width:44px;min-height:44px;font-size:20px;color:#818c73}
+body.mobile-ui .keyframe-point.current{color:var(--accent);text-shadow:none}
+body.mobile-ui .keyframe-playhead{background:#626e53}
+body.mobile-ui .keyframe-time{font-size:12px;color:var(--muted)}
+body.mobile-ui .keyframe-row{grid-template-columns:80px 20px minmax(0,1fr) 44px;background:#f0f2e9;min-height:52px;padding:4px;font-size:12px}
+body.mobile-ui .keyframe-row output{color:#616d50}
+body.mobile-ui .keyframe-row button{min-width:44px;min-height:44px;color:#747f63}
+body.mobile-ui .keyframe-rows{max-height:190px}
+
+/* 퀵포맷과 음성 도구도 같은 편집 패널을 사용합니다. */
+body.mobile-ui .quick-format-hero{grid-template-columns:76px minmax(0,1fr);gap:12px 16px;padding:15px;background:#f0f2e9;border:1px solid #d3d8c7;border-radius:9px}
+body.mobile-ui .quick-format-preview{width:72px;border-color:#adb59d;box-shadow:none}
+body.mobile-ui .quick-format-summary strong{font-size:14px;color:var(--text)}
+body.mobile-ui .quick-format-summary p{font-size:12px;line-height:1.55}
+body.mobile-ui .quick-format-toggle{font-size:13px;min-height:44px;color:#596548;gap:10px}
+body.mobile-ui .quick-format-presets{gap:10px}
+body.mobile-ui .quick-format-preset{min-height:70px;padding:12px 10px;background:#f3f4ed;border-color:#d5dac6;grid-template-columns:25px minmax(0,1fr);gap:4px 9px}
 body.mobile-ui .quick-format-preset strong{font-size:12px}
-body.mobile-ui .quick-format-preset small{display:block;font-size:10px;line-height:1.4}
-body.mobile-ui .quick-copy-editor{padding:14px 12px;border-color:#3c4944;background:#202824}
-body.mobile-ui .quick-copy-editor h3{font-size:13px}
-body.mobile-ui .quick-color{font-size:11px;padding:8px 6px}
-body.mobile-ui .quick-video-ratio,body.mobile-ui .quick-video-ratio strong{font-size:11px}
-body.mobile-ui .quick-format-text{font-size:13px}
-body.mobile-ui .smart-card,body.mobile-ui .pc-voice-card{padding:15px;border-radius:10px;background:#242d25;border-color:#465141}
-body.mobile-ui .smart-card h3,body.mobile-ui .voice-panel h3{font-size:14px}
-body.mobile-ui .pc-voice-actions{gap:8px}
-body.mobile-ui .pc-voice-actions .button{min-height:48px;font-size:13px;padding:10px}
-body.mobile-ui .smart-details summary{min-height:44px;display:flex;align-items:center;font-size:13px}
+body.mobile-ui .quick-format-preset small{display:block;font-size:11px}
+body.mobile-ui .quick-format-preset.active{background:#f9e9dc;border-color:#d5a17d;box-shadow:none}
+body.mobile-ui .quick-video-ratio{font-size:12px;padding:10px;background:#f0f2e9}
+body.mobile-ui .quick-video-ratio strong{font-size:12px;color:#9d542c}
+body.mobile-ui .quick-copy-editor{padding:16px 0;margin:16px 0 0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent}
+body.mobile-ui .quick-copy-editor h3{font-size:14px;color:var(--text)}
+body.mobile-ui .quick-format-text{font-size:12px;color:var(--muted)}
+body.mobile-ui .quick-format-text textarea{font-size:16px;min-height:90px;background:#fffefa}
+body.mobile-ui .quick-color{font-size:12px;color:var(--muted)}
+body.mobile-ui .quick-colors{gap:10px}
+body.mobile-ui .voice-card,body.mobile-ui .smart-card,body.mobile-ui .pc-voice-card{background:#f1f3eb;border-color:#d5ddc8;color:var(--text);border-radius:9px}
+body.mobile-ui .voice-avatar{background:#e4e7d9;color:#768361}
+body.mobile-ui .voice-card strong,body.mobile-ui .smart-card h3,body.mobile-ui .pc-voice-card h3{font-size:14px;color:var(--text)}
+body.mobile-ui .voice-card p,body.mobile-ui .smart-card .note{font-size:12px;color:var(--muted)}
+body.mobile-ui .voice-status{background:#f5edde;border-color:#e0d2b5;color:#816132;font-size:12px}
+body.mobile-ui .pc-voice-actions{gap:10px}
+body.mobile-ui .pc-voice-actions .button{min-height:44px;font-size:12px}
+body.mobile-ui .tts-text{min-height:150px;font-size:16px}
+body.mobile-ui .sound-card{display:flex;align-items:center;gap:12px;padding:12px 0;min-height:72px;border:0;border-bottom:1px solid var(--line);border-radius:0;background:transparent}
+body.mobile-ui .sound-card>div{min-width:0;flex:1}
+body.mobile-ui .sound-card strong{font-size:14px;color:var(--text)}
+body.mobile-ui .sound-card small{font-size:12px;color:var(--muted)}
+body.mobile-ui .sound-play,body.mobile-ui .sound-add{flex:0 0 44px;min-width:44px;min-height:44px;border-radius:7px;background:#eceee2;color:#73805d;border-color:#d9dfca}
+body.mobile-ui .sound-add{background:transparent;color:#a65b31;font-size:24px}
+body.mobile-ui .transition-context{background:#f0f2e9;color:#616f4e;font-size:12px}
 
-/* 대화상자는 화면 폭에 맞추고 긴 내용은 창 안에서 스크롤합니다. */
-body.mobile-ui dialog{width:calc(100% - 20px);max-width:600px;max-height:calc(var(--mobile-vh,100dvh) - var(--mobile-safe-top) - var(--mobile-safe-bottom) - 24px);padding:0;border:1px solid #475054;border-radius:16px;background:#202629;color:var(--text);overflow:auto;overscroll-behavior:contain}
-body.mobile-ui dialog::backdrop{background:#030506b8;backdrop-filter:blur(3px)}
-body.mobile-ui .modal-heading{position:sticky;top:0;z-index:2;min-height:64px;padding:14px 16px;background:#252c30;border-bottom:1px solid #3b454a;gap:10px}
-body.mobile-ui .modal-heading h2{font-size:17px;line-height:1.4}
-body.mobile-ui .modal-heading .eyebrow{font-size:10px}
-body.mobile-ui .modal-body,body.mobile-ui .smart-body{padding:16px;overflow-wrap:anywhere}
-body.mobile-ui .smart-body .property-row{grid-template-columns:78px minmax(0,1fr) auto;gap:8px}
-body.mobile-ui .smart-body .property-row>span:first-child{width:auto}
-body.mobile-ui .smart-body .property-row output{min-width:42px}
-body.mobile-ui .smart-result-actions{grid-template-columns:1fr;gap:6px}
-body.mobile-ui .smart-caption-review label{grid-template-columns:1fr;gap:4px}
-body.mobile-ui .smart-body video,body.mobile-ui .smart-body canvas,body.mobile-ui .smart-body audio{max-width:100%}
-body.mobile-ui .smart-rect-editor{max-height:36dvh;overflow:hidden}
-body.mobile-ui .timeline-menu{position:fixed;z-index:130;width:240px;max-width:calc(100vw - 24px);min-width:0;padding:7px;border-radius:10px;box-shadow:0 14px 48px #0008}
-body.mobile-ui .timeline-menu button{min-height:44px;padding:10px;font-size:13px}
-body.mobile-ui .timeline-menu button>small{display:none}
-body.mobile-ui .safe-area-panel{position:fixed;z-index:110;top:auto;bottom:calc(var(--mobile-dock-height) + 8px);left:10px;right:10px;width:auto;max-height:65dvh;padding:14px;overflow:auto;border-radius:12px;background:#222b28}
+/* 기존 기능의 대화상자도 손가락으로 닫고 조절할 수 있습니다. */
+body.mobile-ui dialog.modal,body.mobile-ui dialog.smart-modal{width:calc(100vw - 24px);max-width:620px;max-height:calc(var(--mobile-vh,100dvh) - 24px);margin:auto;padding:0;border:1px solid #d4d8c7;border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 15px 50px #141b1250;overflow:auto;overscroll-behavior:contain}
+body.mobile-ui dialog::backdrop{background:#151b155e}
+body.mobile-ui .modal-heading,body.mobile-ui .smart-modal .modal-heading{position:sticky;top:0;z-index:3;min-height:62px;padding:10px 14px;gap:10px;background:var(--surface);border-color:var(--line)}
+body.mobile-ui .modal-heading h2,body.mobile-ui .smart-modal .modal-heading h2{font-size:16px;line-height:1.4}
+body.mobile-ui .modal-heading .eyebrow{display:none}
+body.mobile-ui .modal-body,body.mobile-ui .smart-body{padding:16px;min-width:0}
+body.mobile-ui .modal .note,body.mobile-ui .modal #exportMessage{font-size:12px;color:var(--muted)}
+body.mobile-ui .export-summary{background:#f1f3eb;border-color:#dadecf}
+body.mobile-ui .export-summary strong{font-size:14px;color:var(--text)}
+body.mobile-ui .export-icon{color:#9a5d37;background:#f5e7d9}
+body.mobile-ui .smart-details summary{min-height:44px;padding:12px 0;font-size:13px;color:var(--muted)}
+body.mobile-ui .smart-details{border-color:var(--line);color:var(--muted)}
+body.mobile-ui .smart-result-actions{gap:10px;flex-wrap:wrap}
+body.mobile-ui .smart-caption-review textarea{font-size:16px;background:#fffefa}
+body.mobile-ui .smart-caption-review label{background:#eff1e8}
+body.mobile-ui .smart-caption-review span{font-size:12px;color:var(--muted)}
+body.mobile-ui .smart-error{border-color:#d7b498;background:#f9ecde;color:#865132;font-size:13px}
+body.mobile-ui .smart-success{color:#4f6740}
+body.mobile-ui .safe-area-panel{position:absolute;z-index:25;left:8px;right:8px;top:8px;bottom:auto;width:auto;max-height:calc(100% - 16px);overflow:auto;padding:14px;background:#fafaf7;color:var(--text);border:1px solid #d7dccb;border-radius:10px;box-shadow:0 4px 20px #0004}
 body.mobile-ui .safe-panel-heading{min-height:44px}
-body.mobile-ui #toast{z-index:150;left:16px;right:16px;bottom:calc(var(--mobile-dock-height) + 12px);width:auto;max-width:none;transform:none;padding:12px 15px;font-size:13px;line-height:1.5;border-radius:10px;white-space:normal}
-body.mobile-ui .drop-overlay{z-index:160;inset:var(--mobile-header-height) 0 calc(var(--mobile-dock-height) + var(--mobile-keyboard-inset,0px));border-radius:0}
+body.mobile-ui .safe-panel-heading strong{font-size:14px}
+body.mobile-ui .timeline-menu{max-width:calc(100vw - 24px);min-width:230px;padding:7px;background:var(--surface);color:var(--text);border:1px solid #d0d7c4;border-radius:10px;box-shadow:0 10px 35px #18201230}
+body.mobile-ui .timeline-menu button{min-height:44px;padding:10px 12px;font-size:13px;background:transparent;color:var(--text)}
+body.mobile-ui .timeline-menu button:hover{background:#f0f2e9}
+body.mobile-ui .timeline-menu kbd{font-size:11px;color:var(--muted)}
+body.mobile-ui .toast{bottom:calc(var(--mobile-dock-height) + env(safe-area-inset-bottom,0px) + 10px);z-index:100;max-width:calc(100vw - 28px);padding:12px 16px;border-radius:8px;background:#303729;color:#f5f6ed;font-size:12px;line-height:1.6;box-shadow:0 4px 14px #202a1926}
+body.mobile-ui[data-mobile-sheet] .toast{bottom:calc(var(--mobile-keyboard-inset,0px) + 18px)}
+body.mobile-ui .drop-overlay{inset:0;background:#f4f5edef;color:var(--text);border-color:var(--accent)}
+body.mobile-ui .drop-overlay p{color:var(--muted)}
+body.mobile-ui ::-webkit-scrollbar{width:5px;height:5px}
+body.mobile-ui ::-webkit-scrollbar-thumb{background:#c7cbbd;border-radius:8px}
+body.mobile-ui ::-webkit-scrollbar-track{background:transparent}
 
-/* 가로 화면에서는 좌우로 작업 공간을 나누고 시트 왼쪽에 미리보기를 남깁니다. */
-body.mobile-ui.mobile-landscape{--mobile-dock-height:calc(58px + var(--mobile-safe-bottom));--mobile-header-height:calc(48px + var(--mobile-safe-top))}
-body.mobile-ui.mobile-landscape #workbench{grid-template-columns:minmax(0,42fr) minmax(0,58fr);grid-template-rows:44px minmax(0,1fr)}
-body.mobile-ui.mobile-landscape .viewer{grid-column:1;grid-row:1/3;border-right:1px solid #343c40}
-body.mobile-ui.mobile-landscape #mobileContextBar{grid-column:2;grid-row:1;padding:0 5px}
-body.mobile-ui.mobile-landscape .timeline-panel{grid-column:2;grid-row:2}
-body.mobile-ui.mobile-landscape .viewer-stage{padding:6px 10px}
-body.mobile-ui.mobile-landscape .viewer-stage:has(.monitor-tools:not([hidden])){padding-top:50px}
-body.mobile-ui.mobile-landscape .monitor-tools button{padding:5px 7px;font-size:11px}
-body.mobile-ui.mobile-landscape .transport-bar{padding:0 3px}
-body.mobile-ui.mobile-landscape .timecode{min-width:76px;font-size:10px}
-body.mobile-ui.mobile-landscape .timecode span{font-size:10px}
-body.mobile-ui.mobile-landscape .play-controls .icon-button{width:44px;min-width:44px;flex-basis:44px}
-body.mobile-ui.mobile-landscape .viewer-options .icon-button{width:44px;min-width:44px;flex-basis:44px}
-body.mobile-ui.mobile-landscape .mobile-nav-button{min-height:48px;flex-direction:row;gap:8px;font-size:11px}
-body.mobile-ui.mobile-landscape .mobile-dock{padding-top:3px}
-body.mobile-ui.mobile-landscape #library,body.mobile-ui.mobile-landscape #inspector,body.mobile-ui.mobile-landscape #mobileMenu{left:42%;width:58%;right:0;bottom:calc(var(--mobile-dock-height) + var(--mobile-keyboard-inset,0px));height:calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - var(--mobile-dock-height));max-height:none;border-radius:14px 0 0 0}
-body.mobile-ui.mobile-landscape #mobileBackdrop{left:42%}
-body.mobile-ui.mobile-landscape .section-heading,body.mobile-ui.mobile-landscape .mobile-sheet-heading{flex-basis:54px;min-height:54px;padding-top:9px}
-body.mobile-ui.mobile-landscape .library-content,body.mobile-ui.mobile-landscape .inspector-content,body.mobile-ui.mobile-landscape .mobile-menu-content{padding:12px 14px 20px}
-body.mobile-ui.mobile-landscape .asset-image{height:94px}
-body.mobile-ui.mobile-landscape .mobile-menu-item{min-height:70px;padding:10px}
-body.mobile-ui.mobile-landscape .font-options{max-height:42dvh}
+/* 가로 화면에서는 영상과 편집대를 나란히 둡니다. */
+body.mobile-ui.mobile-landscape{--mobile-header-height:48px;--mobile-dock-height:74px;--mobile-deck-height:232px;--mobile-panel-height:min(82dvh,calc(var(--mobile-vh,100dvh) - 12px))}
+body.mobile-ui.mobile-landscape #mobileStudioShell{grid-template-columns:minmax(0,46fr) minmax(0,54fr);grid-template-rows:calc(var(--mobile-header-height) + env(safe-area-inset-top,0px)) minmax(0,1fr) calc(var(--mobile-dock-height) + env(safe-area-inset-bottom,0px))}
+body.mobile-ui.mobile-landscape .mobile-header{grid-column:1/3;grid-row:1}
+body.mobile-ui.mobile-landscape #mobileViewerHost{grid-column:1;grid-row:2/4;border-right:1px solid #3b4233;padding-left:env(safe-area-inset-left,0px)}
+body.mobile-ui.mobile-landscape #mobileEditDeck{grid-column:2;grid-row:2;border-top:0}
+body.mobile-ui.mobile-landscape #mobileActionDock{grid-column:2;grid-row:3;padding-top:3px;padding-bottom:calc(5px + env(safe-area-inset-bottom,0px));border-left:1px solid var(--line)}
+body.mobile-ui.mobile-landscape #mobileActionDock>button,body.mobile-ui.mobile-landscape #mobileActionDock .mobile-action-button{min-height:60px;gap:5px}
+body.mobile-ui.mobile-landscape #mobileViewerHost .transport-bar{flex-basis:46px;height:46px}
+body.mobile-ui.mobile-landscape #mobileLayerBar{flex-basis:40px;padding-bottom:0}
+body.mobile-ui.mobile-landscape .mobile-layer-chip{min-height:36px;padding-inline:12px}
+body.mobile-ui.mobile-landscape #mobileTimelineFooter{min-height:40px;flex-basis:40px}
+body.mobile-ui.mobile-landscape .mobile-edit-heading{flex-basis:42px}
+body.mobile-ui.mobile-landscape[data-mobile-sheet] #mobilePanel{left:46%;border-radius:14px 0 0 0}
+body.mobile-ui.mobile-landscape #mobilePanelBody{padding:14px 16px max(20px,env(safe-area-inset-bottom,0px))}
+body.mobile-ui.mobile-landscape .mobile-panel-header{flex-basis:56px;padding-block:5px}
 
 @media(max-width:374px){
-  body.mobile-ui .brand{display:none}
-  body.mobile-ui #openExport{padding:8px;font-size:11px}
-  body.mobile-ui .appbar{gap:3px}
-  body.mobile-ui .timecode{min-width:83px;font-size:11px}
-  body.mobile-ui #mobileContextBar{padding:0 4px;gap:0}
-  body.mobile-ui .mobile-selection-name{font-size:11px}
-  body.mobile-ui .property-row{grid-template-columns:67px minmax(0,1fr) auto;gap:7px}
-  body.mobile-ui .mobile-menu-grid{gap:6px}
-  body.mobile-ui .mobile-menu-item{padding:10px 8px;font-size:11px}
+  body.mobile-ui .mobile-header{gap:4px;padding-right:10px}
+  body.mobile-ui .mobile-project-title strong{font-size:13px}
+  body.mobile-ui #mobileExport{min-width:57px;padding-inline:12px}
+  body.mobile-ui #mobileViewerHost .timecode{font-size:10px}
+  body.mobile-ui .mobile-edit-heading{padding-left:12px}
+  body.mobile-ui #mobileOverview{padding-inline:7px}
+  body.mobile-ui #mobilePanelBody{padding-left:14px;padding-right:14px}
+  body.mobile-ui .monitor-tools button{padding-inline:7px}
+  body.mobile-ui .quick-format-presets{grid-template-columns:minmax(0,1fr)}
 }
-@media(max-height:650px) and (orientation:portrait){
-  body.mobile-ui{--mobile-timeline-height:min(210px,34dvh);--mobile-dock-height:calc(64px + var(--mobile-safe-bottom))}
-  body.mobile-ui .mobile-nav-button{min-height:52px;gap:4px}
-  body.mobile-ui .empty-preview>span,body.mobile-ui .empty-preview p{display:none}
-}
-@media(max-width:700px) and (orientation:landscape){
-  body.mobile-ui.mobile-landscape .timecode{display:none}
+@media(max-height:700px){
+  body.mobile-ui:not(.mobile-landscape){--mobile-deck-height:220px;--mobile-dock-height:80px}
+  body.mobile-ui:not(.mobile-landscape)[data-mobile-timeline="all"]{--mobile-deck-height:278px}
+  body.mobile-ui:not(.mobile-landscape) #mobileStudioShell:has(.timeline-panel[data-mobile-track-view="all"]){--mobile-deck-height:278px}
+  body.mobile-ui:not(.mobile-landscape) #mobileActionDock{padding-top:4px;padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
+  body.mobile-ui:not(.mobile-landscape) #mobileLayerBar{flex-basis:40px;padding-bottom:0}
+  body.mobile-ui:not(.mobile-landscape) .mobile-edit-heading{flex-basis:40px}
+  body.mobile-ui:not(.mobile-landscape) #mobileTimelineFooter{min-height:40px;flex-basis:40px}
 }
 @media(prefers-reduced-motion:reduce){
-  body.mobile-ui *,body.mobile-ui *::before,body.mobile-ui *::after{animation:none!important;transition:none!important;scroll-behavior:auto!important}
+  body.mobile-ui #mobileStudioShell,body.mobile-ui #mobilePanel,body.mobile-ui #mobileActionDock,body.mobile-ui .mobile-layer-chip{scroll-behavior:auto;transition:none}
 }

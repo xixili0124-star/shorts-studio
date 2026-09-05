@@ -9,7 +9,7 @@
 <body>
 <main>
   <h1>PC 스튜디오 DOM 통합 검사</h1>
-  <p>별도 검수 주소의 빈 편집기를 사용합니다. 테스트 자막과 퀵포맷을 추가·수정한 뒤 정리하며 AI 처리, 다운로드, 사용자 프로젝트 교체는 실행하지 않습니다.</p>
+  <p>별도 검수 주소의 빈 편집기를 사용합니다. 배포에 포함된 CC0 영상, 테스트 자막과 퀵포맷을 추가한 뒤 정리하며 AI 분석, 모델 다운로드, 사용자 프로젝트 교체는 실행하지 않습니다.</p>
   <p>실제 앱 DOM과 합성 클릭·포인터·키보드 이벤트로 UI 연결을 검사합니다. 오른쪽 고정 미리보기와 왼쪽 편집 영역을 픽셀로 측정합니다. 390px 전환은 실제 휴대전화의 터치·OS 검증을 대신하지 않습니다.</p>
   <div class="actions"><button id="runAll" disabled>전체 검사 실행</button><span id="status">편집기 준비 중…</span></div>
   <ol id="checks"></ol>
@@ -106,6 +106,41 @@ const tests={
     assert([...q('#desktopLibraryTabs').children].map(node=>node.textContent.trim()).join('|')==='모자이크|크롭','트래킹에 모자이크와 크롭만 표시되지 않습니다.');
     await group('sound');assert([...q('#desktopLibraryTabs').children].map(node=>node.textContent.trim()).join('|')==='효과음|AI TTS|무음 컷','소리 탭의 작업 이름이나 순서가 다릅니다.');
     uniqueIds();return '다섯 작업에서 열 화면 접근 · AI TTS/무음 컷과 모자이크/크롭 분리 · 중복 ID 없음';
+  },
+  async trackingNavigation(){
+    assert(!doc.querySelector('.timeline-block'),'트래킹 탐색 검사는 빈 타임라인에서 시작해야 합니다.');
+    const dialog=q('#smartToolsDialog'),filename='qa-desktop-tracking.mp4';let importedId=null;
+    const closeTracking=async()=>{if(dialog.open)await click('#smartToolsDialog [data-smart-action="cancel"]');await until(()=>!dialog.open&&!q('[data-desktop-group="files"]').disabled,'트래킹 창을 닫은 뒤 편집기가 준비되지 않았습니다.',10000);};
+    const assertTrackingTabs=()=>{
+      const tabs=[...q('#desktopLibraryTabs').children];assert(tabs.map(node=>node.textContent.trim()).join('|')==='모자이크|크롭'&&tabs.every(visible),'상위 트래킹에서 모자이크와 크롭 하위 탭을 볼 수 없습니다.');
+      assert(!dialog.open,'상위 트래킹을 눌렀는데 작업 창이 자동으로 열렸습니다.');
+    };
+    try{
+      // 영상 선택 전 모자이크를 마지막 하위 화면으로 설정합니다. 상위 재방문의 회귀도 검사합니다.
+      await group('tools');await tab('mosaic');assert(!dialog.open,'선택 없이 트래킹 창이 열렸습니다.');await group('files');
+      const response=await fetch('/demo/portrait.mp4');assert(response.ok,'트래킹 메뉴 검사용 CC0 동영상을 읽지 못했습니다.');
+      const file=new win.File([await response.arrayBuffer()],filename,{type:'video/mp4'}),transfer=new win.DataTransfer();transfer.items.add(file);
+      q('#fileInput').files=transfer.files;q('#fileInput').dispatchEvent(new win.Event('change',{bubbles:true}));
+      await until(()=>[...doc.querySelectorAll('#libraryContent [data-asset]')].some(node=>node.querySelector('h3')?.textContent===filename),'검사용 동영상이 라이브러리에 준비되지 않았습니다.',20000);
+      const card=[...doc.querySelectorAll('#libraryContent [data-asset]')].find(node=>node.querySelector('h3')?.textContent===filename);importedId=card.dataset.asset;await click(card.querySelector('.asset-add'));
+      await until(()=>!!doc.querySelector('.timeline-block[data-type="clip"].selected')&&!q('#workbench').inert&&!q('[data-desktop-group="tools"]').disabled,'검사용 동영상이 선택 상태로 준비되지 않았습니다.',20000);
+      const selectedId=q('.timeline-block[data-type="clip"].selected').dataset.id;
+      await group('tools');assertTrackingTabs();
+      assert(q('[data-desktop-tab="mosaic"]').getAttribute('aria-pressed')==='true','상위 트래킹이 마지막으로 보던 모자이크 화면을 잃었습니다.');
+      await tab('mosaic');await until(()=>dialog.open,'모자이크 하위 탭으로 작업 창이 열리지 않았습니다.');assert(q('#smartToolsTitle').textContent==='트래킹 모자이크','모자이크 하위 탭이 다른 작업 창을 열었습니다.');await closeTracking();
+      await group('files');await group('tools');assertTrackingTabs();
+      await tab('crop-tracking');await until(()=>dialog.open,'크롭 하위 탭으로 작업 창이 열리지 않았습니다.');assert(q('#smartToolsTitle').textContent.startsWith('크롭 트래킹'),'크롭 하위 탭이 다른 작업 창을 열었습니다.');await closeTracking();
+      await group('sound');await group('tools');assertTrackingTabs();
+      assert(q('[data-desktop-tab="crop-tracking"]').getAttribute('aria-pressed')==='true','크롭을 사용한 뒤 상위 재방문에서 마지막 하위 화면이 사라졌습니다.');
+      assert(q('.timeline-block[data-type="clip"].selected').dataset.id===selectedId,'트래킹 메뉴만 오갔는데 선택한 영상이 바뀌었습니다.');
+    }finally{
+      await closeTracking();
+      for(let count=0;doc.querySelector('.timeline-block')&&count<6;count++){assert(!q('#undo').disabled,'검사용 동영상과 분리 오디오를 되돌릴 수 없습니다.');await click('#undo');}
+      assert(!doc.querySelector('.timeline-block'),'트래킹 탐색 검사 후 테스트 클립이 남았습니다.');await group('files');
+      const remove=importedId&&doc.querySelector('#libraryContent [data-remove-asset="'+importedId+'"]');if(remove)await click(remove);
+      assert(!importedId||!doc.querySelector('#libraryContent [data-asset="'+importedId+'"]'),'검사용 동영상이 라이브러리에 남았습니다.');
+    }
+    uniqueIds();return '선택 영상의 상위 트래킹/재방문은 하위 탭만 표시 · 모자이크/크롭 하위 클릭만 작업 창 열기 · 분석 없이 테스트 영상 정리';
   },
   async trackLabels(){
     assert(iframe.clientWidth===1280,'트랙 이름은 1280px PC 폭에서 검사해야 합니다.');

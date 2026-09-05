@@ -97,7 +97,14 @@ export function listSavedQuickFormats(storage) {
 
 export function saveQuickFormat(template, name, { storage, id } = {}) {
   if (!record(template)) throw new Error('저장할 퀵포맷 설정이 올바르지 않습니다.');
-  const resolved = storageAccess(storage), items = readRecords(resolved), label = nameValue(name);
+  const resolved = storageAccess(storage), items = readRecords(resolved);
+  let label;
+  if (name === undefined) {
+    const names = new Set(items.map(item => item.name));
+    let number = 1;
+    while (names.has(`퀵포맷 ${number}`)) number++;
+    label = `퀵포맷 ${number}`;
+  } else label = nameValue(name);
   const index = id === undefined ? -1 : items.findIndex(item => item.id === id);
   if (id !== undefined && index < 0) throw new Error('저장한 퀵포맷을 찾을 수 없습니다. 목록을 다시 열어 주세요.');
   if (index < 0 && items.length >= MAX_SAVED_QUICK_FORMATS) throw new Error('퀵포맷은 20개까지 저장할 수 있습니다. 사용하지 않는 퀵포맷을 삭제한 뒤 다시 저장해 주세요.');
@@ -119,6 +126,16 @@ export function deleteSavedQuickFormat(id, storage) {
   if (items.length === next.length) return false;
   writeRecords(resolved, next);
   return true;
+}
+
+// 이름 편집에는 현재 프로젝트를 받지 않아 저장한 문구와 스타일이 덮어써지지 않습니다.
+export function renameSavedQuickFormat(id, name, storage) {
+  const resolved = storageAccess(storage), items = readRecords(resolved), index = items.findIndex(item => item.id === id);
+  if (index < 0) throw new Error('저장한 퀵포맷을 찾을 수 없습니다. 목록을 다시 열어 주세요.');
+  const item = { ...items[index], name:nameValue(name) };
+  items[index] = item;
+  writeRecords(resolved, items);
+  return item;
 }
 
 export function applySavedQuickFormat(template, id, storage) {

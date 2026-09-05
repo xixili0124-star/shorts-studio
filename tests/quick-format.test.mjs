@@ -12,7 +12,7 @@ import {
 } from '../public/js/quick-format.js';
 import {
   SAVED_QUICK_FORMATS_KEY, MAX_SAVED_QUICK_FORMATS,
-  listSavedQuickFormats, saveQuickFormat, deleteSavedQuickFormat, applySavedQuickFormat,
+  listSavedQuickFormats, saveQuickFormat, deleteSavedQuickFormat, applySavedQuickFormat, renameSavedQuickFormat,
 } from '../public/js/saved-quick-formats.js';
 import { captureDocument, restoreDocument, History, validateDocument } from '../public/js/project-store.js';
 import { project, newClipDefaults } from '../public/js/state.js';
@@ -84,6 +84,42 @@ test('saved formats can be replaced and deleted without affecting other entries'
   assert.throws(()=>applySavedQuickFormat(template,first.id,storage),/찾을 수 없습니다/);
   assert.deepEqual(template,before,'missing records must not partially change the template');
   assert.throws(()=>saveQuickFormat(template,'없음',{storage,id:first.id}),/찾을 수 없습니다/);
+});
+
+test('saving without a name assigns the first unused automatic format name', () => {
+  const storage=quickFormatStorage(), template={};applyQuickFormatPreset(template,'balanced');
+  const first=saveQuickFormat(template,undefined,{storage}), second=saveQuickFormat(template,undefined,{storage});
+  assert.equal(first.name,'퀵포맷 1');assert.equal(second.name,'퀵포맷 2');
+  renameSavedQuickFormat(first.id,'나만의 이름',storage);
+  assert.equal(saveQuickFormat(template,undefined,{storage}).name,'퀵포맷 1','renamed slots may be reused without duplicate names');
+  assert.equal(saveQuickFormat(template,undefined,{storage}).name,'퀵포맷 3');
+});
+
+test('renaming changes only the stored name and preserves saved settings and other entries', () => {
+  const storage=quickFormatStorage(), template={};applyQuickFormatPreset(template,'top-focus');
+  setQuickFormatText(template,'top','원래 *강조*\n문구');
+  setQuickFormatTextStyle(template,'top','color','#2468ac');
+  const saved=saveQuickFormat(template,undefined,{storage});saveQuickFormat(template,'다른 포맷',{storage});
+  const before=JSON.parse(storage.getItem(SAVED_QUICK_FORMATS_KEY)), nextTemplate={};
+  applyQuickFormatPreset(template,'wide');setQuickFormatText(template,'top','지금 편집 중인 다른 문구');
+  const renamed=renameSavedQuickFormat(saved.id,'  수정한 이름  ',storage);
+  assert.equal(renamed.name,'수정한 이름');assert.equal(renamed.id,saved.id);
+  const after=JSON.parse(storage.getItem(SAVED_QUICK_FORMATS_KEY));
+  assert.deepEqual(after.items[0].settings,before.items[0].settings);
+  assert.deepEqual(after.items[1],before.items[1]);
+  assert.deepEqual(applySavedQuickFormat(nextTemplate,saved.id,storage),saved.settings,'renaming never snapshots the currently edited format');
+  assert.equal(quickFormatState(template).topText,'지금 편집 중인 다른 문구');
+});
+
+test('invalid or failed renames retain the existing stored format', () => {
+  const storage=quickFormatStorage(), item=saveQuickFormat({},'원래 이름',{storage});
+  const before=storage.getItem(SAVED_QUICK_FORMATS_KEY);
+  assert.throws(()=>renameSavedQuickFormat(item.id,'\n\u0000 ',storage),/이름/);
+  assert.throws(()=>renameSavedQuickFormat('missing','변경',storage),/찾을 수 없습니다/);
+  assert.equal(storage.getItem(SAVED_QUICK_FORMATS_KEY),before);
+  storage.setItem=()=>{throw new Error('QuotaExceededError');};
+  assert.throws(()=>renameSavedQuickFormat(item.id,'저장 실패',storage),/저장 공간/);
+  assert.equal(storage.getItem(SAVED_QUICK_FORMATS_KEY),before);
 });
 
 test('saved formats reject excess entries, allow updating at the limit, and bound names and text', () => {

@@ -1,10 +1,20 @@
 /* 저장한 포맷은 PC와 모바일에서 같은 동작을 제공합니다. */
 .saved-quick-formats{border:1px solid var(--line);background:var(--surface-2);padding:14px;border-radius:8px;margin:16px 0}
-.saved-quick-formats h3{font-size:13px}.saved-quick-formats .field-label{margin:12px 0 9px}
+.saved-quick-formats h3{font-size:13px;margin:0 0 12px}
 .saved-quick-list{display:flex;flex-direction:column;gap:7px;margin-top:12px}
-.saved-quick-row{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
-.saved-quick-row button{background:transparent;min-height:38px;padding:9px;color:var(--text)}
-.saved-quick-row [data-quick-use]{flex:1;min-width:0;text-align:left;display:flex;align-items:center;gap:10px;overflow-wrap:anywhere}
-.saved-quick-row [data-quick-use] span{margin-left:auto;flex-shrink:0;font-size:11px;color:var(--accent)}
-.saved-quick-row [data-quick-remove]{flex:0 0 34px;color:var(--muted);font-size:19px}
+.saved-quick-row{display:flex;align-items:center;min-height:44px;border:1px solid var(--line);border-radius:6px;overflow:hidden;background:var(--surface)}
+.saved-quick-name{flex:1;min-width:0;padding:10px 12px;font-size:12px;line-height:1.45;overflow-wrap:anywhere}
+.saved-quick-actions{display:flex;flex:none;align-self:stretch}
+.saved-quick-row button{display:grid;place-items:center;min-height:42px;padding:8px;border:0;border-radius:0;background:transparent;color:var(--muted);cursor:pointer}
+.saved-quick-actions button{width:34px;flex:0 0 34px}
+.saved-quick-actions svg{display:block;width:17px;height:17px;pointer-events:none}
+.saved-quick-row [data-quick-use]{color:var(--accent)}
+.saved-quick-row [data-quick-remove]:hover{color:var(--danger,#ef8b82)}
 .saved-quick-row button:hover{background:var(--surface-3)}
+.saved-quick-row button:focus-visible{outline:2px solid var(--accent);outline-offset:-3px}
+.saved-quick-name-editor{display:grid;grid-template-columns:minmax(0,1fr) auto auto;align-items:center;gap:3px;width:100%;padding:4px}
+.saved-quick-name-editor input{width:100%;min-width:0;height:36px;padding:6px 8px;border:1px solid var(--line);border-radius:4px;background:var(--surface-2);color:var(--text);font:inherit;font-size:12px}
+.saved-quick-name-editor button{min-height:36px;padding:6px;font-size:11px}
+.saved-quick-name-editor [data-quick-rename-save]{color:var(--accent)}
+.saved-quick-row [hidden]{display:none!important}
+@media(pointer:coarse){.saved-quick-actions button{width:42px;flex-basis:42px;min-height:44px}.saved-quick-name-editor button{min-height:44px}}

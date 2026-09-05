@@ -58,7 +58,16 @@ const tests={
       assert(textBox.right<=box.right+1&&textBox.left>=box.left,'트랙명이 선택 버튼 밖으로 넘칩니다: '+label.textContent);
       assert(Math.abs(badgeBox.width-24)<.5&&Math.abs(badgeBox.height-24)<.5,'트랙 배지 크기가 24×24가 아닙니다: '+badge.textContent);
     }
-    return '1280px에서 자막·그래픽·영상·오디오·보이스 전체 이름, 동일한 24px 배지, 순서 숫자 제거';
+    const heads=q('.track-heads').getBoundingClientRect(),scroll=q('#timelineScroll').getBoundingClientRect(),tools=q('.edit-tools').getBoundingClientRect(),library=q('#library').getBoundingClientRect(),panel=q('.timeline-panel').getBoundingClientRect();
+    assert(heads.width<=185,'트랙 칸에 과도한 빈 폭이 남았습니다.');
+    assert(tools.left>=scroll.left&&tools.left>=library.right-1,'편집 도구가 트랙 칸이나 연장한 메뉴 패널과 겹칩니다.');
+    assert(Math.abs(library.bottom-scroll.top)<=1&&Math.abs(panel.left)<1,'메뉴 패널이 + 줄을 넘어 트랙까지 내려왔거나 타임라인 전체 폭이 줄었습니다.');
+    assert(!visible(q('.timeline-title'))&&!doc.querySelector('#desktopTrackMore'),'타임라인 왼쪽 + 또는 빈 제목 줄이 남았습니다.');
+    await click('#trackHeaders .audio-head [data-add-track]');
+    assert(doc.querySelectorAll('#trackHeaders .track-selector').length===selectors.length+1,'행의 + 버튼으로 추가한 트랙이 없습니다.');
+    for(const label of doc.querySelectorAll('#trackHeaders .track-selector strong'))assert(label.scrollWidth<=label.clientWidth+1,'추가 트랙명이 잘립니다: '+label.textContent);
+    await click('#undo');assert(doc.querySelectorAll('#trackHeaders .track-selector').length===selectors.length,'추가 트랙 되돌리기가 실패했습니다.');
+    return '184px 트랙 칸·24px 배지·전체 이름, 메뉴는 + 줄까지만 연장, 타임라인 전체 폭 유지';
   },
   async captionPanels(){
     await group('captions');const host=q('#libraryContent'),children=[...host.children];
@@ -88,35 +97,51 @@ const tests={
     await click('#desktopCloseInspector');assert(!visible(q('#inspector')),'편집 패널이 접히지 않습니다.');await click('#toggleInspector');assert(visible(q('#inspector')),'미리보기 버튼으로 편집 패널을 다시 열 수 없습니다.');assert(activeInspector()==='motion','패널 재개방 시 현재 작업이 사라졌습니다.');
     const projectMenu=q('.desktop-project-menu');await click(projectMenu.querySelector('summary'));assert(projectMenu.open,'프로젝트 메뉴가 열리지 않습니다.');for(const id of ['saveProject','openProject']){assert(q('#'+id)===originals.get(id),id+' 버튼이 복제됐습니다.');assert(visible(q('#'+id))&&typeof q('#'+id).onclick==='function',id+'의 원래 실행 연결이 사라졌습니다.');}await click(projectMenu.querySelector('summary'));
     await click('#desktopEditMore > summary');for(const id of ['rippleDeleteClip','copyClipSettings','pasteClipSettings']){assert(q('#'+id)===originals.get(id)&&visible(q('#'+id)),id+' 원래 버튼이 추가 도구에 연결되지 않았습니다.');}await click('#copyClipSettings');assert(!q('#desktopEditMore').open,'설정 복사 후 메뉴가 닫히지 않습니다.');assert(!q('#pasteClipSettings').disabled,'실제 설정 복사 명령이 연결되지 않았습니다.');
-    await click('#desktopTrackMore > summary');assert(visible(q('#trackRoleSelect'))&&visible(q('#addTrack')),'트랙 추가의 종류와 실행 버튼에 접근할 수 없습니다.');await click('#desktopTrackMore > summary');return '편집 패널 재개방 · 프로젝트/추가 편집/트랙 메뉴의 원래 버튼 연결';
+    assert(!doc.querySelector('#desktopTrackMore'),'제거한 상단 트랙 + 버튼이 남았습니다.');
+    assert([...doc.querySelectorAll('#trackHeaders [data-add-track]')].length>=5,'각 행의 트랙 + 버튼이 사라졌습니다.');
+    return '편집 패널 재개방 · 프로젝트/추가 편집 메뉴 연결 · 각 트랙의 + 유지';
   },
   async savedQuickFormat(){
     await group('design');await tab('quick-format');
     const previousIds=[...doc.querySelectorAll('[data-quick-use]')].map(node=>node.dataset.quickUse);
     const name='PC 검수 포맷 '+Date.now(),copy='검수 *강조*\n다시 쓰는 상단 문구';let savedId;
     try{
+      assert(!doc.querySelector('#quickFormatName'),'저장 전 이름 입력칸이 남았습니다.');
+      assert([...doc.querySelectorAll('[data-quick-name]')].every(node=>!visible(node)),'연필을 누르기 전에 이름 편집칸이 보입니다.');
       await click('[data-quick-preset="balanced"]');
       await input('[data-quick-text="top"]',copy);
       await input('[data-quick-position="top"][data-quick-style="background"]','#234567');
-      await input('#quickFormatName',name);await click('[data-quick-save]');
-      const saved=[...doc.querySelectorAll('[data-quick-use]')].find(node=>node.textContent.startsWith(name));
-      assert(saved,'이름으로 저장한 퀵포맷이 목록에 표시되지 않았습니다.');savedId=saved.dataset.quickUse;
+      await click('[data-quick-save]');
+      const saved=[...doc.querySelectorAll('[data-quick-use]')].find(node=>!previousIds.includes(node.dataset.quickUse));
+      assert(saved,'저장한 퀵포맷이 목록에 표시되지 않았습니다.');savedId=saved.dataset.quickUse;
       assert(!previousIds.includes(savedId),'새 포맷이 기존 저장 항목을 덮어썼습니다.');
+      const row=()=>q('[data-quick-row="'+savedId+'"]'),nameInput=()=>q('[data-quick-name="'+savedId+'"]');
+      const autoName=row().querySelector('.saved-quick-name').textContent;
+      assert(/^퀵포맷 [1-9]\d*$/.test(autoName),'퀵포맷 N 자동 이름이 아닙니다.');
+      for(const key of ['use','remove','rename']){const action=q('[data-quick-'+key+'="'+savedId+'"]');assert(visible(action)&&action.getAttribute('aria-label')&&action.getAttribute('title')&&action.querySelector('svg'),'적용·삭제·이름 수정 아이콘의 접근성 설명이 없습니다.');}
       await group('files');await group('design');await tab('quick-format');
       assert(visible(q('[data-quick-use="'+savedId+'"]')),'라이브러리를 다시 열자 저장한 퀵포맷이 사라졌습니다.');
       await click('[data-quick-preset="wide"]');await input('[data-quick-text="top"]','다른 문구');
       await input('[data-quick-position="top"][data-quick-style="background"]','#765432');
+      await click('[data-quick-rename="'+savedId+'"]');assert(visible(nameInput())&&doc.activeElement===nameInput(),'연필 클릭으로 이름 편집에 포커스가 이동하지 않았습니다.');
+      await input('[data-quick-name="'+savedId+'"]','취소할 이름');nameInput().dispatchEvent(new win.KeyboardEvent('keydown',{key:'Escape',bubbles:true,cancelable:true}));await settle();
+      assert(!visible(nameInput())&&row().querySelector('.saved-quick-name').textContent===autoName,'Escape로 이름 수정이 취소되지 않았습니다.');
+      await click('[data-quick-rename="'+savedId+'"]');await input('[data-quick-name="'+savedId+'"]',name);nameInput().dispatchEvent(new win.KeyboardEvent('keydown',{key:'Enter',bubbles:true,cancelable:true}));await settle();
+      assert(!visible(nameInput())&&row().querySelector('.saved-quick-name').textContent===name,'Enter로 이름 수정이 확정되지 않았습니다.');
+      await click('[data-quick-rename="'+savedId+'"]');await input('[data-quick-name="'+savedId+'"]',name+' 저장');await click('[data-quick-rename-save="'+savedId+'"]');
+      assert(row().querySelector('.saved-quick-name').textContent===name+' 저장','이름 저장 버튼으로 수정이 확정되지 않았습니다.');
       await click('[data-quick-use="'+savedId+'"]');
       assert(q('[data-quick-enabled]').checked,'저장한 포맷 적용 후 사용 상태가 꺼졌습니다.');
       assert(q('[data-quick-preset="balanced"]').getAttribute('aria-pressed')==='true','저장한 상하단 여백이 복원되지 않았습니다.');
       assert(q('[data-quick-text="top"]').value===copy,'저장한 줄바꿈/강조 문구가 복원되지 않았습니다.');
       assert(q('[data-quick-position="top"][data-quick-style="background"]').value==='#234567','저장한 상단 배경색이 복원되지 않았습니다.');
     }finally{
+      const cancel=savedId&&doc.querySelector('[data-quick-rename-cancel="'+savedId+'"]');if(cancel&&visible(cancel))await click(cancel);
       if(savedId&&doc.querySelector('[data-quick-remove="'+savedId+'"]'))await click('[data-quick-remove="'+savedId+'"]');
     }
     assert(!doc.querySelector('[data-quick-use="'+savedId+'"]'),'테스트 퀵포맷 삭제가 목록에 반영되지 않았습니다.');
     assert([...doc.querySelectorAll('[data-quick-use]')].map(node=>node.dataset.quickUse).join('|')===previousIds.join('|'),'기존 저장 포맷 목록이 변경됐습니다.');
-    return '현재 퀵포맷 저장 → 라이브러리 재개방 → 여백·문구·배경색 복원 → 테스트 저장 항목 삭제';
+    return '자동 이름 저장 → 연필 이름 수정·Enter/저장·Escape → 기존 저장 설정 복원 → 테스트 저장 항목 삭제';
   },
   async mobileRoundTrip(){
     const nodes=new Map(['library','inspector'].map(id=>[id,q('#'+id)]));nodes.set('viewer',q('.viewer'));nodes.set('timeline',q('.timeline-panel'));const parents=new Map([...nodes].map(([key,node])=>[key,node.parentElement]));
@@ -141,7 +166,7 @@ async function run(){
 }
 $('runAll').onclick=run;
 try{
-  await until(()=>iframe.contentDocument?.documentElement.dataset.studioReady==='true','편집기 초기화/폰트 준비가 20초 안에 완료되지 않았습니다.',20000);doc=iframe.contentDocument;win=iframe.contentWindow;
+  await until(()=>iframe.contentDocument?.documentElement?.dataset.studioReady==='true','편집기 초기화/폰트 준비가 20초 안에 완료되지 않았습니다.',20000);doc=iframe.contentDocument;win=iframe.contentWindow;
   win.addEventListener('error',event=>{if(running)errors.push(event.error?.stack||event.message);});win.addEventListener('unhandledrejection',event=>{if(running)errors.push(event.reason?.stack||String(event.reason));});
   assert(doc.body.classList.contains('desktop-ui'),'처음부터 PC 전용 레이아웃이 아닙니다.');assert(captions().length===0,'빈 프로젝트가 아닌 기존 자막을 감지했습니다.');for(const id of ['saveProject','openProject','rippleDeleteClip','copyClipSettings','pasteClipSettings'])originals.set(id,q('#'+id));
   ready=true;document.body.dataset.result='ready';$('runAll').disabled=false;$('status').textContent='준비 완료 · '+Object.keys(tests).length+'개 검사';$('result').textContent='전체 검사 실행을 누르세요.';

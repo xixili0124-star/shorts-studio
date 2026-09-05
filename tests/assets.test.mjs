@@ -8,6 +8,7 @@ import * as soundEffectModule from '../public/js/sound-effects.js';
 import {addDecodedAudioAsset,assets} from '../public/js/project-store.js';
 import {DEMO_MEDIA,createDemoMediaFile} from '../public/js/demo-media.js';
 import {Input,BufferSource,ALL_FORMATS,EncodedPacketSink} from '../public/vendor/mediabunny.min.js';
+import {isLegacyDemoDraft,LEGACY_DEMO_ASSET_IDS} from '../public/js/legacy-demo.js';
 
 const {SOUND_EFFECTS,createSoundEffect,soundEffectAssetId}=soundEffectModule;
 
@@ -23,6 +24,62 @@ const soundBytes=effect=>readFileSync(new URL(soundSource(effect).file,soundRoot
 const demoRoot=new URL('../public/demo/',import.meta.url);
 const demoSources=JSON.parse(readFileSync(new URL('manifest.json',demoRoot),'utf8'));
 const demoBytes=media=>readFileSync(new URL(media.file,new URL('../public/js/',import.meta.url)));
+
+function legacyDemoFixture(){
+  const records=[
+    {id:'sample-image-1',file:{name:'서울의 밤 01.jpg',type:'image/jpeg',size:405563},kind:'image'},
+    {id:'sample-image-2',file:{name:'서울의 밤 02.jpg',type:'image/jpeg',size:282494},kind:'image'},
+    {id:'sample-image-3',file:{name:'서울의 밤 03.jpg',type:'image/jpeg',size:342127},kind:'image'},
+    {id:'sample-sound',file:{name:'Night pulse · 샘플 사운드.wav',type:'audio/wav',size:576044},kind:'audio'},
+  ];
+  const doc={name:'서울의 밤, 짧은 기록',clips:records.slice(0,3).map((record,index)=>({id:'clip-'+index,assetId:record.id,type:'image'})),tracks:[{id:'audio-1',assetId:'sample-sound'}],captions:[],overlays:[]};
+  return {doc,records};
+}
+
+test('legacy image demo detection allows text and layout edits without mutating a restored document',()=>{
+  const {doc,records}=legacyDemoFixture();
+  doc.captions.push({id:'my-caption',text:'직접 수정한 자막',start:1,end:3});
+  doc.overlays.push({id:'my-graphic',text:'새 그래픽',graphic:'lower'});
+  doc.template={quickFormat:true,hook:{text:'상단 문구'},footer:{text:'하단 문구'}};
+  doc.clips.reverse();doc.clips[0].start=12;
+  const before=structuredClone({doc,records});
+  assert.equal(isLegacyDemoDraft(doc,records),true);
+  assert.deepEqual({doc,records},before);
+  assert.deepEqual(LEGACY_DEMO_ASSET_IDS,records.map(record=>record.id));
+  const header=records.map(record=>({id:record.id,...record.file}));
+  assert.equal(isLegacyDemoDraft(doc,header),true,'이전 .shorts 메타데이터도 같은 범위로 검사합니다');
+});
+
+test('legacy replacement preserves renamed work and used external media while leaving unused library files alone',()=>{
+  const {doc,records}=legacyDemoFixture();
+  assert.equal(isLegacyDemoDraft({...doc,name:'서울 여행 완성본'},records),false);
+  assert.equal(isLegacyDemoDraft({...doc,name:'움직임을 담은 샘플'},records),false);
+  const external={id:'user-video',file:{name:'서울의 밤 01.jpg',type:'image/jpeg',size:405563},kind:'image'};
+  const withUnused=[...records,external],before=structuredClone(withUnused);
+  assert.equal(isLegacyDemoDraft(doc,withUnused),true,'라이브러리에만 있는 사용자 파일을 남기면서 예시를 교체합니다');
+  assert.equal(isLegacyDemoDraft(doc,[...records,{...external,libraryHidden:true}]),true);
+  assert.deepEqual(withUnused,before,'교체 판별은 사용자가 가져온 파일을 수정·삭제하지 않습니다');
+  assert.equal(isLegacyDemoDraft({...doc,tracks:[...doc.tracks,{assetId:'my-recording'}]},records),false);
+  assert.equal(isLegacyDemoDraft({...doc,clips:[...doc.clips,{type:'image',assetId:'user-video'}]},withUnused),false);
+  assert.equal(isLegacyDemoDraft({...doc,clips:[...doc.clips,{type:'video',assetId:'user-video'}]},withUnused),false);
+  assert.equal(isLegacyDemoDraft({...doc,overlays:[{text:'그림',assetId:'user-video'}]},withUnused),false);
+  assert.equal(isLegacyDemoDraft(doc,[...records,{...external,id:'../../invalid'}]),false);
+  assert.equal(isLegacyDemoDraft(doc,[...records,external,external]),false);
+});
+
+test('legacy replacement rejects ambiguous metadata and recognizes a partially deleted demo safely',()=>{
+  const {doc,records}=legacyDemoFixture();
+  for(const field of ['name','type','size']){
+    const altered=structuredClone(records);altered[0].file[field]=field==='size'?405564:'user-value';
+    assert.equal(isLegacyDemoDraft(doc,altered),false,field);
+  }
+  assert.equal(isLegacyDemoDraft(doc,[...records,records[0]]),false);
+  assert.equal(isLegacyDemoDraft(doc,records.slice(0,2)),false,'참조된 파일이 없으면 자동 판별하지 않습니다');
+  assert.equal(isLegacyDemoDraft({...doc,clips:doc.clips.slice(0,1),tracks:[]},records.slice(0,1)),true);
+  assert.equal(isLegacyDemoDraft({...doc,clips:[],tracks:[]},records.slice(0,1)),true,'파일을 가져오지 않은 글자 편집 예시는 교체할 수 있습니다');
+  assert.equal(isLegacyDemoDraft({...doc,clips:[]},records.slice(3)),false,'음악 한 개만 남은 작업은 보수적으로 보존합니다');
+  for(const [document,assets] of [[null,records],[doc,null],[doc,[]],[{...doc,clips:null},records]])assert.equal(isLegacyDemoDraft(document,assets),false);
+});
 
 function mp4Boxes(bytes,start=0,end=bytes.length){
   const boxes=[];

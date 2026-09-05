@@ -26,8 +26,9 @@ import {insertMediaAsset} from './media-insertion.js';
 import {QUICK_FORMAT_PRESETS,quickFormatState,applyQuickFormatPreset,setQuickFormatMargins,setQuickFormatEnabled,setQuickFormatText,setQuickFormatTextStyle} from './quick-format.js';
 import {MobileStudio} from './mobile-studio.js';
 import {DesktopStudio} from './desktop-studio.js';
-import {listSavedQuickFormats,saveQuickFormat,deleteSavedQuickFormat,applySavedQuickFormat} from './saved-quick-formats.js';
+import {listSavedQuickFormats,saveQuickFormat,deleteSavedQuickFormat,applySavedQuickFormat,renameSavedQuickFormat} from './saved-quick-formats.js';
 import {DEMO_MEDIA,createDemoMediaFile} from './demo-media.js';
+import {isLegacyDemoDraft,LEGACY_DEMO_ASSET_IDS} from './legacy-demo.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -287,7 +288,26 @@ function setView(next){
 
 function savedQuickFormatMarkup(enabled){
   let records=[],error='';try{records=listSavedQuickFormats();}catch(e){error=e.message;}
-  return `<section class="saved-quick-formats" aria-label="저장한 퀵포맷"><h3>내 퀵포맷</h3><label class="field-label">이름<input id="quickFormatName" type="text" maxlength="40" placeholder="예: 뉴스 숏츠" value="나의 퀵포맷 ${records.length+1}"></label><button class="button secondary wide" data-quick-save ${enabled?'':'disabled'}>현재 퀵포맷 저장</button>${error?`<p class="note warning">${esc(error)}</p>`:''}<div class="saved-quick-list">${records.map(record=>`<div class="saved-quick-row"><button type="button" data-quick-use="${esc(record.id)}" title="저장한 값으로 적용">${esc(record.name)}<span>적용</span></button><button type="button" data-quick-remove="${esc(record.id)}" aria-label="${esc(record.name)} 퀵포맷 삭제">×</button></div>`).join('')}</div><p class="inspector-note">문구·폰트·색상·위치까지 이 브라우저에 저장합니다.</p></section>`;
+  const icon=path=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${path}"/></svg>`;
+  const rows=records.map(record=>{
+    const id=esc(record.id),name=esc(record.name);
+    return `<div class="saved-quick-row" data-quick-row="${id}"><span class="saved-quick-name" title="${name}">${name}</span><div class="saved-quick-actions"><button type="button" data-quick-use="${id}" title="${name} 적용" aria-label="${name} 적용">${icon('m5 12 4 4 10-10')}</button><button type="button" data-quick-remove="${id}" title="${name} 삭제" aria-label="${name} 삭제">${icon('m6 6 12 12M6 18 18 6')}</button><button type="button" data-quick-rename="${id}" title="${name} 이름 수정" aria-label="${name} 이름 수정">${icon('m14 5 5 5M4 20l5-1L20 8a2.1 2.1 0 0 0-4-4L5 15Z')}</button></div><div class="saved-quick-name-editor" hidden><input type="text" data-quick-name="${id}" maxlength="40" value="${name}" aria-label="퀵포맷 이름" autocomplete="off"><button type="button" data-quick-rename-save="${id}" aria-label="퀵포맷 이름 저장" title="이름 저장">저장</button><button type="button" data-quick-rename-cancel="${id}" aria-label="퀵포맷 이름 수정 취소" title="이름 수정 취소">취소</button></div></div>`;
+  }).join('');
+  return `<section class="saved-quick-formats" aria-label="저장한 퀵포맷"><h3>내 퀵포맷</h3><button class="button secondary wide" data-quick-save ${enabled?'':'disabled'}>현재 퀵포맷 저장</button>${error?`<p class="note warning">${esc(error)}</p>`:''}<div class="saved-quick-list">${rows}</div><p class="inspector-note">문구·폰트·색상·위치까지 이 브라우저에 저장합니다.</p></section>`;
+}
+
+function setSavedQuickRename(row,editing,focus=true){
+  if(!row)return;
+  row.querySelector('.saved-quick-name').hidden=editing;row.querySelector('.saved-quick-actions').hidden=editing;row.querySelector('.saved-quick-name-editor').hidden=!editing;
+  const input=row.querySelector('[data-quick-name]');
+  input.value=row.querySelector('.saved-quick-name').textContent;
+  if(focus){const target=editing?input:row.querySelector('[data-quick-rename]');target.focus();if(editing)input.select();}
+}
+
+function saveQuickFormatName(row){
+  const id=row.dataset.quickRow;
+  renameSavedQuickFormat(id,row.querySelector('[data-quick-name]').value);renderLibrary();
+  $('libraryContent').querySelector(`[data-quick-rename="${id}"]`)?.focus();toast('퀵포맷 이름을 변경했어요.');
 }
 
 function quickFormatMarkup(){
@@ -866,7 +886,7 @@ async function loadDemo(){
     at=result.end;
   }
   // 새 샘플을 명시적으로 열었을 때만, 더 이상 쓰지 않는 과거 예시 자산을 정리합니다.
-  for(const id of ['sample-image-1','sample-image-2','sample-image-3','sample-sound'])if(assets.has(id))removeAssetFromLibrary(id);
+  for(const id of LEGACY_DEMO_ASSET_IDS)if(assets.has(id))removeAssetFromLibrary(id);
   pinClipPositions();
   isDemo=true;selectedItems=[];selection={type:'clip',id:project.clips[0].id};history.clear();refresh();player.seek(0);$('saveStatus').textContent='동영상 샘플';toast('동영상 3개와 원음이 준비됐어요.');
   } catch(error){restoreDocument(before);refresh();throw error;}
@@ -977,13 +997,16 @@ function wire(){
     const add=e.target.closest('[data-add-asset]');if(add){e.stopPropagation();placeAsset(add.dataset.addAsset).catch(e=>toast(e.message));return;}
     const remove=e.target.closest('[data-remove-asset]');if(remove){e.preventDefault();e.stopPropagation();removeLibraryAsset(remove.dataset.removeAsset);return;}
     if(e.target.closest('[data-asset-actions]')){e.stopPropagation();return;}
-    const savedQuick=e.target.closest('[data-quick-save],[data-quick-use],[data-quick-remove]');
+    const savedQuick=e.target.closest('[data-quick-save],[data-quick-use],[data-quick-remove],[data-quick-rename],[data-quick-rename-save],[data-quick-rename-cancel]');
     if(savedQuick){
       if(exportCtrl||importing||smartTools.busy||monitor?.dragging)return;
       finishQuickFormatControl();
       try{
-        if(savedQuick.hasAttribute('data-quick-save')){saveQuickFormat(project.template,$('quickFormatName').value);renderLibrary();toast('현재 퀵포맷을 저장했어요. 목록에서 다시 적용할 수 있습니다.');}
+        if(savedQuick.hasAttribute('data-quick-save')){saveQuickFormat(project.template);renderLibrary();toast('현재 퀵포맷을 저장했어요. 목록에서 다시 적용할 수 있습니다.');}
         else if(savedQuick.dataset.quickUse){edit('저장한 퀵포맷 적용',()=>applySavedQuickFormat(project.template,savedQuick.dataset.quickUse));}
+        else if(savedQuick.dataset.quickRename){for(const row of $('libraryContent').querySelectorAll('[data-quick-row]'))setSavedQuickRename(row,false,false);setSavedQuickRename(savedQuick.closest('[data-quick-row]'),true);}
+        else if(savedQuick.dataset.quickRenameSave){saveQuickFormatName(savedQuick.closest('[data-quick-row]'));}
+        else if(savedQuick.dataset.quickRenameCancel){setSavedQuickRename(savedQuick.closest('[data-quick-row]'),false);}
         else{deleteSavedQuickFormat(savedQuick.dataset.quickRemove);renderLibrary();toast('저장한 퀵포맷을 삭제했어요.');}
       }catch(error){toast(error.message);}return;
     }
@@ -998,6 +1021,12 @@ function wire(){
   });
   $('libraryContent').addEventListener('dblclick',e=>{const card=e.target.closest('[data-asset]');if(card&&!e.target.closest('[data-asset-actions]'))placeAsset(card.dataset.asset).catch(e=>toast(e.message));});
   $('libraryContent').addEventListener('keydown',e=>{const card=e.target.closest('[data-asset]');if(card&&(e.key==='Enter'||e.key===' ')&&!e.target.closest('[data-asset-actions]')){e.preventDefault();e.stopPropagation();placeAsset(card.dataset.asset).catch(e=>toast(e.message));}});
+  $('libraryContent').addEventListener('keydown',e=>{
+    if(!e.target.matches?.('[data-quick-name]')||e.isComposing||e.keyCode===229||!['Enter','Escape'].includes(e.key))return;
+    e.preventDefault();e.stopPropagation();if(exportCtrl||importing||smartTools.busy||monitor?.dragging)return;
+    const row=e.target.closest('[data-quick-row]');
+    try{if(e.key==='Escape')setSavedQuickRename(row,false);else saveQuickFormatName(row);}catch(error){toast(error.message);e.target.focus();}
+  });
   $('libraryContent').addEventListener('dragstart',e=>{if(e.target.closest('[data-asset-actions],button')||exportCtrl||importing||smartTools.busy||monitor?.dragging){e.preventDefault();return;}const a=e.target.closest('[data-asset]'),p=e.target.closest('[data-preset]');if(a){e.dataTransfer.setData('application/x-shorts-asset',a.dataset.asset);timeline.beginExternalDrag('asset',a.dataset.asset);}else if(p){e.dataTransfer.setData('application/x-shorts-preset',p.dataset.preset);timeline.beginExternalDrag('preset',p.dataset.preset);}e.dataTransfer.effectAllowed='copy';});
   $('libraryContent').addEventListener('focusin',e=>beginQuickFormatControl(e.target));
   $('libraryContent').addEventListener('pointerdown',e=>beginQuickFormatControl(e.target));
@@ -1066,7 +1095,17 @@ async function init(){
   });
   setupLayout();
   engine=await detectEngine();$('engineLabel').textContent=engine.label;
-  try{if(new URLSearchParams(location.search).has('empty')){setDocumentName('새 프로젝트');refresh();}else if(await loadDraft()){selectedItems=[];selection=null;refresh();$('saveStatus').textContent='저장된 작업 복구';}else await loadDemo();}
+  try{
+    if(new URLSearchParams(location.search).has('empty')){setDocumentName('새 프로젝트');refresh();}
+    else if(await loadDraft()){
+      if(isLegacyDemoDraft(captureDocument(),[...assets.values()])){
+        // 서울 예시만 놓인 타임라인을 교체합니다. 라이브러리의 사용자 파일은 그대로 둡니다.
+        await loadDemo();
+        try{await saveDraft();$('saveStatus').textContent='이 브라우저에 저장됨';dirty=false;}
+        catch{$('saveStatus').textContent='파일로 저장 필요';toast('새 영상 예시는 열었지만 자동 저장하지 못했어요. 프로젝트 파일로 저장해 주세요.');}
+      }else{selectedItems=[];selection=null;refresh();$('saveStatus').textContent='저장된 작업 복구';}
+    }else await loadDemo();
+  }
   catch(e){console.warn('초기 프로젝트 로딩 실패',e);try{await loadDemo();}catch{refresh();toast('샘플을 불러오지 못했어요. 파일 가져오기로 시작해 주세요.');}}
   await prepareFonts();player.invalidate();
   document.documentElement.dataset.studioReady='true';

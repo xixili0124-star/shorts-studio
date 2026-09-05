@@ -136,6 +136,20 @@ function trackViewFixture(run){
   finally{globalThis.document=savedDocument;Object.assign(project,saved);}
 }
 
+test('모바일은 일반 선택 안내를 토스트로 옮기지 않고 편집 거절 경고만 보존한다',()=>{
+  const saved=globalThis.document,body={classList:classes()},host={textContent:'',dataset:{}},errors=[];
+  globalThis.document={body,getElementById:()=>host};
+  const owner=Object.assign(Object.create(Timeline.prototype),{callbacks:{error:message=>errors.push(message)}});
+  try{
+    owner.notice('PC 선택 안내');assert.equal(host.textContent,'PC 선택 안내');
+    owner.notice('PC 트랙 잠김','warn');assert.deepEqual(errors,[]);
+    body.classList.add('mobile-ui');
+    owner.notice('클립 선택');assert.deepEqual(errors,[]);
+    owner.notice('잠긴 트랙은 편집할 수 없습니다.','warn');assert.deepEqual(errors,['잠긴 트랙은 편집할 수 없습니다.']);
+    assert.equal(host.dataset.tone,'warn');
+  }finally{globalThis.document=saved;}
+});
+
 test('mobile focus filters matching rows and heads without changing document visibility or rendering again',()=>trackViewFixture(({owner,rows,heads,panel,effects})=>{
   const before=JSON.stringify(project),originalRows=rows.slice();
   assert.deepEqual(owner.setMobileTrackView({all:false}),{all:false,trackId:'v4'});

@@ -14,7 +14,7 @@ body.qa-mobile #mobileEditDeck{display:block;grid-area:auto}
 body.qa-mobile #mobileEditDeck .timeline-panel{height:280px;min-height:280px;max-height:280px;width:100%;display:flex;position:relative;grid-column:auto;grid-row:auto;overflow:hidden;border:1px solid #4f645a}
 body.qa-mobile #mobileEditDeck .timeline-toolbar{display:flex;flex:0 0 48px;height:48px;padding:5px;gap:6px;overflow:hidden}
 body.mobile-ui.qa-mobile .timeline-toolbar .timeline-zoom{display:flex;margin-left:auto;gap:3px}.timeline-zoom input{width:50px}
-body.mobile-ui.qa-mobile .timeline-body{flex:1;min-height:0;overflow:hidden}body.mobile-ui.qa-mobile .timeline-notice{display:block;min-height:24px;max-height:42px;white-space:normal;overflow:hidden;font-size:11px}
+body.mobile-ui.qa-mobile .timeline-body{flex:1;min-height:0;overflow:hidden}
 body.mobile-ui.qa-mobile #timelineCanvas,body.mobile-ui.qa-mobile .timeline-block{touch-action:none}
 .qa-results{padding-left:24px;line-height:1.8;font-size:13px}.qa-results [data-result=pass]{color:#c0ef73}.qa-results [data-result=fail]{color:#ffafa3}
 #result{white-space:pre-wrap;font:12px/1.6 Consolas,monospace;color:#dde9df;background:#1a2521;padding:12px;overflow-wrap:anywhere}
@@ -172,12 +172,15 @@ const tests={
     const headers=document.querySelector('.track-heads');assert(!headers.getClientRects().length,'집중 보기에서 PC 트랙 헤더 공간이 남았습니다.');
     const panel=document.querySelector('.timeline-panel').getBoundingClientRect(),scroll=timeline.scroll.getBoundingClientRect();
     assert(Math.abs(scroll.left-panel.left)<4,'집중 트랙이 왼쪽 끝부터 가로 공간을 사용하지 않습니다.');
+    const available=timeline.scroll.clientHeight-$('ruler').offsetHeight,rowHeight=visible[0].getBoundingClientRect().height;
+    assert(available>78&&Math.abs(rowHeight-available)<=4,'집중 행이 안내·버튼을 뺀 실제 콘텐츠 높이를 채우지 못했습니다: '+JSON.stringify({available,rowHeight,scroll:timeline.scroll.clientHeight,ruler:$('ruler').offsetHeight}));
+    timeline.notice('검사용 일반 안내');assert(!$('timelineNotice').getClientRects().length,'모바일에서 삭제한 하단 안내 공간이 다시 표시됩니다.');
     const at=await point(block('qa-a'));assert(document.elementFromPoint(at.x,at.y)?.closest('.timeline-block')?.dataset.id==='qa-a','보이는 클립의 실제 hit-test가 틀립니다.');
     for(let y=scroll.top+8;y<scroll.bottom-4;y+=16){const row=document.elementFromPoint(scroll.left+30,y)?.closest('.track');assert(!row||row.dataset.mobileVisible!=='false','보이지 않는 트랙이 터치 hit-test에 잡혔습니다.');}
     const hiddenEvent=new PointerEvent('pointerdown',{pointerId:++nextPointer,pointerType:'touch',bubbles:true,cancelable:true});caption.dispatchEvent(hiddenEvent);
     assert(hiddenEvent.defaultPrevented&&!timeline.mobileGestures.points.size,'숨겨진 클립의 오래된 이벤트를 거절하지 못했습니다.');
     assert(JSON.stringify(captureDocument())===before,'집중 보기가 문서의 클립이나 숨김 설정을 바꿨습니다.');
-    return '영상 한 행·전체 가로폭, 다른 자막 행의 레이아웃·hit-test·오래된 이벤트 차단';
+    return '영상 한 행·전체 가로폭·가용 높이 채움, 안내 공간 제거와 숨은 행 입력 차단';
   },
   async empty(){
     const before=JSON.stringify(captureDocument());timeline.setMobileTrackView({all:false,trackId:'v2'});await frame();
@@ -201,6 +204,7 @@ const tests={
     assert(timeline.mobileTrackView===null&&!document.querySelector('.timeline-panel').hasAttribute('data-mobile-track-view'),'PC 복귀 후 모바일 집중 상태가 남았습니다.');
     assert(!document.querySelector('[data-mobile-visible]'),'PC 복귀 후 트랙 표시 속성이 남았습니다.');
     assert([...timeline.canvas.querySelectorAll('.track')].every(row=>row.getClientRects().length>0),'PC 복귀 후 숨겨진 트랙이 남았습니다.');
+    timeline.notice('검사용 PC 안내');assert($('timelineNotice').getClientRects().length>0,'PC 복귀 후 기존 타임라인 안내도 숨겨졌습니다.');
     assert(JSON.stringify(captureDocument())===before,'트랙 복원 검사 후 원래 문서가 달라졌습니다.');
     document.body.classList.add('mobile-ui');return '집중 보기 재렌더 유지·삭제 트랙 대체·PC 복귀 시 모든 표시 속성 제거';
   },

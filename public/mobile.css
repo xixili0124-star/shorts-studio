@@ -1,14 +1,14 @@
 /* 모바일 전용 작업대. PC에서는 전용 셸만 숨깁니다. */
 .mobile-only{display:none}
 
-/* 밝은 작업대와 어두운 영상 영역은 모바일 모드 안에서만 적용합니다. */
+/* PC와 같은 어두운 작업대와 연두 포인트를 모바일 구조에 적용합니다. */
 body.mobile-ui{
-  --bg:#efeee9;--surface:#fafaf7;--surface-2:#f2f1eb;--surface-3:#e7e6df;--line:#dcdcd4;
-  --text:#202421;--muted:#696c65;--faint:#797c74;--accent:#e77539;--accent-dark:#f7e6da;
-  --violet:#71776e;--blue:#71776e;--mint:#71776e;--orange:#e77539;
+  --bg:#101112;--surface:#17191b;--surface-2:#1e2023;--surface-3:#282b2f;--line:#2b2e31;
+  --text:#eceeed;--muted:#92989b;--faint:#666d72;--accent:#b8ee63;--accent-dark:#23341b;
+  --violet:#baadf7;--blue:#9fc5ff;--mint:#78cdb7;--orange:#f3c995;
   --mobile-header-height:56px;--mobile-deck-height:232px;--mobile-dock-height:88px;
   --mobile-panel-height:min(62dvh,calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - 12px));
-  color-scheme:light;min-width:0;width:100%;height:var(--mobile-vh,100dvh);overflow:hidden;
+  color-scheme:dark;min-width:0;width:100%;height:var(--mobile-vh,100dvh);overflow:hidden;
   background:var(--bg);color:var(--text);font-size:14px;overscroll-behavior:none;
 }
 body.mobile-ui .appbar,body.mobile-ui #workbench{display:none}
@@ -24,48 +24,48 @@ body.mobile-ui button{touch-action:manipulation}
 body.mobile-ui button:focus-visible,body.mobile-ui a:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
 body.mobile-ui button:disabled{opacity:.32}
 body.mobile-ui .mobile-header{grid-column:1;grid-row:1;display:flex;align-items:center;gap:8px;min-width:0;padding:env(safe-area-inset-top,0px) max(12px,env(safe-area-inset-right,0px)) 0 max(8px,env(safe-area-inset-left,0px));background:var(--surface);border-bottom:1px solid var(--line)}
-body.mobile-ui #mobileProjectMenu,body.mobile-ui #mobileUndo,body.mobile-ui #mobileRedo,body.mobile-ui #mobileZoomMinus,body.mobile-ui #mobileZoomFit,body.mobile-ui #mobileZoomPlus,body.mobile-ui #mobilePanelBack,body.mobile-ui #mobilePanelDone{display:inline-flex;align-items:center;justify-content:center;flex:0 0 44px;min-width:44px;height:44px;padding:0;background:transparent;color:var(--text);border:0;border-radius:8px}
+body.mobile-ui #mobileProjectMenu,body.mobile-ui #mobileUndo,body.mobile-ui #mobileRedo,body.mobile-ui #mobilePanelBack,body.mobile-ui #mobilePanelDone{display:inline-flex;align-items:center;justify-content:center;flex:0 0 44px;min-width:44px;height:44px;padding:0;background:transparent;color:var(--text);border:0;border-radius:8px}
 body.mobile-ui .mobile-project-title{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
 body.mobile-ui .mobile-project-title strong{display:block;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;font-size:14px;font-weight:650;letter-spacing:-.3px}
 body.mobile-ui .mobile-project-title small{color:var(--muted);font-size:11px;line-height:1.2}
-body.mobile-ui #mobileExport{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:44px;min-height:44px;min-width:62px;padding:0 15px;border-radius:8px;background:var(--accent);color:#241b16;font-size:13px;font-weight:750}
+body.mobile-ui #mobileExport{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:44px;min-height:44px;min-width:62px;padding:0 15px;border-radius:8px;background:var(--accent);color:#17200e;font-size:13px;font-weight:750}
 body.mobile-ui #mobileExport .mobile-icon{width:16px;height:16px;flex-basis:16px}
 
 /* 영상은 남은 공간을 전부 사용하고 재생 조작부는 움직이지 않습니다. */
-body.mobile-ui #mobileViewerHost{grid-column:1;grid-row:2;display:flex;min-width:0;min-height:0;background:#101211;overflow:hidden}
-body.mobile-ui #mobileViewerHost .viewer{display:flex;flex:1;grid-area:auto;position:relative;min-width:0;min-height:0;width:100%;height:100%;background:#101211;color:#f4f4ef}
+body.mobile-ui #mobileViewerHost{grid-column:1;grid-row:2;display:flex;min-width:0;min-height:0;background:#101112;overflow:hidden}
+body.mobile-ui #mobileViewerHost .viewer{display:flex;flex:1;grid-area:auto;position:relative;min-width:0;min-height:0;width:100%;height:100%;background:#101112;color:var(--text)}
 body.mobile-ui #mobileViewerHost .viewer-heading,body.mobile-ui #mobileViewerHost .preview-label{display:none}
-body.mobile-ui #mobileViewerHost .viewer-stage{flex:1;min-height:0;min-width:0;padding:8px;overflow:hidden;background:#101211;touch-action:none}
+body.mobile-ui #mobileViewerHost .viewer-stage{flex:1;min-height:0;min-width:0;padding:8px;overflow:hidden;background:#101112;touch-action:none}
 body.mobile-ui #mobileViewerHost .viewer-stage:has(.monitor-tools:not([hidden])){padding-top:58px}
 body.mobile-ui #mobileViewerHost .viewer-stage canvas{width:auto;height:auto;max-width:100%;max-height:100%;object-fit:contain;box-shadow:none;background:#000;touch-action:none}
-body.mobile-ui #mobileViewerHost .transport-bar{display:grid;grid-template-columns:minmax(72px,1fr) auto minmax(44px,1fr);gap:0;flex:0 0 50px;height:50px;margin:0;padding:0 8px;border-top:1px solid #292c29;background:#171a18}
-body.mobile-ui #mobileViewerHost .timecode{min-width:0;font:11px/1.2 Consolas,monospace;color:#e8eae4;white-space:nowrap;letter-spacing:-.5px}
-body.mobile-ui #mobileViewerHost .timecode span{color:#8e968c}
+body.mobile-ui #mobileViewerHost .transport-bar{display:grid;grid-template-columns:minmax(72px,1fr) auto minmax(44px,1fr);gap:0;flex:0 0 50px;height:50px;margin:0;padding:0 8px;border-top:1px solid #3c4243;background:#17191a}
+body.mobile-ui #mobileViewerHost .timecode{min-width:0;font:11px/1.2 Consolas,monospace;color:var(--text);white-space:nowrap;letter-spacing:-.5px}
+body.mobile-ui #mobileViewerHost .timecode span{color:var(--muted)}
 body.mobile-ui #mobileViewerHost .play-controls{justify-content:center;gap:0}
-body.mobile-ui #mobileViewerHost .play-controls .icon-button,body.mobile-ui #mobileViewerHost .play-button,body.mobile-ui #mobileViewerHost .viewer-options .icon-button{width:44px;height:44px;min-width:44px;flex:0 0 44px;padding:0;display:inline-flex;align-items:center;justify-content:center;color:#eef0e9;background:transparent}
+body.mobile-ui #mobileViewerHost .play-controls .icon-button,body.mobile-ui #mobileViewerHost .play-button,body.mobile-ui #mobileViewerHost .viewer-options .icon-button{width:44px;height:44px;min-width:44px;flex:0 0 44px;padding:0;display:inline-flex;align-items:center;justify-content:center;color:var(--text);background:transparent}
 body.mobile-ui #mobileViewerHost .play-button{border-radius:50%;color:#fff}
 body.mobile-ui #mobileViewerHost .viewer-options{justify-self:end}
 body.mobile-ui #mobileViewerHost .viewer-options #loop,body.mobile-ui #mobileViewerHost .zoom-label{display:none}
 body.mobile-ui #mobileViewerHost .viewer-options .icon-button[aria-pressed="true"]{color:var(--accent)}
-body.mobile-ui #mobileViewerHost .empty-preview{gap:10px;padding:12px;color:#eceee7}
+body.mobile-ui #mobileViewerHost .empty-preview{gap:10px;padding:12px;color:var(--text)}
 body.mobile-ui #mobileViewerHost .empty-preview>span{display:none}
 body.mobile-ui #mobileViewerHost .empty-preview h2{font-size:18px;letter-spacing:-.6px}
-body.mobile-ui #mobileViewerHost .empty-preview p{font-size:12px;line-height:1.6;color:#a6aea2}
+body.mobile-ui #mobileViewerHost .empty-preview p{font-size:12px;line-height:1.6;color:var(--muted)}
 body.mobile-ui #mobileViewerHost .empty-preview .button{min-height:44px;margin:0}
-body.mobile-ui #mobileViewerHost .empty-preview .button.subtle{color:#d1d8cc}
-body.mobile-ui .monitor-tools{left:50%!important;top:6px!important;transform:translateX(-50%);max-width:calc(100% - 12px);gap:0;padding:2px;border:1px solid #41463f;border-radius:8px;background:#252a25f5;box-shadow:0 2px 8px #0003;color:#eef0e9}
-body.mobile-ui .monitor-tools button{height:44px;min-height:44px;min-width:44px;padding:0 9px;font-size:12px;color:#dfe5d9;border-radius:5px}
-body.mobile-ui .monitor-tools button.active{background:#f0eee5;color:#202421}
-body.mobile-ui .monitor-tools .divider{background:#50574b;margin:0 3px}
+body.mobile-ui #mobileViewerHost .empty-preview .button.subtle{color:var(--text)}
+body.mobile-ui .monitor-tools{left:50%!important;top:6px!important;transform:translateX(-50%);max-width:calc(100% - 12px);gap:0;padding:2px;border:1px solid #3c4243;border-radius:8px;background:#20281eee;box-shadow:0 2px 8px #0003;color:var(--text)}
+body.mobile-ui .monitor-tools button{height:44px;min-height:44px;min-width:44px;padding:0 9px;font-size:12px;color:var(--text);border-radius:5px}
+body.mobile-ui .monitor-tools button.active{background:var(--accent);color:#17200e}
+body.mobile-ui .monitor-tools .divider{background:#3b4435;margin:0 3px}
 body.mobile-ui .monitor-tools small{display:none}
 body.mobile-ui #monitorOutline polygon,body.mobile-ui #monitorOutline .center-guide{stroke:var(--accent)}
 body.mobile-ui .monitor-handle,body.mobile-ui .monitor-handle.crop-handle{width:44px;height:44px;border:17px solid transparent;background:var(--accent);background-clip:padding-box;border-radius:0;box-shadow:none;touch-action:none}
-body.mobile-ui .monitor-handle.rotate-handle{width:44px;height:44px;border:8px solid transparent;border-radius:50%;background:#fafaf7;background-clip:padding-box;color:#202421;font-size:20px;line-height:28px;box-shadow:none}
-body.mobile-ui .monitor-handle:hover,body.mobile-ui .monitor-handle:focus-visible{background-color:#ffa674;outline:0}
+body.mobile-ui .monitor-handle.rotate-handle{width:44px;height:44px;border:8px solid transparent;border-radius:50%;background:var(--surface);background-clip:padding-box;color:var(--text);font-size:20px;line-height:28px;box-shadow:none}
+body.mobile-ui .monitor-handle:hover,body.mobile-ui .monitor-handle:focus-visible{background-color:#efffd9;outline:0}
 body.mobile-ui .monitor-handle:focus-visible::after{content:'';position:absolute;inset:-3px;border:2px solid #fff;border-radius:3px;pointer-events:none}
 
 /* 트랙 탭 하나와 크게 보이는 필름 한 줄이 기본 편집 화면입니다. */
-body.mobile-ui #mobileEditDeck{grid-column:1;grid-row:3;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:var(--bg);border-top:1px solid #333930}
+body.mobile-ui #mobileEditDeck{grid-column:1;grid-row:3;display:flex;flex-direction:column;min-width:0;min-height:0;overflow:hidden;background:var(--bg);border-top:1px solid #3c4243}
 body.mobile-ui .mobile-edit-heading{display:flex;align-items:center;flex:0 0 44px;min-width:0;gap:2px;padding:0 8px 0 16px}
 body.mobile-ui .mobile-edit-heading>strong,body.mobile-ui .mobile-edit-heading>span,body.mobile-ui .mobile-edit-heading>h2{font-size:13px;font-weight:700;white-space:nowrap;margin-right:auto}
 body.mobile-ui .mobile-history{display:flex;align-items:center;flex:0 0 auto}
@@ -78,71 +78,74 @@ body.mobile-ui #mobileLayerBar{display:flex;align-items:center;gap:6px;flex:0 0 
 body.mobile-ui #mobileLayerBar::-webkit-scrollbar{display:none}
 body.mobile-ui .mobile-layer-chip{display:inline-flex;align-items:center;justify-content:center;gap:6px;flex:0 0 auto;min-height:40px;padding:0 14px;border:1px solid transparent;border-radius:7px;background:transparent;color:var(--muted);font-size:12px;font-weight:550;white-space:nowrap}
 body.mobile-ui .mobile-layer-chip .mobile-icon{width:17px;height:17px;flex-basis:17px}
-body.mobile-ui .mobile-layer-chip[aria-pressed="true"],body.mobile-ui .mobile-layer-chip.active{border-color:#c9cbc2;background:var(--surface);color:var(--text);box-shadow:0 1px 2px #222a1e07}
+body.mobile-ui .mobile-layer-chip[aria-pressed="true"],body.mobile-ui .mobile-layer-chip.active{border-color:#3c4243;background:var(--surface);color:var(--text);box-shadow:0 1px 2px #0004}
 body.mobile-ui .mobile-layer-chip small{font-size:11px;color:var(--faint)}
 body.mobile-ui #mobileTrackManager{display:flex;align-items:center;justify-content:center;flex:0 0 44px;min-width:44px;min-height:44px;padding:0;background:transparent;color:var(--muted);border:0;border-radius:6px}
 body.mobile-ui #mobileTimelineHost{display:flex;flex:1;min-width:0;min-height:0;overflow:hidden}
 body.mobile-ui #mobileEditDeck .timeline-panel{position:relative;grid-area:auto;display:flex;flex:1;min-height:0;min-width:0;overflow:hidden;background:var(--bg);border:0}
 body.mobile-ui #mobileEditDeck .timeline-toolbar,body.mobile-ui #mobileEditDeck .statusbar,body.mobile-ui #mobileEditDeck .timeline-resizer{display:none}
 body.mobile-ui #mobileEditDeck .timeline-body{flex:1;min-height:0;min-width:0;overflow:hidden;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
-body.mobile-ui #mobileEditDeck .timeline-scroll{flex:1;min-width:0;min-height:0;background:#e7e7e0;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#bfc3b8 transparent;touch-action:pan-x pan-y}
-body.mobile-ui #mobileEditDeck .timeline-canvas{min-height:100%;background:#e7e7e0;touch-action:none;outline-offset:-2px}
-body.mobile-ui #mobileEditDeck .ruler,body.mobile-ui #mobileEditDeck .ruler-spacer{height:26px;min-height:26px;flex:0 0 26px;background:var(--bg);border-bottom:1px solid #d7d9cf}
-body.mobile-ui #mobileEditDeck .ruler-mark{background:#cdd0c6}
-body.mobile-ui #mobileEditDeck .ruler-mark>span{top:6px;left:7px;font:10px Consolas,monospace;color:#73786e}
-body.mobile-ui #mobileEditDeck .ruler-mark.minor{height:4px;top:21px;background:#c0c4b9}
-body.mobile-ui #mobileEditDeck .track-heads{width:44px;flex:0 0 44px;min-height:0;background:var(--bg);border-right:1px solid #d4d7cb}
+body.mobile-ui #mobileEditDeck .timeline-scroll{flex:1;min-width:0;min-height:0;background:#141618;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#42494d transparent;touch-action:pan-x pan-y}
+body.mobile-ui #mobileEditDeck .timeline-canvas{min-height:100%;background:#141618;touch-action:none;outline-offset:-2px}
+body.mobile-ui #mobileEditDeck .ruler,body.mobile-ui #mobileEditDeck .ruler-spacer{height:26px;min-height:26px;flex:0 0 26px;background:var(--bg);border-bottom:1px solid #3c4243}
+body.mobile-ui #mobileEditDeck .ruler-mark{background:#33383a}
+body.mobile-ui #mobileEditDeck .ruler-mark>span{top:6px;left:7px;font:10px Consolas,monospace;color:var(--muted)}
+body.mobile-ui #mobileEditDeck .ruler-mark.minor{height:4px;top:21px;background:#3d4245}
+body.mobile-ui #mobileEditDeck .track-heads{width:44px;flex:0 0 44px;min-height:0;background:var(--bg);border-right:1px solid #3c4243}
 body.mobile-ui #mobileEditDeck .ruler-spacer{font-size:0;padding:0}
 body.mobile-ui #mobileEditDeck .ruler-spacer small{display:none}
-body.mobile-ui #mobileEditDeck #trackHeaders>.track-head,body.mobile-ui #mobileEditDeck #timelineRows>.track{height:52px;min-height:52px;border-bottom:1px solid #d2d5c8;background:transparent;padding:0}
+body.mobile-ui #mobileEditDeck #trackHeaders>.track-head,body.mobile-ui #mobileEditDeck #timelineRows>.track{height:52px;min-height:52px;border-bottom:1px solid #3c4243;background:transparent;padding:0}
 body.mobile-ui #mobileEditDeck .track-head{gap:0;justify-content:center}
 body.mobile-ui #mobileEditDeck .track-selector{height:100%;min-height:44px;min-width:0;width:44px;flex:1;justify-content:center;padding:0;gap:0;color:var(--muted);background:transparent}
 body.mobile-ui #mobileEditDeck .track-code{display:grid;place-items:center;width:30px;height:30px;min-width:0;padding:0;border:0;border-radius:5px;color:var(--muted);background:transparent;font:600 10px Consolas,monospace}
 body.mobile-ui #mobileEditDeck .track-head.active .track-code,body.mobile-ui #mobileEditDeck .track-selector[aria-pressed="true"] .track-code{background:var(--surface);color:var(--text)}
+body.mobile-ui #mobileEditDeck .graphic-head .track-code{color:var(--violet)}
+body.mobile-ui #mobileEditDeck .caption-head .track-code{color:var(--orange)}
+body.mobile-ui #mobileEditDeck .video-head .track-code{color:var(--blue)}
+body.mobile-ui #mobileEditDeck .audio-head .track-code{color:var(--mint)}
+body.mobile-ui #mobileEditDeck .voice-head .track-code{color:#9fd5e1}
 body.mobile-ui #mobileEditDeck .track-selector strong,body.mobile-ui #mobileEditDeck .track-selector small,body.mobile-ui #mobileEditDeck .track-switches,body.mobile-ui #mobileEditDeck .add-track,body.mobile-ui #mobileEditDeck .remove-track,body.mobile-ui #mobileEditDeck .track-count{display:none}
 body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] .track-heads{display:none}
-body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] #timelineRows>.track{height:78px;min-height:78px}
+body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] .timeline-canvas{display:flex;flex-direction:column;height:100%;min-height:100%}
+body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] #timelineRows{flex:1;min-height:78px}
+body.mobile-ui #mobileEditDeck .timeline-panel[data-mobile-track-view="focus"] #timelineRows>.track{height:100%;min-height:78px}
 body.mobile-ui #mobileEditDeck .track[data-mobile-visible="false"],body.mobile-ui #mobileEditDeck .track-head[data-mobile-visible="false"]{display:none}
-body.mobile-ui #mobileEditDeck .timeline-block{top:5px;height:calc(100% - 10px);border:1px solid #b2b7aa;border-radius:5px;background:#d4d7ce;color:#30352b;min-width:12px;box-shadow:none;touch-action:none}
-body.mobile-ui #mobileEditDeck .timeline-block.selected{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent);z-index:5}
+body.mobile-ui #mobileEditDeck .timeline-block{top:5px;height:calc(100% - 10px);border:1px solid #635b7c;border-radius:5px;background:#3d3656;color:#d9cef4;min-width:12px;box-shadow:none;touch-action:none}
 body.mobile-ui #mobileEditDeck .timeline-block.timeline-overview-block{min-width:0;border-radius:1px}
-body.mobile-ui #mobileEditDeck .timeline-block .block-label{font-size:11px;padding:0 10px;color:#30372b;text-shadow:none}
+body.mobile-ui #mobileEditDeck .timeline-block .block-label{font-size:11px;padding:0 10px;color:inherit;text-shadow:none}
 body.mobile-ui #mobileEditDeck .timeline-block.video-block .thumb-strip{opacity:.85}
 body.mobile-ui #mobileEditDeck .thumb-strip img{width:62px;height:100%;object-fit:cover;filter:saturate(.8)}
-body.mobile-ui #mobileEditDeck .timeline-block.video-block .block-label{color:#fff;background:#20261dcc;border-radius:0 0 4px 0;margin-top:0;padding:4px 8px;max-width:calc(100% - 8px);font-size:11px}
-body.mobile-ui #mobileEditDeck .timeline-block.caption-block{background:#dcded6;border-color:#babfb1}
-body.mobile-ui #mobileEditDeck .timeline-block.audio-block{background:#cdd2c6;border-color:#abb3a2}
-body.mobile-ui #mobileEditDeck .waveform i{background:#78816e;opacity:.7}
+body.mobile-ui #mobileEditDeck .timeline-block.video-block .block-label{color:#fff;background:#142234bf;border-radius:0 0 4px 0;margin-top:0;padding:4px 8px;max-width:calc(100% - 8px);font-size:11px}
+body.mobile-ui #mobileEditDeck .timeline-block.video-block{background:#314661;border-color:#526b8d;color:#e0ecfb}
+body.mobile-ui #mobileEditDeck .timeline-block.caption-block{background:#514330;border-color:#7b6748;color:#f2d6a4}
+body.mobile-ui #mobileEditDeck .timeline-block.audio-block{background:#254139;border-color:#3a6b5b;color:#abd9c9}
+body.mobile-ui #mobileEditDeck .voice-track .timeline-block.audio-block{background:#243e45;border-color:#3d626b;color:#9fd5e1}
+body.mobile-ui #mobileEditDeck .timeline-block.selected{outline:2px solid var(--accent);outline-offset:0;border-color:var(--accent);z-index:5}
+body.mobile-ui #mobileEditDeck .waveform i{background:#81b8a3;opacity:.7}
+body.mobile-ui #mobileEditDeck .voice-track .waveform i{background:#96c8d4}
 body.mobile-ui #mobileEditDeck .clip-settings,body.mobile-ui #mobileEditDeck .timeline-block .clip-actions{display:none}
-body.mobile-ui #mobileEditDeck .block-grip{width:14px;background:#e775394d;opacity:0;touch-action:none}
+body.mobile-ui #mobileEditDeck .block-grip{width:14px;background:#b8ee634d;opacity:0;touch-action:none}
 body.mobile-ui #mobileEditDeck .timeline-block.selected .block-grip{opacity:1}
-body.mobile-ui #mobileEditDeck .block-grip::after{content:'';position:absolute;left:6px;top:calc(50% - 9px);width:2px;height:18px;background:#fdf6ee;border-radius:1px}
+body.mobile-ui #mobileEditDeck .block-grip::after{content:'';position:absolute;left:6px;top:calc(50% - 9px);width:2px;height:18px;background:#e8efdf;border-radius:1px}
 body.mobile-ui #mobileEditDeck .timeline-overview-block .block-grip{display:none}
-body.mobile-ui #mobileEditDeck .playhead{width:1px;background:#30372c;box-shadow:none}
+body.mobile-ui #mobileEditDeck .playhead{width:1px;background:#e8efdf;box-shadow:none}
 body.mobile-ui #mobileEditDeck .playhead>span{width:10px;height:13px;left:-4px;background:var(--accent)}
-body.mobile-ui #mobileEditDeck .transition-chip{min-width:28px;width:28px;height:34px;top:calc(50% - 17px);background:#fafaf0e8;color:#525c4c;border:1px solid #aeb49e;border-radius:5px;font-size:15px}
-body.mobile-ui #mobileEditDeck .transition-chip.selected{border-color:var(--accent);outline:2px solid var(--accent);color:#8e441c}
-body.mobile-ui #mobileEditDeck .track.drop-target{background:#e7753912;box-shadow:inset 0 0 0 1px #e7753977}
-body.mobile-ui #mobileEditDeck .timeline-gap:hover{border-color:#bbc2af;color:#737d67;background:#fafaf71a}
-body.mobile-ui #mobileEditDeck .timeline-gap.selected{border:1px dashed var(--accent);background:#e7753912;color:#965b32;box-shadow:none}
-body.mobile-ui #mobileEditDeck .timeline-marquee{border-color:var(--accent);background:#e7753920;box-shadow:none}
-body.mobile-ui #mobileEditDeck .timeline-insert-preview{border-color:var(--accent);background:#e7753924;color:#7b4c2c}
-body.mobile-ui #mobileEditDeck .timeline-insert-preview.invalid{border-color:#a76551;background:#a7655124;color:#864b38}
-body.mobile-ui #mobileEditDeck .timeline-notice{background:var(--surface);color:var(--muted);border-color:var(--line);font-size:11px;line-height:1.45;padding:0 10px}
-body.mobile-ui #mobileEditDeck .timeline-notice:empty{display:none}
+body.mobile-ui #mobileEditDeck .transition-chip{min-width:28px;width:28px;height:34px;top:calc(50% - 17px);background:#252b2ef2;color:var(--muted);border:1px solid #3c4243;border-radius:5px;font-size:15px}
+body.mobile-ui #mobileEditDeck .transition-chip.selected{border-color:var(--accent);outline:2px solid var(--accent);color:var(--accent)}
+body.mobile-ui #mobileEditDeck .track.drop-target{background:#b8ee6312;box-shadow:inset 0 0 0 1px #b8ee6377}
+body.mobile-ui #mobileEditDeck .timeline-gap:hover{border-color:#3c4243;color:var(--muted);background:#d5e8eb06}
+body.mobile-ui #mobileEditDeck .timeline-gap.selected{border:1px dashed var(--accent);background:#b8ee6312;color:var(--accent);box-shadow:none}
+body.mobile-ui #mobileEditDeck .timeline-marquee{border-color:var(--accent);background:#b8ee6320;box-shadow:none}
+body.mobile-ui #mobileEditDeck .timeline-insert-preview{border-color:var(--accent);background:#b8ee6324;color:var(--accent)}
+body.mobile-ui #mobileEditDeck .timeline-insert-preview.invalid{border-color:#956340;background:#c4454329;color:#ffd3ae}
+body.mobile-ui #mobileEditDeck .timeline-notice{display:none}
 body.mobile-ui #mobileEditDeck #timelineCanvas.mobile-touch-hold .timeline-block.selected{outline-width:3px}
 body.mobile-ui #mobileEditDeck #timelineCanvas.mobile-touch-pan,body.mobile-ui #mobileEditDeck #timelineCanvas.mobile-touch-pinch{cursor:grabbing}
-body.mobile-ui #mobileTimelineFooter{display:flex;align-items:center;min-height:44px;flex:0 0 44px;gap:0;padding:0 8px 0 16px;background:var(--bg)}
-body.mobile-ui #mobileTimelineFooter .mobile-selection-name{flex:1;min-width:0;margin-right:8px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted)}
-body.mobile-ui .mobile-zoom-controls{display:flex;align-items:center;flex:0 0 auto}
-body.mobile-ui #mobileTimelineFooter button{color:#666c5d;font-size:18px}
-body.mobile-ui #mobileZoomFit{font-size:11px!important}
-body.mobile-ui #mobileTimelineFooter .mobile-icon{width:20px;height:20px}
 
 /* 도구는 한 줄만 두고 클립을 고르면 같은 줄에서 편집 동작을 고릅니다. */
 body.mobile-ui #mobileActionDock{grid-column:1;grid-row:4;display:flex;align-items:stretch;gap:0;min-width:0;min-height:0;padding:7px max(8px,env(safe-area-inset-right,0px)) calc(9px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));background:var(--surface);border-top:1px solid var(--line);overflow:hidden}
 body.mobile-ui #mobileActionDock>button,body.mobile-ui #mobileActionDock .mobile-action-button{display:flex;flex:1 1 0;min-width:0;min-height:64px;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:6px 3px;border-radius:8px;background:transparent;color:var(--text);font-size:12px;font-weight:500;line-height:1.2;white-space:nowrap}
-body.mobile-ui #mobileActionDock .mobile-action-button[aria-pressed="true"]{color:var(--accent);background:#f6eade}
+body.mobile-ui #mobileActionDock .mobile-action-button[aria-pressed="true"]{color:var(--accent);background:var(--accent-dark)}
 body.mobile-ui #mobileActionDock .mobile-action-scroll{display:flex;flex:1;min-width:0;gap:3px;overflow-x:auto;overflow-y:hidden;scrollbar-width:none;overscroll-behavior-x:contain}
 body.mobile-ui #mobileActionDock .mobile-action-scroll::-webkit-scrollbar{display:none}
 body.mobile-ui #mobileActionDock .mobile-action-scroll .mobile-action-button{flex:0 0 68px;min-width:68px}
@@ -152,8 +155,8 @@ body.mobile-ui[data-mobile-sheet] #mobileActionDock{visibility:hidden;pointer-ev
 
 /* 열린 패널의 헤더와 내용은 별개이며 키보드가 올라와도 완료가 보입니다. */
 body.mobile-ui #mobileBackdrop,body.mobile-ui #mobilePanel{display:none}
-body.mobile-ui[data-mobile-sheet] #mobileBackdrop{display:block;position:fixed;inset:0 0 auto;height:var(--mobile-vh,100dvh);width:100%;z-index:70;background:#171b1747;border:0;padding:0;touch-action:none}
-body.mobile-ui[data-mobile-sheet] #mobilePanel{display:flex;flex-direction:column;position:fixed;z-index:71;left:0;right:0;bottom:var(--mobile-keyboard-inset,0px);height:var(--mobile-panel-height);min-height:0;max-height:calc(var(--mobile-vh,100dvh) - 12px);border:1px solid #d9ddd0;border-bottom:0;border-radius:17px 17px 0 0;background:var(--surface);box-shadow:0 -6px 24px #20241b14;overflow:hidden;color:var(--text)}
+body.mobile-ui[data-mobile-sheet] #mobileBackdrop{display:block;position:fixed;inset:0 0 auto;height:var(--mobile-vh,100dvh);width:100%;z-index:70;background:#10111266;border:0;padding:0;touch-action:none}
+body.mobile-ui[data-mobile-sheet] #mobilePanel{display:flex;flex-direction:column;position:fixed;z-index:71;left:0;right:0;bottom:var(--mobile-keyboard-inset,0px);height:var(--mobile-panel-height);min-height:0;max-height:calc(var(--mobile-vh,100dvh) - 12px);border:1px solid #3c4243;border-bottom:0;border-radius:17px 17px 0 0;background:var(--surface);box-shadow:0 -6px 24px #0004;overflow:hidden;color:var(--text)}
 /* 세로 패널을 열면 편집대를 접고 영상 전체를 패널 위 영역에 다시 맞춥니다.
    화면 높이는 실제 보이는 영역을 기준으로 하므로 키보드 높이를 두 번 빼지 않습니다. */
 body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet]{--mobile-panel-height:min(calc(var(--mobile-vh,100dvh) * .62),calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - env(safe-area-inset-top,0px) - 110px))}
@@ -166,10 +169,10 @@ body.mobile-ui:not(.mobile-landscape)[data-mobile-sheet] #mobileViewerHost .tran
 body.mobile-ui[data-mobile-sheet="inspector"] #mobileBackdrop{background:transparent}
 body.mobile-ui .mobile-panel-header{display:flex;align-items:center;gap:7px;flex:0 0 62px;padding:8px 12px;border-bottom:1px solid var(--line);background:var(--surface)}
 body.mobile-ui #mobilePanelTitle{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:16px;font-weight:650;letter-spacing:-.3px}
-body.mobile-ui #mobilePanelDone{flex-basis:auto;min-width:52px;padding:0 8px;color:#a84c1d;font-weight:650;font-size:13px}
+body.mobile-ui #mobilePanelDone{flex-basis:auto;min-width:52px;padding:0 8px;color:var(--accent);font-weight:650;font-size:13px}
 body.mobile-ui #mobilePanelTabs{display:flex;flex:0 0 48px;align-items:center;gap:6px;padding:0 12px;overflow-x:auto;overflow-y:hidden;border-bottom:1px solid var(--line);scrollbar-width:none;background:var(--surface)}
 body.mobile-ui #mobilePanelTabs button{flex:0 0 auto;min-height:44px;padding:0 12px;border:0;border-radius:6px;background:transparent;color:var(--muted);font-size:12px;white-space:nowrap}
-body.mobile-ui #mobilePanelTabs button[aria-selected="true"],body.mobile-ui #mobilePanelTabs button[aria-pressed="true"],body.mobile-ui #mobilePanelTabs button.active{color:#a65326;background:#f7e8dc}
+body.mobile-ui #mobilePanelTabs button[aria-selected="true"],body.mobile-ui #mobilePanelTabs button[aria-pressed="true"],body.mobile-ui #mobilePanelTabs button.active{color:var(--accent);background:var(--accent-dark)}
 body.mobile-ui #mobilePanelBody{min-height:0;min-width:0;flex:1;overflow:auto;padding:16px 16px max(24px,env(safe-area-inset-bottom,0px));overscroll-behavior:contain;scroll-padding-block:12px;-webkit-overflow-scrolling:touch;background:var(--surface)}
 body.mobile-ui #mobilePanelBody #library,body.mobile-ui #mobilePanelBody #inspector,body.mobile-ui #mobilePanelBody #mobileMenu{display:flex;position:static;grid-area:auto;flex-direction:column;width:100%;height:auto;max-height:none;min-width:0;min-height:0;overflow:visible;border:0;border-radius:0;padding:0;margin:0;background:transparent;box-shadow:none;transform:none}
 body.mobile-ui #mobilePanelBody .section-heading,body.mobile-ui #mobilePanelBody .library-footer,body.mobile-ui #mobilePanelBody .mobile-sheet-heading,body.mobile-ui #mobilePanelBody .mobile-sheet-close{display:none}
@@ -178,20 +181,20 @@ body.mobile-ui #mobilePanelBody .selected-item{display:none}
 body.mobile-ui #mobilePanelBody [data-mobile-filtered="true"]{display:none!important}
 body.mobile-ui .mobile-option-list{display:flex;flex-direction:column;gap:0}
 body.mobile-ui .mobile-option-row{display:flex;align-items:center;gap:14px;width:100%;min-height:64px;text-align:left;padding:12px 4px;background:transparent;color:var(--text);border-bottom:1px solid var(--line);font-size:14px}
-body.mobile-ui .mobile-option-row>.mobile-icon{color:#707665}
+body.mobile-ui .mobile-option-row>.mobile-icon{color:var(--muted)}
 body.mobile-ui .mobile-option-row>div,body.mobile-ui .mobile-option-row>span{flex:1;min-width:0}
-body.mobile-ui .mobile-option-row>.mobile-option-arrow{flex:0 0 16px;min-width:16px;text-align:center;font-size:25px;line-height:1;color:#878c7f}
+body.mobile-ui .mobile-option-row>.mobile-option-arrow{flex:0 0 16px;min-width:16px;text-align:center;font-size:25px;line-height:1;color:var(--muted)}
 body.mobile-ui .mobile-option-row strong{display:block;font-size:14px;font-weight:550;line-height:1.4}
 body.mobile-ui .mobile-option-row small{display:block;margin-top:4px;font-size:12px;color:var(--muted);line-height:1.4}
-body.mobile-ui .mobile-option-row>.mobile-icon:last-child{width:18px;height:18px;flex-basis:18px;color:#858c7b}
-body.mobile-ui .mobile-option-row[aria-pressed="true"]{color:#a44d22}
-body.mobile-ui .mobile-row-switch{width:36px!important;height:22px;flex:0 0 36px!important;min-width:36px;border-radius:12px;background:#d6d9cf;position:relative}
-body.mobile-ui .mobile-row-switch::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:#fffefa;box-shadow:0 1px 2px #0002}
+body.mobile-ui .mobile-option-row>.mobile-icon:last-child{width:18px;height:18px;flex-basis:18px;color:var(--muted)}
+body.mobile-ui .mobile-option-row[aria-pressed="true"]{color:var(--accent)}
+body.mobile-ui .mobile-row-switch{width:36px!important;height:22px;flex:0 0 36px!important;min-width:36px;border-radius:12px;background:#41474a;position:relative}
+body.mobile-ui .mobile-row-switch::after{content:'';position:absolute;top:3px;left:3px;width:16px;height:16px;border-radius:50%;background:var(--text);box-shadow:0 1px 2px #0002}
 body.mobile-ui .mobile-option-row[aria-pressed="true"] .mobile-row-switch{background:var(--accent)}
-body.mobile-ui .mobile-option-row[aria-pressed="true"] .mobile-row-switch::after{left:17px}
+body.mobile-ui .mobile-option-row[aria-pressed="true"] .mobile-row-switch::after{left:17px;background:#17200e}
 body.mobile-ui .mobile-name-field{display:flex;flex-direction:column;gap:8px;margin-bottom:20px;font-size:12px;color:var(--muted)}
 body.mobile-ui .mobile-category-grid{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:12px}
-body.mobile-ui .mobile-category-grid .mobile-option-row{min-height:100px;align-items:flex-start;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--line);border-radius:9px;background:#f1f2eb}
+body.mobile-ui .mobile-category-grid .mobile-option-row{min-height:100px;align-items:flex-start;flex-direction:column;gap:12px;padding:16px;border:1px solid var(--line);border-radius:9px;background:var(--surface-2)}
 body.mobile-ui .mobile-menu-section{margin:0 0 20px}
 body.mobile-ui .mobile-menu-section h3{font-size:12px;font-weight:550;color:var(--muted);margin:0 0 6px}
 body.mobile-ui .mobile-gesture-hint{font-size:12px;line-height:1.7;color:var(--muted);margin:16px 0 0}
@@ -199,19 +202,19 @@ body.mobile-ui .mobile-track-row{padding:12px 0;border-bottom:1px solid var(--li
 body.mobile-ui .mobile-track-row>strong{display:block;margin-bottom:8px;font-size:14px}
 body.mobile-ui .mobile-track-actions{display:flex;gap:6px;flex-wrap:wrap}
 body.mobile-ui .mobile-track-actions button{min-height:44px;padding:0 12px;border:1px solid var(--line);border-radius:6px;background:var(--surface-2);color:var(--muted);font-size:12px}
-body.mobile-ui .mobile-track-actions button[aria-pressed="true"]{border-color:#be7951;background:#f8e8dc;color:#93471f}
+body.mobile-ui .mobile-track-actions button[aria-pressed="true"]{border-color:var(--accent);background:var(--accent-dark);color:var(--accent)}
 
 /* 속성 폼 크기를 통일하고 실제 글꼴·색상 미리보기는 보존합니다. */
-body.mobile-ui input:not([type="range"]):not([type="checkbox"]):not([type="color"]),body.mobile-ui select,body.mobile-ui textarea{min-height:44px;max-width:100%;font-size:16px;padding:10px 12px;color:var(--text);background:#fffefa;border:1px solid #cfd2c7;border-radius:7px;line-height:1.4}
+body.mobile-ui input:not([type="range"]):not([type="checkbox"]):not([type="color"]),body.mobile-ui select,body.mobile-ui textarea{min-height:44px;max-width:100%;font-size:16px;padding:10px 12px;color:var(--text);background:var(--surface-2);border:1px solid #3c4243;border-radius:7px;line-height:1.4}
 body.mobile-ui input:focus,body.mobile-ui select:focus,body.mobile-ui textarea:focus{border-color:var(--accent);outline:1px solid var(--accent);outline-offset:0}
 body.mobile-ui input[type="range"]{height:44px;min-height:44px;min-width:32px;accent-color:var(--accent);background:transparent;touch-action:pan-y}
-body.mobile-ui input[type="color"]{width:44px;height:44px;min-height:44px;padding:4px;background:var(--surface);border:1px solid #cbd0c0;border-radius:7px}
+body.mobile-ui input[type="color"]{width:44px;height:44px;min-height:44px;padding:4px;background:var(--surface);border:1px solid #3c4243;border-radius:7px}
 body.mobile-ui input[type="checkbox"]{width:20px;height:20px;flex:0 0 20px;accent-color:var(--accent)}
 body.mobile-ui .check-label{display:flex;align-items:center;min-height:44px;gap:10px;font-size:13px;color:var(--text)}
 body.mobile-ui .button{min-height:44px;padding:10px 14px;font-size:13px;border-radius:7px;line-height:1.45;white-space:normal}
-body.mobile-ui .button.primary,body.mobile-ui .button.primary:hover{background:var(--accent);color:#241d17}
-body.mobile-ui .button.secondary{background:var(--surface-2);color:var(--text);border:1px solid #cdd1c4}
-body.mobile-ui .button.subtle,body.mobile-ui .button.subtle:hover{color:#626a58;background:transparent}
+body.mobile-ui .button.primary,body.mobile-ui .button.primary:hover{background:var(--accent);color:#17200e}
+body.mobile-ui .button.secondary{background:var(--surface-2);color:var(--text);border:1px solid #3c4243}
+body.mobile-ui .button.subtle,body.mobile-ui .button.subtle:hover{color:var(--muted);background:transparent}
 body.mobile-ui .icon-button{width:44px;height:44px;min-width:44px;flex-basis:44px;color:var(--muted)}
 body.mobile-ui .icon-button:hover{color:var(--text);background:var(--surface-2)}
 body.mobile-ui .property-section,body.mobile-ui .inspector-section{padding:12px 0;border-color:var(--line)}
@@ -220,96 +223,96 @@ body.mobile-ui .property-section h3,body.mobile-ui .inspector-section h3{font-si
 body.mobile-ui .property-section h3 span{font-size:12px;color:var(--muted)}
 body.mobile-ui .property-section .reset-small{min-width:44px;min-height:44px;color:var(--muted)}
 body.mobile-ui .property-row{min-height:44px;margin:9px 0;gap:10px;font-size:12px;color:var(--muted)}
-body.mobile-ui .property-row>span:first-child{width:62px;font-size:12px;color:#5b6453}
-body.mobile-ui .property-row output{min-width:51px;min-height:36px;display:flex;align-items:center;justify-content:center;padding:6px;background:#f0f1e9;border:1px solid #d7dbce;color:#48513f;font:12px Consolas,monospace;border-radius:5px}
+body.mobile-ui .property-row>span:first-child{width:62px;font-size:12px;color:var(--muted)}
+body.mobile-ui .property-row output{min-width:51px;min-height:36px;display:flex;align-items:center;justify-content:center;padding:6px;background:var(--surface-3);border:1px solid #3c4243;color:var(--text);font:12px Consolas,monospace;border-radius:5px}
 body.mobile-ui .property-row input[type="number"],body.mobile-ui .property-row input[type="text"],body.mobile-ui .property-row select{font-size:16px;min-height:44px}
 body.mobile-ui .property-section .field-grid{gap:10px}
 body.mobile-ui .property-section .field-grid .button{min-height:44px;padding:8px;font-size:12px}
 body.mobile-ui .field-label{font-size:13px;color:var(--muted)}
 body.mobile-ui .field-label input,body.mobile-ui .field-label select,body.mobile-ui .property-section .field-label select{font-size:16px;color:var(--text)}
-body.mobile-ui .segmented{border-color:#cfd3c3;border-radius:7px}
-body.mobile-ui .segmented button{min-height:44px;font-size:12px;background:#f2f2ea;color:var(--muted)}
-body.mobile-ui .segmented button.active{background:#f7e4d5;color:#954720}
+body.mobile-ui .segmented{border-color:#3c4243;border-radius:7px}
+body.mobile-ui .segmented button{min-height:44px;font-size:12px;background:var(--surface-2);color:var(--muted)}
+body.mobile-ui .segmented button.active{background:var(--accent-dark);color:var(--accent)}
 body.mobile-ui .note,body.mobile-ui .inspector-note,body.mobile-ui .preset-intro,body.mobile-ui .library-hint,body.mobile-ui .asset-credit{font-size:12px;line-height:1.7;color:var(--muted)}
-body.mobile-ui .note strong{color:#4a5442}
-body.mobile-ui .note.warning{color:#946129}
-body.mobile-ui .small-tag{background:#ebede3;color:#6a735d;font-size:11px}
-body.mobile-ui .section-label{color:#616c55;font-size:12px}
-body.mobile-ui .search-box{min-height:44px;padding:0 11px;margin-bottom:16px;background:#f1f2eb;border:1px solid #d7dbce;border-radius:7px}
+body.mobile-ui .note strong{color:var(--text)}
+body.mobile-ui .note.warning{color:#d7b881}
+body.mobile-ui .small-tag{background:var(--surface-3);color:var(--muted);font-size:11px}
+body.mobile-ui .section-label{color:var(--muted);font-size:12px}
+body.mobile-ui .search-box{min-height:44px;padding:0 11px;margin-bottom:16px;background:var(--surface-2);border:1px solid #3c4243;border-radius:7px}
 body.mobile-ui .search-box input{border:0!important;background:transparent!important;padding:8px 0!important}
 body.mobile-ui .search-box kbd{display:none}
 body.mobile-ui .filter-tabs{gap:18px;overflow:auto;scrollbar-width:none;margin:12px 0 16px;border-color:var(--line)}
 body.mobile-ui .filter-tabs button{flex:0 0 auto;min-height:44px;padding:8px 0;font-size:12px;white-space:nowrap;color:var(--muted)}
 body.mobile-ui .filter-tabs button.active{color:var(--text)}
-body.mobile-ui .import-zone{min-height:100px;padding:14px;gap:5px;border:1px dashed #b2b9a7;background:#f1f2eb;color:#515c46;border-radius:9px}
-body.mobile-ui .import-zone:hover{border-color:#be825c;background:#f4eee5}
+body.mobile-ui .import-zone{min-height:100px;padding:14px;gap:5px;border:1px dashed #3c4243;background:var(--surface-2);color:var(--muted);border-radius:9px}
+body.mobile-ui .import-zone:hover{border-color:var(--accent);background:#252e20}
 body.mobile-ui .import-zone strong{font-size:14px}
 body.mobile-ui .import-zone>span:not(.import-plus),body.mobile-ui .import-zone small{font-size:12px;color:var(--muted)}
 body.mobile-ui .asset-grid,body.mobile-ui .preset-grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 12px}
-body.mobile-ui .asset-image{height:auto;min-height:96px;aspect-ratio:4/3;border-radius:7px;background:#dde0d5}
+body.mobile-ui .asset-image{height:auto;min-height:96px;aspect-ratio:4/3;border-radius:7px;background:#282b2d}
 body.mobile-ui .asset-card h3,body.mobile-ui .preset-card strong{font-size:13px;color:var(--text);margin-top:8px;line-height:1.5}
 body.mobile-ui .asset-card p,body.mobile-ui .preset-card small{font-size:11px;color:var(--muted)}
 body.mobile-ui .asset-kind,body.mobile-ui .asset-duration{font-size:11px;color:#fff}
-body.mobile-ui .asset-actions{top:4px;right:4px;gap:0;padding:0;opacity:1;pointer-events:auto;transform:none;background:#fafaf7f2;border:1px solid #dce0d3;border-radius:6px;box-shadow:0 1px 4px #17221226}
-body.mobile-ui .asset-actions .asset-add,body.mobile-ui .asset-actions .asset-remove{width:44px;height:44px;min-height:44px;min-width:44px;background:transparent;border:0;border-radius:0;color:#47523d;font-size:21px;padding:0}
-body.mobile-ui .asset-actions .asset-add{border-left:1px solid #daddcf;color:#a64d20}
-body.mobile-ui .asset-actions .asset-add:hover,body.mobile-ui .asset-actions .asset-remove:hover{background:#efeee7;color:#282f23}
+body.mobile-ui .asset-actions{top:4px;right:4px;gap:0;padding:0;opacity:1;pointer-events:auto;transform:none;background:#101313e8;border:1px solid #3c4243;border-radius:6px;box-shadow:0 1px 4px #0004}
+body.mobile-ui .asset-actions .asset-add,body.mobile-ui .asset-actions .asset-remove{width:44px;height:44px;min-height:44px;min-width:44px;background:transparent;border:0;border-radius:0;color:var(--text);font-size:21px;padding:0}
+body.mobile-ui .asset-actions .asset-add{border-left:1px solid #3c4243;color:var(--accent)}
+body.mobile-ui .asset-actions .asset-add:hover,body.mobile-ui .asset-actions .asset-remove:hover{background:var(--surface-3);color:var(--text)}
 body.mobile-ui .asset-tools .button{min-height:44px;font-size:12px}
-body.mobile-ui .audio-thumb{background:#d8ddcd}
-body.mobile-ui .audio-thumb i{background:#889475}
-body.mobile-ui .preset-art{min-height:128px;height:128px;border-color:#d4d8c9;border-radius:8px;background:#282d26}
+body.mobile-ui .audio-thumb{background:#20342f}
+body.mobile-ui .audio-thumb i{background:#77b7a3}
+body.mobile-ui .preset-art{min-height:128px;height:128px;border-color:#3c4243;border-radius:8px;background:#24282c}
 body.mobile-ui .preset-art.caption-preview{height:144px;min-height:144px}
 body.mobile-ui .preset-card.active .preset-art{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
-body.mobile-ui .caption-list button{min-height:54px;padding:10px 12px;background:#f1f3eb;color:var(--text);border-color:#d7dccb;font-size:14px}
+body.mobile-ui .caption-list button{min-height:54px;padding:10px 12px;background:var(--surface-2);color:var(--text);border-color:#3c4243;font-size:14px}
 body.mobile-ui .caption-list button.selected{border-color:var(--accent)}
 body.mobile-ui .caption-list button small{font-size:11px;color:var(--muted)}
-body.mobile-ui .font-trigger{min-height:48px;background:#fffefa;color:var(--text);border-color:#cdd3c3;border-radius:7px}
+body.mobile-ui .font-trigger{min-height:48px;background:var(--surface-2);color:var(--text);border-color:#3c4243;border-radius:7px}
 body.mobile-ui .font-trigger>span:first-child{font-size:19px}
-body.mobile-ui .font-popup{background:#f6f7f0;border-color:#ccd2c0;border-radius:8px;padding:10px;box-shadow:0 5px 15px #27321914}
+body.mobile-ui .font-popup{background:#18201d;border-color:#3c4243;border-radius:8px;padding:10px;box-shadow:0 5px 15px #0004}
 body.mobile-ui .font-search{font-size:16px}
 body.mobile-ui .font-filters button{min-height:44px;font-size:12px;background:transparent;color:var(--muted)}
-body.mobile-ui .font-filters button.active,body.mobile-ui .font-filters button[aria-pressed="true"]{color:#a65329;background:#f8e9dd}
+body.mobile-ui .font-filters button.active,body.mobile-ui .font-filters button[aria-pressed="true"]{color:var(--accent);background:var(--accent-dark)}
 body.mobile-ui .font-options{max-height:280px;overscroll-behavior:contain}
-body.mobile-ui .font-option{min-height:60px;padding:10px;background:transparent;color:var(--text);border-color:#dfe3d7}
-body.mobile-ui .font-option:hover,body.mobile-ui .font-option.selected,body.mobile-ui .font-option[aria-selected="true"]{background:#eeefe2;color:var(--text)}
+body.mobile-ui .font-option{min-height:60px;padding:10px;background:transparent;color:var(--text);border-color:#3c4243}
+body.mobile-ui .font-option:hover,body.mobile-ui .font-option.selected,body.mobile-ui .font-option[aria-selected="true"]{background:#2a372e;color:var(--text)}
 body.mobile-ui .font-option-name{font-size:20px;color:var(--text)}
 body.mobile-ui .font-load-state,body.mobile-ui .font-picker-note{font-size:12px;color:var(--muted)}
 body.mobile-ui .font-option-sample,body.mobile-ui .font-option small{color:var(--muted);font-size:12px}
 body.mobile-ui .keyframe-actions .button{min-height:44px}
-body.mobile-ui .keyframe-ruler{height:48px;margin:14px 18px;border-color:#adb69f;background:linear-gradient(90deg,#b7bea933 1px,transparent 1px) 0 100%/10% 7px repeat-x}
-body.mobile-ui .keyframe-point{top:4px;min-width:44px;min-height:44px;font-size:20px;color:#818c73}
+body.mobile-ui .keyframe-ruler{height:48px;margin:14px 18px;border-color:#3c4243;background:linear-gradient(90deg,#8b9b6e33 1px,transparent 1px) 0 100%/10% 7px repeat-x}
+body.mobile-ui .keyframe-point{top:4px;min-width:44px;min-height:44px;font-size:20px;color:var(--muted)}
 body.mobile-ui .keyframe-point.current{color:var(--accent);text-shadow:none}
-body.mobile-ui .keyframe-playhead{background:#626e53}
+body.mobile-ui .keyframe-playhead{background:#e5f4d4}
 body.mobile-ui .keyframe-time{font-size:12px;color:var(--muted)}
-body.mobile-ui .keyframe-row{grid-template-columns:80px 20px minmax(0,1fr) 44px;background:#f0f2e9;min-height:52px;padding:4px;font-size:12px}
-body.mobile-ui .keyframe-row output{color:#616d50}
-body.mobile-ui .keyframe-row button{min-width:44px;min-height:44px;color:#747f63}
+body.mobile-ui .keyframe-row{grid-template-columns:80px 20px minmax(0,1fr) 44px;background:var(--surface-2);min-height:52px;padding:4px;font-size:12px}
+body.mobile-ui .keyframe-row output{color:var(--muted)}
+body.mobile-ui .keyframe-row button{min-width:44px;min-height:44px;color:var(--muted)}
 body.mobile-ui .keyframe-rows{max-height:190px}
 
 /* 퀵포맷과 음성 도구도 같은 편집 패널을 사용합니다. */
-body.mobile-ui .quick-format-hero{grid-template-columns:76px minmax(0,1fr);gap:12px 16px;padding:15px;background:#f0f2e9;border:1px solid #d3d8c7;border-radius:9px}
-body.mobile-ui .quick-format-preview{width:72px;border-color:#adb59d;box-shadow:none}
+body.mobile-ui .quick-format-hero{grid-template-columns:76px minmax(0,1fr);gap:12px 16px;padding:15px;background:var(--surface-2);border:1px solid #3c4243;border-radius:9px}
+body.mobile-ui .quick-format-preview{width:72px;border-color:#3c4243;box-shadow:none}
 body.mobile-ui .quick-format-summary strong{font-size:14px;color:var(--text)}
 body.mobile-ui .quick-format-summary p{font-size:12px;line-height:1.55}
-body.mobile-ui .quick-format-toggle{font-size:13px;min-height:44px;color:#596548;gap:10px}
+body.mobile-ui .quick-format-toggle{font-size:13px;min-height:44px;color:var(--muted);gap:10px}
 body.mobile-ui .quick-format-presets{gap:10px}
-body.mobile-ui .quick-format-preset{min-height:70px;padding:12px 10px;background:#f3f4ed;border-color:#d5dac6;grid-template-columns:25px minmax(0,1fr);gap:4px 9px}
+body.mobile-ui .quick-format-preset{min-height:70px;padding:12px 10px;background:var(--surface-2);border-color:#3c4243;grid-template-columns:25px minmax(0,1fr);gap:4px 9px}
 body.mobile-ui .quick-format-preset strong{font-size:12px}
 body.mobile-ui .quick-format-preset small{display:block;font-size:11px}
-body.mobile-ui .quick-format-preset.active{background:#f9e9dc;border-color:#d5a17d;box-shadow:none}
-body.mobile-ui .quick-video-ratio{font-size:12px;padding:10px;background:#f0f2e9}
-body.mobile-ui .quick-video-ratio strong{font-size:12px;color:#9d542c}
+body.mobile-ui .quick-format-preset.active{background:var(--accent-dark);border-color:var(--accent);box-shadow:none}
+body.mobile-ui .quick-video-ratio{font-size:12px;padding:10px;background:var(--surface-2)}
+body.mobile-ui .quick-video-ratio strong{font-size:12px;color:var(--accent)}
 body.mobile-ui .quick-copy-editor{padding:16px 0;margin:16px 0 0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent}
 body.mobile-ui .quick-copy-editor h3{font-size:14px;color:var(--text)}
 body.mobile-ui .quick-format-text{font-size:12px;color:var(--muted)}
-body.mobile-ui .quick-format-text textarea{font-size:16px;min-height:90px;background:#fffefa}
+body.mobile-ui .quick-format-text textarea{font-size:16px;min-height:90px;background:var(--surface-2)}
 body.mobile-ui .quick-color{font-size:12px;color:var(--muted)}
 body.mobile-ui .quick-colors{gap:10px}
-body.mobile-ui .voice-card,body.mobile-ui .smart-card,body.mobile-ui .pc-voice-card{background:#f1f3eb;border-color:#d5ddc8;color:var(--text);border-radius:9px}
-body.mobile-ui .voice-avatar{background:#e4e7d9;color:#768361}
+body.mobile-ui .voice-card,body.mobile-ui .smart-card,body.mobile-ui .pc-voice-card{background:var(--surface-2);border-color:#3c4243;color:var(--text);border-radius:9px}
+body.mobile-ui .voice-avatar{background:#b8ee6320;color:var(--muted)}
 body.mobile-ui .voice-card strong,body.mobile-ui .smart-card h3,body.mobile-ui .pc-voice-card h3{font-size:14px;color:var(--text)}
 body.mobile-ui .voice-card p,body.mobile-ui .smart-card .note{font-size:12px;color:var(--muted)}
-body.mobile-ui .voice-status{background:#f5edde;border-color:#e0d2b5;color:#816132;font-size:12px}
+body.mobile-ui .voice-status{background:#29241a;border-color:#4a4234;color:#d7b881;font-size:12px}
 body.mobile-ui .pc-voice-actions{gap:10px}
 body.mobile-ui .pc-voice-actions .button{min-height:44px;font-size:12px}
 body.mobile-ui .tts-text{min-height:150px;font-size:16px}
@@ -317,56 +320,55 @@ body.mobile-ui .sound-card{display:flex;align-items:center;gap:12px;padding:12px
 body.mobile-ui .sound-card>div{min-width:0;flex:1}
 body.mobile-ui .sound-card strong{font-size:14px;color:var(--text)}
 body.mobile-ui .sound-card small{font-size:12px;color:var(--muted)}
-body.mobile-ui .sound-play,body.mobile-ui .sound-add{flex:0 0 44px;min-width:44px;min-height:44px;border-radius:7px;background:#eceee2;color:#73805d;border-color:#d9dfca}
-body.mobile-ui .sound-add{background:transparent;color:#a65b31;font-size:24px}
-body.mobile-ui .transition-context{background:#f0f2e9;color:#616f4e;font-size:12px}
+body.mobile-ui .sound-play,body.mobile-ui .sound-add{flex:0 0 44px;min-width:44px;min-height:44px;border-radius:7px;background:#263829;color:var(--muted);border-color:#3c4243}
+body.mobile-ui .sound-add{background:transparent;color:var(--accent);font-size:24px}
+body.mobile-ui .transition-context{background:var(--surface-2);color:var(--muted);font-size:12px}
 
 /* 기존 기능의 대화상자도 손가락으로 닫고 조절할 수 있습니다. */
-body.mobile-ui dialog.modal,body.mobile-ui dialog.smart-modal{width:calc(100vw - 24px);max-width:620px;max-height:calc(var(--mobile-vh,100dvh) - 24px);margin:auto;padding:0;border:1px solid #d4d8c7;border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 15px 50px #141b1250;overflow:auto;overscroll-behavior:contain}
-body.mobile-ui dialog::backdrop{background:#151b155e}
+body.mobile-ui dialog.modal,body.mobile-ui dialog.smart-modal{width:calc(100vw - 24px);max-width:620px;max-height:calc(var(--mobile-vh,100dvh) - 24px);margin:auto;padding:0;border:1px solid #3c4243;border-radius:14px;background:var(--surface);color:var(--text);box-shadow:0 15px 50px #0004;overflow:auto;overscroll-behavior:contain}
+body.mobile-ui dialog::backdrop{background:#080a0ab3}
 body.mobile-ui .modal-heading,body.mobile-ui .smart-modal .modal-heading{position:sticky;top:0;z-index:3;min-height:62px;padding:10px 14px;gap:10px;background:var(--surface);border-color:var(--line)}
 body.mobile-ui .modal-heading h2,body.mobile-ui .smart-modal .modal-heading h2{font-size:16px;line-height:1.4}
 body.mobile-ui .modal-heading .eyebrow{display:none}
 body.mobile-ui .modal-body,body.mobile-ui .smart-body{padding:16px;min-width:0}
 body.mobile-ui .modal .note,body.mobile-ui .modal #exportMessage{font-size:12px;color:var(--muted)}
-body.mobile-ui .export-summary{background:#f1f3eb;border-color:#dadecf}
+body.mobile-ui .export-summary{background:var(--surface-2);border-color:#3c4243}
 body.mobile-ui .export-summary strong{font-size:14px;color:var(--text)}
-body.mobile-ui .export-icon{color:#9a5d37;background:#f5e7d9}
+body.mobile-ui .export-icon{color:var(--accent);background:#263320}
 body.mobile-ui .smart-details summary{min-height:44px;padding:12px 0;font-size:13px;color:var(--muted)}
 body.mobile-ui .smart-details{border-color:var(--line);color:var(--muted)}
 body.mobile-ui .smart-result-actions{gap:10px;flex-wrap:wrap}
-body.mobile-ui .smart-caption-review textarea{font-size:16px;background:#fffefa}
-body.mobile-ui .smart-caption-review label{background:#eff1e8}
+body.mobile-ui .smart-caption-review textarea{font-size:16px;background:var(--surface-2)}
+body.mobile-ui .smart-caption-review label{background:#171c19}
 body.mobile-ui .smart-caption-review span{font-size:12px;color:var(--muted)}
-body.mobile-ui .smart-error{border-color:#d7b498;background:#f9ecde;color:#865132;font-size:13px}
-body.mobile-ui .smart-success{color:#4f6740}
-body.mobile-ui .safe-area-panel{position:absolute;z-index:25;left:8px;right:8px;top:8px;bottom:auto;width:auto;max-height:calc(100% - 16px);overflow:auto;padding:14px;background:#fafaf7;color:var(--text);border:1px solid #d7dccb;border-radius:10px;box-shadow:0 4px 20px #0004}
+body.mobile-ui .smart-error{border-color:#956340;background:#33251c;color:#ffd3ae;font-size:13px}
+body.mobile-ui .smart-success{color:#d1f6a9}
+body.mobile-ui .safe-area-panel{position:absolute;z-index:25;left:8px;right:8px;top:8px;bottom:auto;width:auto;max-height:calc(100% - 16px);overflow:auto;padding:14px;background:var(--surface);color:var(--text);border:1px solid #3c4243;border-radius:10px;box-shadow:0 4px 20px #0004}
 body.mobile-ui .safe-panel-heading{min-height:44px}
 body.mobile-ui .safe-panel-heading strong{font-size:14px}
-body.mobile-ui .timeline-menu{max-width:calc(100vw - 24px);min-width:230px;padding:7px;background:var(--surface);color:var(--text);border:1px solid #d0d7c4;border-radius:10px;box-shadow:0 10px 35px #18201230}
+body.mobile-ui .timeline-menu{max-width:calc(100vw - 24px);min-width:230px;padding:7px;background:var(--surface);color:var(--text);border:1px solid #3c4243;border-radius:10px;box-shadow:0 10px 35px #0004}
 body.mobile-ui .timeline-menu button{min-height:44px;padding:10px 12px;font-size:13px;background:transparent;color:var(--text)}
-body.mobile-ui .timeline-menu button:hover{background:#f0f2e9}
+body.mobile-ui .timeline-menu button:hover{background:var(--surface-2)}
 body.mobile-ui .timeline-menu kbd{font-size:11px;color:var(--muted)}
-body.mobile-ui .toast{bottom:calc(var(--mobile-dock-height) + env(safe-area-inset-bottom,0px) + 10px);z-index:100;max-width:calc(100vw - 28px);padding:12px 16px;border-radius:8px;background:#303729;color:#f5f6ed;font-size:12px;line-height:1.6;box-shadow:0 4px 14px #202a1926}
+body.mobile-ui .toast{bottom:calc(var(--mobile-dock-height) + env(safe-area-inset-bottom,0px) + 10px);z-index:100;max-width:calc(100vw - 28px);padding:12px 16px;border-radius:8px;background:#2a3027;color:var(--text);font-size:12px;line-height:1.6;box-shadow:0 4px 14px #0004}
 body.mobile-ui[data-mobile-sheet] .toast{bottom:calc(var(--mobile-keyboard-inset,0px) + 18px)}
-body.mobile-ui .drop-overlay{inset:0;background:#f4f5edef;color:var(--text);border-color:var(--accent)}
+body.mobile-ui .drop-overlay{inset:0;background:#131c13ed;color:var(--text);border-color:var(--accent)}
 body.mobile-ui .drop-overlay p{color:var(--muted)}
 body.mobile-ui ::-webkit-scrollbar{width:5px;height:5px}
-body.mobile-ui ::-webkit-scrollbar-thumb{background:#c7cbbd;border-radius:8px}
+body.mobile-ui ::-webkit-scrollbar-thumb{background:#42494d;border-radius:8px}
 body.mobile-ui ::-webkit-scrollbar-track{background:transparent}
 
 /* 가로 화면에서는 영상과 편집대를 나란히 둡니다. */
 body.mobile-ui.mobile-landscape{--mobile-header-height:48px;--mobile-dock-height:74px;--mobile-deck-height:232px;--mobile-panel-height:min(82dvh,calc(var(--mobile-vh,100dvh) - 12px))}
 body.mobile-ui.mobile-landscape #mobileStudioShell{grid-template-columns:minmax(0,46fr) minmax(0,54fr);grid-template-rows:calc(var(--mobile-header-height) + env(safe-area-inset-top,0px)) minmax(0,1fr) calc(var(--mobile-dock-height) + env(safe-area-inset-bottom,0px))}
 body.mobile-ui.mobile-landscape .mobile-header{grid-column:1/3;grid-row:1}
-body.mobile-ui.mobile-landscape #mobileViewerHost{grid-column:1;grid-row:2/4;border-right:1px solid #3b4233;padding-left:env(safe-area-inset-left,0px)}
+body.mobile-ui.mobile-landscape #mobileViewerHost{grid-column:1;grid-row:2/4;border-right:1px solid #3c4243;padding-left:env(safe-area-inset-left,0px)}
 body.mobile-ui.mobile-landscape #mobileEditDeck{grid-column:2;grid-row:2;border-top:0}
 body.mobile-ui.mobile-landscape #mobileActionDock{grid-column:2;grid-row:3;padding-top:3px;padding-bottom:calc(5px + env(safe-area-inset-bottom,0px));border-left:1px solid var(--line)}
 body.mobile-ui.mobile-landscape #mobileActionDock>button,body.mobile-ui.mobile-landscape #mobileActionDock .mobile-action-button{min-height:60px;gap:5px}
 body.mobile-ui.mobile-landscape #mobileViewerHost .transport-bar{flex-basis:46px;height:46px}
 body.mobile-ui.mobile-landscape #mobileLayerBar{flex-basis:40px;padding-bottom:0}
 body.mobile-ui.mobile-landscape .mobile-layer-chip{min-height:36px;padding-inline:12px}
-body.mobile-ui.mobile-landscape #mobileTimelineFooter{min-height:40px;flex-basis:40px}
 body.mobile-ui.mobile-landscape .mobile-edit-heading{flex-basis:42px}
 body.mobile-ui.mobile-landscape[data-mobile-sheet] #mobilePanel{left:46%;border-radius:14px 0 0 0}
 body.mobile-ui.mobile-landscape #mobilePanelBody{padding:14px 16px max(20px,env(safe-area-inset-bottom,0px))}
@@ -390,7 +392,6 @@ body.mobile-ui.mobile-landscape .mobile-panel-header{flex-basis:56px;padding-blo
   body.mobile-ui:not(.mobile-landscape) #mobileActionDock{padding-top:4px;padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
   body.mobile-ui:not(.mobile-landscape) #mobileLayerBar{flex-basis:40px;padding-bottom:0}
   body.mobile-ui:not(.mobile-landscape) .mobile-edit-heading{flex-basis:40px}
-  body.mobile-ui:not(.mobile-landscape) #mobileTimelineFooter{min-height:40px;flex-basis:40px}
 }
 @media(prefers-reduced-motion:reduce){
   body.mobile-ui #mobileStudioShell,body.mobile-ui #mobilePanel,body.mobile-ui #mobileActionDock,body.mobile-ui .mobile-layer-chip{scroll-behavior:auto;transition:none}

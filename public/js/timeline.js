@@ -96,8 +96,9 @@ export class Timeline {
       if(e.ctrlKey||e.metaKey){e.preventDefault();this.setZoom(this.zoom*(e.deltaY<0?1.12:.89),e.clientX);}
     },{passive:false});
   }
-  /** 드래그 미리보기와 거절 사유를 눈에 보이는 상태줄에도 전달합니다. */
+  /** 모바일은 상시 안내줄 없이 편집하고, 거절 사유만 기존 토스트로 알립니다. */
   notice(text,tone='info'){
+    if(document.body?.classList.contains('mobile-ui')&&tone==='warn'&&text)this.callbacks.error?.(text);
     const host=$('timelineNotice');if(!host)return;
     host.textContent=text||'';host.dataset.tone=tone;
   }

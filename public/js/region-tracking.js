@@ -33,6 +33,12 @@ export const REACQUIRE_SCORE = .5;
 /** 이어 갈 때와 다시 붙을 때, 그동안 맞아 온 점수의 몇 할을 요구할지입니다. */
 export const KEEP_RATIO = .72;
 export const REACQUIRE_RATIO = .88;
+/**
+ * 이 시간까지는 놓쳐도 예측 위치로 계속 가립니다.
+ * 손이 스쳐 지나가는 정도(10Hz 에서 두어 프레임)에 모자이크가 깜빡 꺼지면 오히려
+ * 사고입니다. 대상이 그 사이에 순간이동하지는 않으므로 속도로 이어 갑니다.
+ */
+export const COAST_SECONDS = .5;
 /** 이보다 오래 못 찾으면 포기합니다. */
 export const MAX_GAP_SECONDS = 5;
 /** 무늬가 서서히 변해도 따라가되, 가려진 프레임으로는 절대 갱신하지 않습니다. */
@@ -102,7 +108,7 @@ export function createRegionTracker(frame, rect, seedTime, { onWarn } = {}) {
   // 되지 않아 영영 돌아오지 못합니다. 처음에는 절대 바닥값만 요구합니다.
   let baseline = ACCEPT_SCORE / KEEP_RATIO;
   let output = { ...rect, confidence: 1, lost: false }, seeded = false;
-  const lose = () => { output = { ...output, confidence: 0, lost: true };return { ...output }; };
+  const lose = () => { output = { ...output, confidence: 0, lost: true, coasting: false };return { ...output }; };
   return {
     initial: { ...output, manual: true },
     get rect() { return { ...last }; },
@@ -149,7 +155,13 @@ export function createRegionTracker(frame, rect, seedTime, { onWarn } = {}) {
         ? Math.max(REACQUIRE_SCORE, baseline * REACQUIRE_RATIO)
         : Math.max(ACCEPT_SCORE, baseline * KEEP_RATIO);
       if (!best || best.score < needed) {
-        misses++;gap += elapsed;
+        // elapsed 는 이미 "마지막으로 확인한 프레임 이후" 이므로 더하면 두 배로 불어납니다.
+        misses++;gap = elapsed;
+        if (gap <= COAST_SECONDS) {
+          // 잠깐 스친 정도는 예측 위치로 계속 가립니다. 여기서 꺼지면 그게 더 사고입니다.
+          output = { ...predicted, confidence: 0, lost: false, coasting: true };
+          return { ...output };
+        }
         if (gap > MAX_GAP_SECONDS) { done = true;onWarn?.('gave-up', gap); }
         return lose();
       }

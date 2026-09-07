@@ -112,21 +112,31 @@ export function uncertainMosaicRanges(clip) {
   return ranges;
 }
 
-/** 수동으로 새 위치를 지정해 다시 추적하면 성공한 구간만 기존 경로와 합칩니다. */
+/**
+ * 끊긴 지점부터 다시 추적했을 때, 두 경로에서 성공한 구간만 골라 합칩니다.
+ *
+ * 판정 기준: "그 시각에 따라간 자리를 아느냐". 예전에는 놓친 구간을 full 로 표시했지만
+ * 지금은 uncertain 으로 표시하므로 둘 다 "모름"으로 봐야 합니다. 한쪽만 보면
+ * 새 결과가 기존의 멀쩡한 구간을 덮어써 버립니다.
+ */
+const unknownAt = (keys, time) => {
+  const at = mosaicAt({ mode: 'tracked', enabled: true, keyframes: keys }, time);
+  return !at || at.full === true || at.uncertain === true;
+};
 export function mergeTrackingKeys(previous, next) {
   if (!previous?.length) return next;
   const at = (keys, time) => mosaicAt({ mode: 'tracked', enabled: true, keyframes: keys }, time);
-  const keys = previous.filter(k => at(next, k.time)?.full);
-  for (const k of next) if (!k.lost || at(previous, k.time)?.full) keys.push(k);
+  const keys = previous.filter(k => unknownAt(next, k.time));
+  for (const k of next) if (!k.lost || unknownAt(previous, k.time)) keys.push(k);
   const map = new Map();
   for (const key of keys) { const id = key.time.toFixed(6), old = map.get(id); if (!old || old.lost || !key.lost) map.set(id, key); }
   const result = [...map.values()].sort((a, b) => a.time - b.time);
-  const sameRect = (a,b) => a && !a.full && ['x','y','w','h'].every(k => Math.abs(a[k]-b[k]) < 1e-6);
+  const sameRect = (a,b) => a && !a.full && !a.uncertain && ['x','y','w','h'].every(k => Math.abs(a[k]-b[k]) < 1e-6);
   const covered = (keys,a,b) => {
     if (!sameRect(at(keys,a.time+1e-7),a) || !sameRect(at(keys,b.time-1e-7),b)) return false;
     const times = [a.time+1e-7, b.time-1e-7, (a.time+b.time)/2,
       ...keys.filter(k => k.time>a.time && k.time<b.time).flatMap(k => [k.time-1e-7,k.time+1e-7])];
-    return times.every(time => !at(keys,time)?.full);
+    return times.every(time => !unknownAt(keys, time));
   };
   const safe = [];
   for (let i=0; i<result.length; i++) {

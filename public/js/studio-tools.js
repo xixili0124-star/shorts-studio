@@ -5,7 +5,7 @@ import { itemRange, planSilenceCuts, applySilenceCuts, placeTimelineItem, planPl
 import { extractClipAudio, mixTimeline, findUncaptioned } from './audio.js';
 import { encodeWav } from './ai-client.js';
 import { analyzeSilence, monoPcm } from './silence.js';
-import { normalizedRect, mosaicAt, redactSource, unresolvedMosaics, MAX_MOSAICS } from './mosaic.js';
+import { normalizedRect, mosaicAt, redactSource, unresolvedMosaics, mergeTrackingKeys, MAX_MOSAICS } from './mosaic.js';
 import { videoFrameReader, trackMosaic } from './video-analysis.js';
 import { trackCrop, cropTrackingAt, cropTrackingGeometry, cropTrackingWarnings, validCropTracking } from './crop-tracking.js';
 import { clipGeometry, drawClipLayer } from './render.js';
@@ -416,6 +416,7 @@ export class StudioTools {
     if(action==='captions')return this.openCaptions();
     if(action==='voice')return this.voice.engine==='pc'?this.beginPcVoiceAction('create'):this.openVoice();
     if(action==='track')return this.track();
+    if(action==='retrack')return this.track({merge:true});
     if(action==='save-mosaic')return this.saveMosaic(false);
     if(action==='static-mosaic')return this.saveMosaic(true);
     if(action==='add-mask'){
@@ -499,7 +500,7 @@ export class StudioTools {
   }
   renderMosaic(){
     const s=this.state;if(s?.kind!=='mosaic')return;const e=s.effects[s.index],isVideo=s.clip.type==='video';
-    this.setBody('<p class="note"><strong>'+esc(s.clip.name)+'</strong><br>변형 전 원본에서 드래그해 영역을 다시 지정하세요.</p>'+(isVideo?'<div id="trackingSettings">'+this.trackingSettings('mosaic')+'</div>':'')+'<div class="mosaic-stage"><canvas id="mosaicEditor" width="640" height="360" aria-label="모자이크 영역 지정"></canvas></div>'+(isVideo?rangeInput('원본 시각','mosaic-time',s.time,s.clip.trimStart,Math.max(s.clip.trimStart,s.clip.trimEnd-.001),.01)+'<p class="inspector-note" id="mosaicTimeLabel"></p>':'')+'<label class="check-label"><input type="checkbox" data-smart-input="mosaic-preview" '+(s.preview?'checked':'')+'>모자이크 결과 미리보기 · 끄면 원본</label><div class="field-grid"><label class="field-label">영역<select data-smart-input="mosaic-index">'+s.effects.map((m,i)=>'<option value="'+i+'" '+(i===s.index?'selected':'')+'>영역 '+(i+1)+' · '+(m.mode==='tracked'?'추적':'고정')+'</option>').join('')+'</select></label><div>'+button('add-mask','＋ 영역 추가',s.effects.length>=MAX_MOSAICS)+button('remove-mask','선택 영역 삭제',!e)+'</div></div>'+(e?'<label class="check-label"><input type="checkbox" data-smart-input="mosaic-enabled" '+(e.enabled?'checked':'')+'>선택 영역 켜기</label>'+rangeInput('모자이크 강도','mosaic-strength',e.strength,1,100,1,'%')+rangeInput('가림 여유','mosaic-padding',e.padding*100,0,50,1,'%')+'<details class="smart-details"><summary>영역 위치·크기 숫자로 조절</summary>'+['x','y','w','h'].map((k,i)=>rangeInput(['가로 위치','세로 위치','너비','높이'][i],'rect-'+k,e.rect[k]*100,k==='w'||k==='h'?.5:0,100,.5,'%')).join('')+'</details>'+(isVideo?button('track','현재 위치에서 자동 추적',false,true):''):'')+'<p class="smart-mask-status" id="mosaicStatus" role="status"></p>'+progressMarkup+'<div class="smart-result-actions">'+button('save-mosaic','모자이크 적용',false,true)+(e&&isVideo?button('static-mosaic','추적 없이 고정 영역으로 적용'):'')+'</div><p class="inspector-note">큰 강도일수록 블록이 커집니다. 가림은 완전히 불투명합니다. 추적이 끊기면 원본 보기를 켜 대상을 다시 지정한 뒤 추적을 실행하세요.</p>');
+    this.setBody('<p class="note"><strong>'+esc(s.clip.name)+'</strong><br>변형 전 원본에서 드래그해 영역을 다시 지정하세요.</p>'+(isVideo?'<div id="trackingSettings">'+this.trackingSettings('mosaic')+'</div>':'')+'<div class="mosaic-stage"><canvas id="mosaicEditor" width="640" height="360" aria-label="모자이크 영역 지정"></canvas></div>'+(isVideo?rangeInput('원본 시각','mosaic-time',s.time,s.clip.trimStart,Math.max(s.clip.trimStart,s.clip.trimEnd-.001),.01)+'<p class="inspector-note" id="mosaicTimeLabel"></p>':'')+'<label class="check-label"><input type="checkbox" data-smart-input="mosaic-preview" '+(s.preview?'checked':'')+'>모자이크 결과 미리보기 · 끄면 원본</label><div class="field-grid"><label class="field-label">영역<select data-smart-input="mosaic-index">'+s.effects.map((m,i)=>'<option value="'+i+'" '+(i===s.index?'selected':'')+'>영역 '+(i+1)+' · '+(m.mode==='tracked'?'추적':'고정')+'</option>').join('')+'</select></label><div>'+button('add-mask','＋ 영역 추가',s.effects.length>=MAX_MOSAICS)+button('remove-mask','선택 영역 삭제',!e)+'</div></div>'+(e?'<label class="check-label"><input type="checkbox" data-smart-input="mosaic-enabled" '+(e.enabled?'checked':'')+'>선택 영역 켜기</label>'+rangeInput('모자이크 강도','mosaic-strength',e.strength,1,100,1,'%')+rangeInput('가림 여유','mosaic-padding',e.padding*100,0,50,1,'%')+'<details class="smart-details"><summary>영역 위치·크기 숫자로 조절</summary>'+['x','y','w','h'].map((k,i)=>rangeInput(['가로 위치','세로 위치','너비','높이'][i],'rect-'+k,e.rect[k]*100,k==='w'||k==='h'?.5:0,100,.5,'%')).join('')+'</details>'+(isVideo?button('track','현재 위치에서 자동 추적',false,true)+(e.mode==='tracked'&&e.keyframes?.some(k=>k.lost)?button('retrack','놓친 구간부터 이어서 추적'):''):''):'')+'<p class="smart-mask-status" id="mosaicStatus" role="status"></p>'+progressMarkup+'<div class="smart-result-actions">'+button('save-mosaic','모자이크 적용',false,true)+(e&&isVideo?button('static-mosaic','추적 없이 고정 영역으로 적용'):'')+'</div><p class="inspector-note">큰 강도일수록 블록이 커집니다. 가림은 완전히 불투명합니다. 추적이 끊기면 원본 보기를 켜 대상을 다시 지정한 뒤 추적을 실행하세요.</p>');
     const canvas=this.body.querySelector('canvas');let drag=null;
     const point=event=>{const r=canvas.getBoundingClientRect();return{x:clamp((event.clientX-r.left)/r.width,0,1),y:clamp((event.clientY-r.top)/r.height,0,1)};};
     canvas.onpointerdown=event=>{if(event.button!==0||this.busy||!s.effects[s.index])return;event.preventDefault();drag={start:point(event),old:{...s.effects[s.index].rect},edited:s.edited.has(s.effects[s.index].id)};canvas.setPointerCapture(event.pointerId);};
@@ -533,12 +534,26 @@ export class StudioTools {
     status.textContent=!e?'모든 모자이크를 제거할 수 있습니다.':changed?'영역이 변경됐습니다. 다시 추적하거나 고정 영역으로 적용하세요.':e.mode==='tracked'?(lost?'추적 끊김 '+lost+'개 지점 · 보정 전 내보내기 차단':'추적 '+e.keyframes.length+'개 위치 · 재생하며 결과를 확인해 주세요.'):'고정 영역 · 자동 추적 전입니다.';
     if(rect)for(const k of ['x','y','w','h']){const input=this.body.querySelector('[data-smart-input="rect-'+k+'"]');if(input&&document.activeElement!==input){input.value=e.rect[k]*100;input.nextElementSibling.textContent=(e.rect[k]*100).toFixed(1)+'%';}}
   }
-  async track(){
+  /**
+   * merge 를 주면 기존 경로를 지우지 않고, 두 경로에서 성공한 구간만 골라 합칩니다.
+   * 앞부분이 멀쩡한데 중간부터 놓친 경우 다시 처음부터 잡을 필요가 없습니다.
+   */
+  async track({merge=false}={}){
     const s=this.state,e=s.effects[s.index];if(!e||s.clip.type!=='video')return;
+    if(merge&&!(e.mode==='tracked'&&e.keyframes?.length))throw new Error('이어 붙일 기존 추적 경로가 없습니다. 먼저 자동 추적을 한 번 실행해 주세요.');
+    const previous=merge?e.keyframes.map(k=>({...k})):null;
     const options=this.trackingOptions('mosaic');
     await this.run('tracking',async signal=>{
       const result=await trackMosaic(s.clip,e,s.time,{...options,signal,onProgress:(p,m)=>this.progress(p,m)});
-      if(signal.aborted)return;s.effects[s.index]=result;s.edited.delete(e.id);this.drawMosaic();
+      if(signal.aborted)return;
+      if(previous){
+        const merged=mergeTrackingKeys(previous,result.keyframes);
+        const before=previous.filter(k=>k.lost).length,after=merged.filter(k=>k.lost).length;
+        s.effects[s.index]={...result,keyframes:merged};
+        this.hooks.toast(after<before?'놓친 구간 '+(before-after)+'개를 이어 붙였어요.'
+          :'이번 추적으로는 놓친 구간이 줄지 않았어요. 대상이 잘 보이는 프레임에서 영역을 다시 지정해 주세요.');
+      }else s.effects[s.index]=result;
+      s.edited.delete(e.id);this.drawMosaic();
     });
   }
   async saveMosaic(fixed){

@@ -1334,14 +1334,20 @@ test('mosaic replaces transparent details and fully covers unresolved sources',{
   const clip={mosaics:[maskFixture({rect:{x:0,y:0,w:1,h:1},padding:0})]};
   let redacted=redactSource(ctx,{img:source,w:40,h:40,sourceTime:0},clip,0);const r=redacted.img.getContext('2d');
   assert.deepEqual([...r.getImageData(5,5,1,1).data],[...r.getImageData(6,5,1,1).data]);assert.equal(r.getImageData(5,5,1,1).data[3],255);
-  // 추적을 놓친 구간은 화면을 죽이지 않고, 사용자가 지정한 사각형으로 대신 가립니다.
-  // 원본(반투명 빨강/파랑 줄무늬)이 그대로 비치지 않아야 하고, 불투명해야 합니다.
+  // 추적을 놓친 구간은 이제 가리지 않습니다. 고정 사각형으로 대신 가려 보았더니 대상이
+  // 움직인 경우 엉뚱한 자리를 덮은 채 멈춰 있어 고장으로 읽혔습니다. 어디였는지만 남깁니다.
   clip.mosaics=[maskFixture({mode:'tracked',range:[0,1],keyframes:[keyFixture(0,{lost:true})]})];
   redacted=redactSource(ctx,{img:source,w:40,h:40,sourceTime:.1},clip,.1);
   const lost=redacted.img.getContext('2d');
-  // rect 는 0.2~0.5 이므로 (14,14) 가 가려진 안쪽입니다. 원본 줄무늬가 비치면 안 됩니다.
-  assert.equal(lost.getImageData(14,14,1,1).data[3],255);
-  assert.deepEqual([...lost.getImageData(14,14,1,1).data],[...lost.getImageData(15,14,1,1).data]);
+  // rect 는 0.2~0.5 이므로 (14,14) 는 예전에 가려지던 안쪽입니다. 원본 줄무늬가 그대로 보여야 합니다.
+  assert.notDeepEqual([...lost.getImageData(14,14,1,1).data],[...lost.getImageData(15,14,1,1).data],
+    '놓친 구간을 덮지 않으므로 원본 줄무늬가 그대로 보입니다');
+  // 원본 줄무늬는 반투명(알파 128)이고 표시선은 불투명에 가깝습니다. 왼쪽 모서리에서 찾습니다.
+  let marked=0;
+  const box=lost.getImageData(0,0,40,40).data;
+  for(let i=0;i<box.length;i+=4)if(box[i+3]>200&&box[i]>150&&box[i+1]>60&&box[i+2]>60)marked++;
+  assert.ok(marked>0,'놓친 구간이 어디였는지 붉은 테두리로 알려야 합니다');
+  assert.equal(unresolvedMosaics({...clip,trimStart:0,trimEnd:1}).length,1,'그 상태로는 내보내기가 막힙니다');
 
   // 프레임 시각 자체를 못 믿을 때는 어디를 가릴지 알 수 없으므로 전체를 덮습니다.
   redacted=redactSource(ctx,{img:source,w:40,h:40,timeReliable:false},clip,.1);

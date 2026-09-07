@@ -16,14 +16,15 @@ export function normalizedRect(rect = {}) {
  * 추적 위치를 돌려줍니다. 확인되지 않은 구간은 대상을 노출하지 않되 화면도 죽이지 않습니다.
  *
  *   확인된 구간        추적 사각형을 보간해 그립니다.
- *   추적 범위 바깥      사용자가 처음 지정한 effect.rect 로 고정해 가립니다 (uncertain).
- *   추적 실패(lost)     같은 방식으로 고정해 가립니다 (uncertain).
+ *   추적 범위 바깥      가리지 않고 어디였는지만 붉은 점선으로 알립니다 (uncertain).
+ *   추적 실패(lost)     같은 방식으로 걷어냅니다 (uncertain).
  *   시각을 못 믿을 때   원본 전체를 가립니다 (full). 어디를 가려야 할지 알 수 없기 때문입니다.
  *
  * 예전에는 위 세 경우를 모두 원본 전체 가림으로 처리했습니다. 그러면 10초 클립에서 2초만
  * 추적했을 때 나머지 8초가 통째로 검은 화면이 되어, 기능 실패가 아니라 영상이 망가진 것처럼
- * 보였습니다. 고정 사각형은 대상이 움직였다면 빗나갈 수 있으므로 uncertain 으로 표시하고,
- * unresolvedMosaics() 가 내보내기를 계속 막습니다.
+ * 보였습니다. 그 뒤 고정 사각형으로 대신 가려 보았지만, 대상이 움직인 경우 엉뚱한 자리를
+ * 덮은 채 멈춰 있어 역시 고장으로 읽혔습니다. 지금은 걷어내고 표시만 남깁니다.
+ * unresolvedMosaics() 가 내보내기를 계속 막으므로 가려지지 않은 채로 나가지 않습니다.
  */
 export function mosaicAt(effect, time) {
   if (effect.enabled === false) return null;
@@ -152,10 +153,15 @@ function paintUnavailable(dest, W, H) {
   dest.restore();
 }
 
-/** 고정 사각형으로 대신 가린 구간임을 테두리로 알립니다. */
+/**
+ * 따라가지 못한 구간을 알립니다. 여기서는 가리지 않습니다.
+ * 예전에는 처음 지정한 사각형으로 대신 가렸는데, 대상이 움직였으면 엉뚱한 곳을 덮은 채
+ * 멈춰 있어 "추적이 망가졌다" 로 읽혔습니다. 지금은 걷어내고 테두리로만 알립니다.
+ * 이 구간이 남아 있으면 unresolvedMosaics() 가 내보내기를 막으므로 그대로 나가지 않습니다.
+ */
 function markUncertain(dest, x, y, w, h) {
   dest.save();
-  dest.strokeStyle = 'rgba(255,150,90,.85)';
+  dest.strokeStyle = 'rgba(255,110,110,.9)';
   dest.lineWidth = Math.max(2, Math.round(Math.min(w, h) / 40));
   dest.setLineDash([dest.lineWidth * 3, dest.lineWidth * 2]);
   dest.strokeRect(x + dest.lineWidth / 2, y + dest.lineWidth / 2, w - dest.lineWidth, h - dest.lineWidth);
@@ -182,6 +188,8 @@ export function redactSource(ctx, source, clip, fallbackTime) {
     const x = Math.max(0, Math.floor((r.x - r.w * pad) * W)), y = Math.max(0, Math.floor((r.y - r.h * pad) * H));
     const w = Math.min(W - x, Math.ceil((r.x + r.w * (1 + pad)) * W) - x);
     const h = Math.min(H - y, Math.ceil((r.y + r.h * (1 + pad)) * H) - y);
+    // 따라가지 못한 구간은 가리지 않습니다. 어디였는지만 테두리로 남깁니다.
+    if (r.uncertain) { markUncertain(dest, x, y, w, h);continue; }
     const cells = Math.max(2, Math.round(34 - clamp(effect.strength, 1, 100) * .32));
     cache.tile.width = Math.max(1, Math.round(w >= h ? cells : cells * w / h));
     cache.tile.height = Math.max(1, Math.round(h >= w ? cells : cells * h / w));
@@ -191,8 +199,7 @@ export function redactSource(ctx, source, clip, fallbackTime) {
     dest.fillStyle = '#151515';dest.fillRect(x, y, w, h);
     dest.imageSmoothingEnabled = false;dest.drawImage(cache.tile, 0, 0, cache.tile.width, cache.tile.height, x, y, w, h);
     dest.imageSmoothingEnabled = true;
-    // 추적이 확인되지 않은 구간은 가리기는 하되, 위치가 빗나갈 수 있음을 눈에 보이게 알립니다.
-    if (r.uncertain) markUncertain(dest, x, y, w, h);
+
   }
   return { img: cache.image, w: W, h: H, sourceTime: source.sourceTime };
 }

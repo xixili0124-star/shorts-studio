@@ -1,6 +1,7 @@
 // 편집기의 재생용 디코더와 분리된 분석 전용 프레임 공급자입니다.
 import { Input, BlobSource, ALL_FORMATS, CanvasSink } from '../vendor/mediabunny.min.js';
 import { normalizedRect, MAX_TRACK_SECONDS, MAX_TRACK_KEYS } from './mosaic.js';
+import { createRegionTracker, normalizePatch, TEMPLATE_SIZE } from './region-tracking.js';
 import { createTargetTracker } from './browser-tracking.js';
 import { createBrowserDetector } from './browser-tracking-client.js';
 import { trackingError } from './browser-tracking-models.js';
@@ -57,17 +58,21 @@ function validFrame(frame) {
 /** 실제 프레임 시각을 기록합니다. 검출 유실은 키로 남기며 다음 프레임도 계속 검사합니다. */
 export async function analyzeTrackingFrames(clip, rect, seedTime, {
   readFrame, detectFrame, signal, onProgress = () => {}, task = 'mosaic',
+  createTracker, prepareFrame, label = '검출 모델로 대상 연결 중…',
 }) {
   aborted(signal);
+  // 검출기 경로는 프레임을 검출 결과로 바꾸고, 픽셀 추적 경로는 표본 추출기로 바꿉니다.
+  const prepare = prepareFrame || ((frame, selected) => detectFrame(frame, selected));
+  const factory = createTracker || ((context, at, when) => createTargetTracker(context, at, when, { task }));
   const range = trackingRange(clip, rect, seedTime), time = range.seedTime;
   const seed = validFrame(await readFrame(time));aborted(signal);
-  const detections = await detectFrame(seed, rect);aborted(signal);
-  const initial = createTargetTracker(detections, rect, seed.time, { task }).initial;
+  const detections = await prepare(seed, rect);aborted(signal);
+  const initial = factory(detections, rect, seed.time).initial;
   const keys = [{ ...initial, time: seed.time, duration: seed.duration }];
   const maximum = Math.ceil(range.duration * 10) + 3;
   let completed = 1, missed = 0;
   for (const direction of [-1, 1]) {
-    const tracker = createTargetTracker(detections, rect, seed.time, { task });
+    const tracker = factory(detections, rect, seed.time);
     let lastTime = seed.time;
     const limit = direction < 0 ? clip.trimStart : clip.trimEnd - .000001;
     for (let n = 1; n <= maximum; n++) {
@@ -75,12 +80,12 @@ export async function analyzeTrackingFrames(clip, rect, seedTime, {
       const target = direction < 0 ? Math.max(limit, time - n / 10) : Math.min(limit, time + n / 10);
       const current = validFrame(await readFrame(target));aborted(signal);
       if (Math.abs(current.time - lastTime) > .000001) {
-        const detected = await detectFrame(current, tracker.rect);aborted(signal);
+        const detected = await prepare(current, tracker.rect);aborted(signal);
         const result = tracker.step(detected, current.time);
         keys.push({ ...result, time: current.time, duration: current.duration });lastTime = current.time;
         if (result.lost) missed++;
       }
-      onProgress(Math.min(.99, ++completed / maximum), '검출 모델로 대상 연결 중… ' + completed + '프레임 · 유실 ' + missed);
+      onProgress(Math.min(.99, ++completed / maximum), label + ' ' + completed + '프레임 · 유실 ' + missed);
       if (target === limit) break;
     }
   }
@@ -117,14 +122,72 @@ export function pcTrackingKeys(raw, clip) {
   return keys;
 }
 
+/**
+ * 프레임을 작은 흑백 배열로 한 번만 만들어 두고, 후보 사각형마다 표본을 뽑습니다.
+ * 후보가 프레임마다 수백 개라 매번 원본 픽셀을 읽으면 너무 느립니다.
+ */
+export function frameSampler(frame, canvas, context, maxSide = 320) {
+  const width = frame?.canvas?.width, height = frame?.canvas?.height;
+  if (!width || !height) throw trackingError('INVALID_FRAME', '분석할 영상 프레임이 비어 있습니다.');
+  const ratio = Math.min(1, maxSide / Math.max(width, height));
+  const w = Math.max(TEMPLATE_SIZE, Math.round(width * ratio));
+  const h = Math.max(TEMPLATE_SIZE, Math.round(height * ratio));
+  canvas.width = w;canvas.height = h;
+  context.drawImage(frame.canvas, 0, 0, w, h);
+  const pixels = context.getImageData(0, 0, w, h).data;
+  const gray = new Float32Array(w * h);
+  for (let i = 0; i < gray.length; i++) {
+    gray[i] = pixels[i * 4] * .299 + pixels[i * 4 + 1] * .587 + pixels[i * 4 + 2] * .114;
+  }
+  const values = new Float32Array(TEMPLATE_SIZE * TEMPLATE_SIZE);
+  return {
+    sample(rect) {
+      if (!(rect?.w > 0) || !(rect?.h > 0)) return null;
+      for (let j = 0; j < TEMPLATE_SIZE; j++) {
+        const y = Math.min(h - 1, Math.max(0, Math.round((rect.y + (j + .5) / TEMPLATE_SIZE * rect.h) * h - .5)));
+        for (let i = 0; i < TEMPLATE_SIZE; i++) {
+          const x = Math.min(w - 1, Math.max(0, Math.round((rect.x + (i + .5) / TEMPLATE_SIZE * rect.w) * w - .5)));
+          values[j * TEMPLATE_SIZE + i] = gray[y * w + x];
+        }
+      }
+      return normalizePatch(values);
+    },
+  };
+}
+
 export async function trackMosaic(clip, effect, seedTime, {
   signal, onProgress = () => {}, engine = 'browser', task = 'mosaic', allowModelDownload = false,
 } = {}) {
   aborted(signal);
   const range = trackingRange(clip, effect?.rect, seedTime), rect = normalizedRect(effect.rect);
-  if (!['browser', 'pc'].includes(engine)) throw trackingError('INVALID_TRACKING_ENGINE', '지원하지 않는 추적 엔진입니다.');
+  if (!['browser', 'pc', 'region'].includes(engine)) throw trackingError('INVALID_TRACKING_ENGINE', '지원하지 않는 추적 엔진입니다.');
   if (!['mosaic', 'crop'].includes(task)) throw trackingError('INVALID_TRACKING_TASK', '지원하지 않는 추적 종류입니다.');
   let keyframes;
+  if (engine === 'region') {
+    // 검출기를 쓰지 않으므로 모델을 받을 필요가 없습니다. 지정한 상자의 무늬만 따라갑니다.
+    if (typeof document === 'undefined') throw trackingError('BROWSER_UNSUPPORTED', '이 브라우저는 영상 프레임 분석을 지원하지 않습니다.');
+    let reader;
+    const notes = { reacquired: 0, gaveUp: false };
+    try {
+      reader = await videoFrameReader(clip, signal);
+      const canvas = document.createElement('canvas'), context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) throw trackingError('BROWSER_UNSUPPORTED', '분석용 캔버스를 만들 수 없습니다.');
+      keyframes = await analyzeTrackingFrames(clip, rect, range.seedTime, {
+        task, signal, readFrame: time => reader.frame(time),
+        label: '지정한 영역을 따라가는 중…',
+        onProgress: (value, message) => onProgress(value * .99, message),
+        prepareFrame: frame => frameSampler(frame, canvas, context),
+        createTracker: (sampler, at, when) => createRegionTracker(sampler, at, when, {
+          onWarn: kind => { if (kind === 'reacquired') notes.reacquired++;else notes.gaveUp = true; },
+        }),
+      });
+    } finally { reader?.close(); }
+    aborted(signal);
+    onProgress(1, notes.gaveUp ? '대상을 오래 찾지 못해 중단한 구간이 있습니다. 그 지점에서 다시 지정해 주세요.'
+      : notes.reacquired ? '가려졌다 다시 나타난 구간 ' + notes.reacquired + '곳을 이어 붙였습니다. 타임라인의 빨간 표시를 확인해 주세요.'
+      : '추적 결과를 확인해 주세요.');
+    return { ...effect, rect, mode: 'tracked', range: [clip.trimStart, clip.trimEnd], keyframes };
+  }
   if (engine === 'pc') {
     const { trackPcVideo } = await import('./pc-tracking.js');aborted(signal);
     const result = await trackPcVideo(clip, rect, { seedTime: range.seedTime, signal, onProgress });aborted(signal);

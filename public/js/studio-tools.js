@@ -50,7 +50,7 @@ export class StudioTools {
     this.pcVoice={status:null,error:'',checking:false,profileId:'',accepted:false};
     this.captionScope='selected';this.captionEngine=sttAvailable()?'server':'local';this.captionEngineChosen=false;
     this.pcAsr={status:null,error:'',checking:false,checked:false};this.cutOptions={thresholdDb:-38,minSilence:.45,padding:.1};
-    this.pcTracking={status:null,error:'',checking:false,accepted:false};this.trackingEngine='browser';this.trackingEngineChosen=false;
+    this.pcTracking={status:null,error:'',checking:false,accepted:false};this.trackingEngine='region';this.trackingEngineChosen=false;
     this.trackingDownloads={mosaic:false,crop:false};this.pcRefreshAt=0;this.pcStartingChecks=0;
     this.pcHelp=new PcHelpController({onChange:()=>this.refreshPcEngines(),toast:hooks.toast});
     this.dialog=document.createElement('dialog');this.dialog.className='modal smart-modal';this.dialog.id='smartToolsDialog';
@@ -98,13 +98,16 @@ export class StudioTools {
     finally{pc.checking=false;this.updateTrackingSettings();}
   }
   trackingSettings(task){
-    const model=browserTrackingModelInfo(task),pc=this.trackingEngine==='pc',status=this.pcTracking.status;
+    const model=browserTrackingModelInfo(task),pc=this.trackingEngine==='pc',region=this.trackingEngine==='region',status=this.pcTracking.status;
     const quick=task==='mosaic'?'모바일·브라우저 · 얼굴 빠른 추적':'모바일·브라우저 · 대상 빠른 추적';
-    return '<label class="field-label">추적 방식<select data-smart-input="tracking-engine"><option value="pc" '+(pc?'selected':'')+'>Windows PC · 정밀 추적</option><option value="browser" '+(!pc?'selected':'')+'>'+quick+'</option></select></label>'
+    return '<label class="field-label">추적 방식<select data-smart-input="tracking-engine"><option value="region" '+(region?'selected':'')+'>지정한 영역 따라가기 · 설치 없음</option><option value="pc" '+(pc?'selected':'')+'>Windows PC · 정밀 추적</option><option value="browser" '+(!pc&&!region?'selected':'')+'>'+quick+'</option></select></label>'
+      +(region?'<p class="inspector-note">내가 그린 상자 안의 무늬를 기억해 따라갑니다. <strong>얼굴이 아니어도 되고 받을 파일도 없습니다.</strong> 잠깐 가려지면 그 구간만 유실로 남기고 다시 나타날 때 이어 붙입니다. 이어 붙인 자리는 타임라인의 빨간 표시와 화면의 주황 점선으로 확인하세요.</p>'+
+        '<p class="inspector-note">무늬나 색이 뚜렷한 부분을 조금 넉넉하게 잡아 주세요. 민무늬 단색 면, 크게 회전하거나 모양이 완전히 달라지는 대상에는 약합니다.</p>':'')
       +(pc?'<p class="inspector-note">'+esc(this.pcTracking.checking?'정밀 추적 준비 상태 확인 중…':status?.available?'정밀 추적을 사용할 수 있어요.':'정밀 추적 기능을 먼저 준비해 주세요.')+'</p>'
         +'<label class="smart-consent"><input type="checkbox" data-smart-input="tracking-pc-consent" '+(this.pcTracking.accepted?'checked':'')+'><span>이 클립의 원본 파일을 이 PC의 추적 엔진으로 보내 분석합니다. 외부 서버로 보내지 않습니다. 최대 3분 · 원본 256MB.</span></label>'
         +(!status?.available?button('pc-help','도움말 · PC 설치와 연결'):'')
-      :'<p class="inspector-note">'+(task==='mosaic'?'얼굴을 검출하고 같은 얼굴을 연결합니다. 얼굴 외 대상은 Windows PC 정밀 추적을 선택하세요.':'사람·고양이·개 등 지원 대상을 검출하고 같은 대상을 연결합니다. 임의의 물체는 Windows PC 정밀 추적을 선택하세요.')+'</p>'
+      :region?''
+      :'<p class="inspector-note">'+(task==='mosaic'?'얼굴을 검출하고 같은 얼굴을 연결합니다. 얼굴 외 대상은 지정한 영역 따라가기를 선택하세요.':'사람·고양이·개 등 지원 대상을 검출하고 같은 대상을 연결합니다. 임의의 물체는 Windows PC 정밀 추적을 선택하세요.')+'</p>'
         +'<label class="smart-consent"><input type="checkbox" data-smart-input="tracking-download" '+(this.trackingDownloads[task]?'checked':'')+'><span>최초 '+((model.bytes+model.runtimeBytes)/1000000).toFixed(1)+'MB 필요 파일 다운로드 허용. 영상은 이 브라우저에서만 처리하며, 받은 파일은 재사용합니다.</span></label>')
       +'<p class="inspector-note">재추적하면 현재 클립 구간의 기존 추적 경로를 새 결과로 바꿉니다. 적용 전 결과를 확인하세요.</p>';
   }
@@ -470,7 +473,7 @@ export class StudioTools {
   }
   change(input){
     const key=input.dataset.smartInput;if(this.busy)return;
-    if(key==='tracking-engine'&&['pc','browser'].includes(input.value)){this.trackingEngine=input.value;this.trackingEngineChosen=true;this.updateTrackingSettings();if(input.value==='pc')this.refreshPcTracking();}
+    if(key==='tracking-engine'&&['pc','browser','region'].includes(input.value)){this.trackingEngine=input.value;this.trackingEngineChosen=true;this.updateTrackingSettings();if(input.value==='pc')this.refreshPcTracking();}
     if(key==='voice-engine'){this.voice.engine=input.value;this.hooks.renderLibrary();if(input.value==='pc'&&!this.pcVoice.status)this.refreshPcVoice();}
     if(key==='reference-file'){const file=input.files?.[0];input.value='';this.loadVoiceReference(file).catch(error=>this.showError(error));}
     if(key==='caption-engine'&&['local','pc','server'].includes(input.value)){this.captionEngine=input.value;this.captionEngineChosen=true;this.hooks.renderLibrary();if(input.value==='pc'&&!this.pcAsr.status)this.refreshPcAsr();}

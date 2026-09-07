@@ -12,6 +12,16 @@ export const MIN_TIMELINE = 168;
 /** 화면이 아무리 커도 타임라인이 작업 공간을 다 먹지 않게 합니다. */
 export const MAX_TIMELINE_RATIO = .72;
 export const STORAGE_KEY = 'shorts-studio-timeline-height';
+export const MOBILE_STORAGE_KEY = 'shorts-studio-mobile-deck-height';
+
+/**
+ * 어느 변수와 어느 저장 칸을 쓸지 정합니다.
+ * 폰 껍데기는 --mobile-deck-height 로 행 높이를 정하고, 그 변수는 body.mobile-ui 에
+ * 선언돼 있어서 html 에 써 봐야 덮이지 않습니다. 그래서 대상 요소도 함께 알려 줍니다.
+ */
+export const heightTargetFor = mode => mode === 'mobile'
+  ? { variable: '--mobile-deck-height', storageKey: MOBILE_STORAGE_KEY, onBody: true }
+  : { variable: '--timeline-h', storageKey: STORAGE_KEY, onBody: false };
 
 export function maxTimelineHeight(workbench) {
   if (!Number.isFinite(workbench) || workbench <= 0) return MIN_TIMELINE;

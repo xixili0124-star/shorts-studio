@@ -6,7 +6,7 @@ body.mobile-ui{
   --bg:#101112;--surface:#17191b;--surface-2:#1e2023;--surface-3:#282b2f;--line:#2b2e31;
   --text:#eceeed;--muted:#92989b;--faint:#666d72;--accent:#b8ee63;--accent-dark:#23341b;
   --violet:#baadf7;--blue:#9fc5ff;--mint:#78cdb7;--orange:#f3c995;
-  --mobile-header-height:56px;--mobile-deck-height:328px;--mobile-track-height:48px;--mobile-dock-height:88px;
+  --mobile-header-height:56px;--mobile-deck-height:264px;--mobile-track-height:48px;--mobile-dock-height:88px;
   --mobile-panel-height:min(62dvh,calc(var(--mobile-vh,100dvh) - var(--mobile-header-height) - 12px));
   color-scheme:dark;min-width:0;width:100%;height:var(--mobile-vh,100dvh);overflow:hidden;
   background:var(--bg);color:var(--text);font-size:14px;overscroll-behavior:none;
@@ -72,7 +72,7 @@ body.mobile-ui #mobileUndo .mobile-icon,body.mobile-ui #mobileRedo .mobile-icon{
 body.mobile-ui #mobileTrackManager{display:flex;align-items:center;justify-content:center;flex:0 0 44px;min-width:44px;min-height:44px;padding:0;background:transparent;color:var(--muted);border:0;border-radius:6px}
 body.mobile-ui #mobileTimelineHost{display:flex;flex:1;min-width:0;min-height:0;overflow:hidden}
 body.mobile-ui #mobileEditDeck .timeline-panel{position:relative;grid-area:auto;display:flex;flex:1;min-height:0;min-width:0;overflow:hidden;background:var(--bg);border:0}
-body.mobile-ui #mobileEditDeck .timeline-toolbar,body.mobile-ui #mobileEditDeck .statusbar,body.mobile-ui #mobileEditDeck .timeline-resizer{display:none}
+body.mobile-ui #mobileEditDeck .timeline-toolbar,body.mobile-ui #mobileEditDeck .statusbar{display:none}
 body.mobile-ui #mobileEditDeck .timeline-body{flex:1;min-height:0;min-width:0;overflow:hidden;border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
 body.mobile-ui #mobileEditDeck .timeline-scroll{flex:1;min-width:0;min-height:0;background:#141618;overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#42494d transparent;touch-action:none}
 body.mobile-ui #mobileEditDeck .timeline-canvas{min-height:100%;background:#141618;touch-action:none;outline-offset:-2px}
@@ -369,7 +369,7 @@ body.mobile-ui.mobile-landscape .mobile-panel-header{flex-basis:56px;padding-blo
   body.mobile-ui .quick-format-presets{grid-template-columns:minmax(0,1fr)}
 }
 @media(max-height:700px){
-  body.mobile-ui:not(.mobile-landscape){--mobile-deck-height:314px;--mobile-track-height:46px;--mobile-dock-height:80px}
+  body.mobile-ui:not(.mobile-landscape){--mobile-deck-height:248px;--mobile-track-height:46px;--mobile-dock-height:80px}
   body.mobile-ui:not(.mobile-landscape) #mobileActionDock{padding-top:4px;padding-bottom:calc(6px + env(safe-area-inset-bottom,0px))}
   body.mobile-ui:not(.mobile-landscape) .mobile-edit-heading{flex-basis:40px}
 }
@@ -387,3 +387,23 @@ body.mobile-ui #mobileActionDock .mobile-action-button span{text-align:center;wi
 /* 자막 입력을 스타일 목록보다 먼저 제시하며 그리드 자체는 그대로 유지합니다. */
 body.mobile-ui #libraryContent:has(> .preset-grid [data-caption-preview]){display:flex;flex-direction:column}
 body.mobile-ui #libraryContent>[data-action="add-caption"]{order:-1;margin-bottom:16px;flex-shrink:0}
+
+/* ── 미리보기와 타임라인의 경계 (2026-09-01) ───────────────
+   폰에서 덱 높이가 328px 로 고정돼 있어 375×812 에서 미리보기 캔버스가
+   126×224px, 화면의 27.6% 밖에 되지 않았습니다. 자막을 읽을 수 없는 크기입니다.
+   기본값을 줄이고, 데스크톱과 같은 경계 끌기를 폰에서도 쓸 수 있게 되살립니다.
+   손가락으로 잡아야 하므로 잡는 자리를 넓힙니다. */
+body.mobile-ui #mobileEditDeck .timeline-resizer{
+  display:block;position:absolute;top:-9px;left:0;right:0;height:20px;z-index:16;
+  background:transparent;border:0;padding:0;touch-action:none;cursor:ns-resize;
+}
+body.mobile-ui #mobileEditDeck .timeline-resizer::after{
+  content:'';position:absolute;left:50%;top:7px;width:52px;height:4px;
+  transform:translateX(-50%);border-radius:3px;background:#59636a;
+}
+body.mobile-ui #mobileEditDeck .timeline-resizer.dragging::after,
+body.mobile-ui #mobileEditDeck .timeline-resizer:focus-visible::after{background:var(--accent)}
+/* 손잡이는 덱 맨 위 경계에 놓아야 잡는 자리가 분명합니다. 안쪽 패널을 기준으로
+   두면 '타임라인' 머리말 아래로 들어가 버립니다. */
+body.mobile-ui #mobileEditDeck{position:relative;overflow:visible}
+body.mobile-ui #mobileEditDeck .timeline-panel{position:static}

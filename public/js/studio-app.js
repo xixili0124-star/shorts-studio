@@ -7,7 +7,7 @@ import {parseSrt,buildSrt} from './srt.js';
 import {uid,clamp,download} from './util.js';
 import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,onAssetReady,removeAssetFromLibrary,unusedLibraryAssetIds} from './project-store.js';
 import {Timeline} from './timeline.js';
-import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight,STORAGE_KEY} from './layout.js';
+import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight,heightTargetFor} from './layout.js';
 import {frameTime,timelineCollection,itemRange,splitAvailability,placeVideoClip,planClipTrim,applyClipTrim,setTransition,deleteTimelineItem,planPlacement,placeTimelineItem,currentGap,planItemTrim,applyItemTrim} from './timeline-edits.js';
 import {GRAPHICS,CAPTIONS,TRANSITIONS} from './presets.js';
 import {transformOf,alignVisual} from './visual-transform.js';
@@ -216,20 +216,42 @@ function toggleTrackSwitch(id,name){
 // ── 작업 공간과 타임라인의 높이 배분 ─────────────────────────────────
 // PC의 오른쪽 미리보기는 이 높이와 무관하게 전체 세로 공간을 유지합니다.
 let expandedFrom=null;
-const workbenchHeight=()=>$('workbench')?.getBoundingClientRect().height||0;
-const currentTimelineHeight=()=>Math.round($('timelineScroll')?.closest('.timeline-panel')?.getBoundingClientRect().height||0);
+const mobileUi=()=>!!(mobileStudio?.active||document.body.classList.contains('mobile-ui'));
+const box=id=>$(id)?.getBoundingClientRect().height||0;
+/** 미리보기와 타임라인이 나눠 쓰는 높이입니다. 폰은 머리말·하단 도구를 뺀 나머지입니다. */
+const workbenchHeight=()=>mobileUi()
+  ? (box('mobileViewerHost')+box('mobileEditDeck'))||box('workbench')
+  : box('workbench');
+const currentTimelineHeight=()=>Math.round(mobileUi()
+  ? box('mobileEditDeck')
+  : ($('timelineScroll')?.closest('.timeline-panel')?.getBoundingClientRect().height||0));
+/**
+ * 폰과 PC 는 행 높이를 정하는 변수도, 저장 칸도 다릅니다.
+ * 예전에는 폰에서 아예 조절을 막았는데, 그 결과 375×812 에서 미리보기가
+ * 126×224px(화면의 27.6%)로 고정돼 자막을 읽을 수 없었습니다.
+ * --mobile-deck-height 는 body.mobile-ui 에 선언돼 있어 html 에 써도 덮이지 않으므로
+ * 대상 요소도 함께 바꿉니다.
+ */
 function applyTimelineHeight(height,{store=true}={}){
-  // 모바일 화면의 높이는 별도로 배분하며 PC에서 저장한 모니터 크기는 보존합니다.
-  if(mobileStudio?.active||document.body.classList.contains('mobile-ui'))return null;
+  const {variable,storageKey,onBody}=heightTargetFor(mobileUi()?'mobile':'desktop');
   const next=clampTimelineHeight(height,workbenchHeight());
   if(next===null)return null;
-  document.documentElement.style.setProperty('--timeline-h',next+'px');
+  (onBody?document.body:document.documentElement).style.setProperty(variable,next+'px');
   const separator=$('timelineResizer');
-  separator.setAttribute('aria-valuemin',String(MIN_TIMELINE));separator.setAttribute('aria-valuemax',String(maxTimelineHeight(workbenchHeight())));
-  separator.setAttribute('aria-valuenow',String(next));separator.setAttribute('aria-valuetext',`타임라인 높이 ${next}픽셀`);
-  if(store)try{localStorage.setItem(STORAGE_KEY,String(next));}catch{}
+  if(separator){
+    separator.setAttribute('aria-valuemin',String(MIN_TIMELINE));separator.setAttribute('aria-valuemax',String(maxTimelineHeight(workbenchHeight())));
+    separator.setAttribute('aria-valuenow',String(next));separator.setAttribute('aria-valuetext',`타임라인 높이 ${next}픽셀`);
+  }
+  if(store)try{localStorage.setItem(storageKey,String(next));}catch{}
   timeline?.render();player.invalidate();
   return next;
+}
+/** 배치가 갈리면 변수도 저장 칸도 달라지므로 그 배치에 저장된 높이를 다시 씁니다. */
+function restoreStoredHeight(){
+  const {storageKey}=heightTargetFor(mobileUi()?'mobile':'desktop');
+  let saved=null;try{saved=localStorage.getItem(storageKey);}catch{}
+  const stored=readStoredHeight(saved,workbenchHeight());
+  applyTimelineHeight(stored??currentTimelineHeight(),{store:false});
 }
 function setExpanded(on){
   const button=$('expandMonitor');
@@ -245,14 +267,13 @@ function setExpanded(on){
   button?.setAttribute('aria-label',on?'미리보기 크게 보기 끄기':'미리보기 크게 보기');
 }
 function setupLayout(){
-  let saved=null;try{saved=localStorage.getItem(STORAGE_KEY);}catch{}
-  const stored=readStoredHeight(saved,workbenchHeight());
-  if(stored)applyTimelineHeight(stored,{store:false});
-  else applyTimelineHeight(currentTimelineHeight(),{store:false});
+  restoreStoredHeight();
   const bar=$('timelineResizer');
-  $('expandMonitor').onclick=()=>setExpanded(!expandedFrom);
+  const expand=$('expandMonitor');if(expand)expand.onclick=()=>setExpanded(!expandedFrom);
+  // 화면을 돌리거나 폰↔PC 배치가 갈릴 때 그 배치의 값으로 다시 맞춥니다.
+  matchMedia('(max-width:760px)').addEventListener('change',()=>requestAnimationFrame(restoreStoredHeight));
   bar.addEventListener('pointerdown',event=>{
-    if(event.button!==0||timeline.dragging||mobileStudio?.active)return;
+    if(event.button!==0||timeline.dragging)return;
     event.preventDefault();
     // 포인터 캡처는 브라우저에 따라 거절될 수 있습니다. 실패해도 끌기는 이어져야 합니다.
     try{bar.setPointerCapture(event.pointerId);}catch{}
@@ -1092,7 +1113,8 @@ async function init(){
     clearSelection:()=>select(null,null),addCaption:()=>addCaption(),route:routeAction,menuItems:timelineMenuItems,menuAction:runTimelineMenu,
     rename:name=>{setDocumentName(name);$('projectName').value=documentName;dirty=true;scheduleDraft();},
     trackAction:(id,action)=>{if(action==='select')timeline.activateTrack(id);else if(action==='add')addTrackByRole(null,id);else if(action==='remove')edit('빈 트랙 삭제',()=>removeTimelineTrack(id));else toggleTrackSwitch(id,action);},
-    layout:mobile=>{if(!mobile){let saved=null;try{saved=localStorage.getItem(STORAGE_KEY);}catch{}const height=readStoredHeight(saved,workbenchHeight());if(height)applyTimelineHeight(height,{store:false});}if(!timeline.dragging&&!monitor?.dragging){timeline.render();player.invalidate();}},
+    // 폰↔PC 배치가 갈릴 때마다 그 배치에 저장된 높이를 씁니다(변수와 저장 칸이 다릅니다).
+    layout:()=>{restoreStoredHeight();if(!timeline.dragging&&!monitor?.dragging){timeline.render();player.invalidate();}},
   });
   desktopStudio=new DesktopStudio({setView,view:()=>view,route:routeAction,
     openTracking:task=>{if(selection?.type==='clip'&&(task==='mosaic'||selected()?.type==='video'))smartTools.action(task).catch(error=>toast(error.message));},

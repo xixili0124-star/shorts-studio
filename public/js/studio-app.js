@@ -29,6 +29,7 @@ import {DesktopStudio} from './desktop-studio.js';
 import {listSavedQuickFormats,saveQuickFormat,deleteSavedQuickFormat,applySavedQuickFormat,renameSavedQuickFormat} from './saved-quick-formats.js';
 import {DEMO_MEDIA,createDemoMediaFile} from './demo-media.js';
 import {isLegacyDemoDraft,LEGACY_DEMO_ASSET_IDS} from './legacy-demo.js';
+import {setupCompactNotes} from './compact-notes.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -1129,6 +1130,7 @@ async function init(){
     layout:()=>{if(!timeline.dragging&&!monitor?.dragging){timeline.render();player.invalidate();}},
   });
   setupLayout();
+  setupCompactNotes();
   engine=await detectEngine();$('engineLabel').textContent=engine.label;
   try{
     if(new URLSearchParams(location.search).has('empty')){setDocumentName('새 프로젝트');refresh();}

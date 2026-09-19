@@ -1,0 +1,32 @@
+/* 설명 문구 접기
+ *
+ * 패널마다 설명 문단이 46+6+110 개 붙어 있어, 정작 눌러야 할 것이 글에 묻혔습니다.
+ * 글을 지우면 처음 쓰는 사람이 막히므로 지우지 않고 한 줄로 접어 둡니다.
+ * 누르면 그 자리에서 펼쳐지고, 앱바의 ? 로 전체를 한 번에 펼칠 수 있습니다.
+ *
+ * 접는 것은 보이는 높이뿐이라 화면 낭독기에는 항상 전체가 읽힙니다.
+ * data-hints="on" 이면 예전처럼 전부 펼친 상태가 됩니다.
+ */
+:root:not([data-hints="on"]) .inspector-note,
+:root:not([data-hints="on"]) .library-hint{
+  display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:1;overflow:hidden;
+}
+/* 실제로 잘린 문단에만 펼치기 표시를 붙입니다. 한 줄로 끝나는 짧은 글은 그대로 둡니다. */
+:root:not([data-hints="on"]) .inspector-note.is-clampable,
+:root:not([data-hints="on"]) .library-hint.is-clampable{
+  position:relative;cursor:pointer;padding-right:20px;
+}
+:root:not([data-hints="on"]) .inspector-note.is-clampable::after,
+:root:not([data-hints="on"]) .library-hint.is-clampable::after{
+  content:"⌄";position:absolute;right:2px;top:0;line-height:inherit;
+  color:var(--accent);opacity:.8;font-size:13px;
+}
+:root:not([data-hints="on"]) .inspector-note.is-open,
+:root:not([data-hints="on"]) .library-hint.is-open{-webkit-line-clamp:999}
+:root:not([data-hints="on"]) .inspector-note.is-open::after,
+:root:not([data-hints="on"]) .library-hint.is-open::after{content:"⌃"}
+:root:not([data-hints="on"]) .inspector-note.is-clampable:hover::after,
+:root:not([data-hints="on"]) .library-hint.is-clampable:hover::after{opacity:1}
+
+/* 앱바의 설명 토글. 켜져 있을 때만 강조합니다. */
+#toggleHints[aria-pressed="true"]{color:var(--accent);background:#263121}

@@ -104,6 +104,22 @@ async function viaVideoElement(file) {
   return clip;
 }
 
+/**
+ * 실제로 디코드되는 첫 프레임의 시각을 찾는다.
+ * 첫 패킷 시각부터 앞으로 조금씩 짚어 보고, 못 찾으면 원래 값을 그대로 돌려준다.
+ * 찾는 범위를 좁게 두어 큰 파일에서도 금방 끝난다.
+ */
+async function firstDecodableTime(sink, from, duration) {
+  const step = 0.05, limit = Math.min(from + 1.5, duration);
+  for (let t = from; t <= limit; t += step) {
+    try {
+      const frame = await sink.getCanvas(t);
+      if (frame && Number.isFinite(frame.timestamp)) return Math.max(from, frame.timestamp);
+    } catch { /* 이 지점은 못 읽는다. 다음으로 넘어간다 */ }
+  }
+  return from;
+}
+
 // ── 2) mediabunny 디코더 폴백 (+ 실패 원인 진단) ───────
 async function viaDecoder(file, prevError) {
   let input, track;
@@ -132,11 +148,13 @@ async function viaDecoder(file, prevError) {
   const sink = new CanvasSink(track);
 
   // MPEG-TS 는 PTS 가 0 에서 시작하지 않는다. 실측한 1초짜리 파일이 1.65~2.65 초에 놓여 있었다.
-  // 0 부터 클립으로 잡으면 앞 1.65 초에는 그릴 프레임이 아예 없고, 길이도 2.65 초로 부풀어 보인다.
-  // 첫 프레임 시각을 클립의 시작으로 삼아 실제 프레임이 있는 구간만 쓴다.
+  // 0 부터 클립으로 잡으면 앞 구간에는 그릴 프레임이 아예 없고, 길이도 2.65 초로 부풀어 보인다.
+  // 게다가 첫 패킷 시각(1.65)과 실제로 디코드되는 첫 프레임(1.90)이 또 다르다. 키프레임이
+  // 뒤에 있으면 그렇다. 미리보기도 내보내기도 프레임이 나오는 지점부터 시작해야 한다.
   let startTs = 0;
   try { startTs = await track.getFirstTimestamp?.() ?? 0; } catch { startTs = 0; }
   if (!Number.isFinite(startTs) || startTs < 0 || startTs >= dur) startTs = 0;
+  startTs = await firstDecodableTime(sink, startTs, dur);
 
   const clip = {
     ...newClipDefaults('video'),

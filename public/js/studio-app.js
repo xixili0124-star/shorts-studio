@@ -1069,7 +1069,9 @@ function wire(){
     if(isQuickControl(e.target)){updateQuickFormatControl(e.target);return;}
     if(e.target.id==='mediaSearch'){search=e.target.value;renderAssets();}
   });
-  const beginProperty=input=>{if(!input.dataset.prop||exportCtrl||importing||smartTools.busy||monitor?.dragging)return;clearTimeout(draftTimer);if(!controlBefore.has(input))controlBefore.set(input,captureDocument());};
+  // 예약된 저장은 이전 편집의 것이다. 여기서 취소하면 focusout 전에 창을 닫을 때 그 편집이 통째로 사라진다.
+  // 상태 표시만 ‘저장 중…’으로 남아 저장되는 중인 것처럼 보이는 문제도 같이 생긴다.
+  const beginProperty=input=>{if(!input.dataset.prop||exportCtrl||importing||smartTools.busy||monitor?.dragging)return;if(!controlBefore.has(input))controlBefore.set(input,captureDocument());};
   $('inspectorContent').addEventListener('focusin',e=>beginProperty(e.target));
   $('inspectorContent').addEventListener('pointerdown',e=>beginProperty(e.target));
   $('inspectorContent').addEventListener('focusout',()=>{if(dirty&&!monitor?.dragging)scheduleDraft();});
@@ -1101,6 +1103,10 @@ function wire(){
   document.addEventListener('drop',e=>{dragDepth=0;$('dropOverlay').hidden=true;if(e.dataTransfer.files.length){e.preventDefault();importFiles([...e.dataTransfer.files]);}});
   document.addEventListener('paste',e=>{if(/INPUT|TEXTAREA/.test(document.activeElement?.tagName))return;const files=[...(e.clipboardData?.files||[])];if(files.length){e.preventDefault();importFiles(files);}});
   window.addEventListener('beforeunload',e=>{if(dirty){e.preventDefault();e.returnValue='';}});
+  // 탭을 닫거나 모바일에서 백그라운드로 가면 디바운스를 기다려 주지 않는다. 즉시 쓴다.
+  const flushDraft=()=>{if(!dirty)return;clearTimeout(draftTimer);saveDraft().then(()=>{$('saveStatus').textContent='이 브라우저에 저장됨';dirty=false;}).catch(()=>{});};
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')flushDraft();});
+  window.addEventListener('pagehide',flushDraft);
   window.addEventListener('resize',()=>timeline.render());
 }
 

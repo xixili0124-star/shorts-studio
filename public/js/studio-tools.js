@@ -48,7 +48,7 @@ export class StudioTools {
     this.hooks=hooks;this.navigator=hooks.navigator||globalThis.navigator;this.job=null;this.state=null;
     this.voice={text:'안녕하세요. 오늘은 짧은 영상을 함께 편집합니다.',engine:'local',voice:'F1',speed:1,steps:5,systemVoice:'',accepted:false};
     this.pcVoice={status:null,error:'',checking:false,profileId:'',accepted:false};
-    this.captionScope='selected';this.captionEngine=sttAvailable()?'server':'local';this.captionEngineChosen=false;
+    this.captionScope='selected';this.captionEngine=sttAvailable()?'server':'local';this.captionEngineChosen=false;this.captionLang='ko';
     this.pcAsr={status:null,error:'',checking:false,checked:false};this.cutOptions={thresholdDb:-38,minSilence:.45,padding:.1};
     this.pcTracking={status:null,error:'',checking:false,accepted:false};this.trackingEngine='region';this.trackingEngineChosen=false;
     this.trackingDownloads={mosaic:false,crop:false};this.pcRefreshAt=0;this.pcStartingChecks=0;
@@ -134,6 +134,7 @@ export class StudioTools {
     this.referenceRecording?.cancel();this.referenceRecording=null;
     this.job?.abort();this.readerCtrl?.abort();this.readerCtrl=null;
     this.state?.reader?.close();this.state=null;
+    this.settleConsent(false);   // 창이 닫히면 동의하지 않은 것으로 본다
     this.dialog.querySelectorAll('audio,video').forEach(el=>el.pause());
     for(const url of this.urls||[])URL.revokeObjectURL(url);this.urls=[];
   }
@@ -155,6 +156,20 @@ export class StudioTools {
     if(!this.dialog.open)this.dialog.showModal();this.hooks.player.pause();
   }
   setBody(html){this.dialog.querySelectorAll('audio,video').forEach(el=>el.pause());this.body.innerHTML=html;}
+  /**
+   * 앱 대화상자로 동의를 받는다.
+   * 네이티브 confirm 은 인앱 브라우저와 미리보기 창에서 차단돼, 눌러도 아무 일도 일어나지 않는다.
+   * 그때 사용자는 버튼이 고장난 줄 알게 되므로 여기서는 쓰지 않는다.
+   */
+  askConsent(title,message,okLabel){
+    this.open(title,'<p class="note">'+esc(message)+'</p>'
+      +'<div class="smart-result-actions">'
+      +'<button class="button subtle" data-smart-action="consent-no">보내지 않기</button>'
+      +button('consent-yes',okLabel,false,true)
+      +'</div>');
+    return new Promise(resolve=>{this.consentResolve=resolve;});
+  }
+  settleConsent(value){const resolve=this.consentResolve;this.consentResolve=null;resolve?.(value);}
   objectUrl(blob){const url=URL.createObjectURL(blob);(this.urls||=[]).push(url);return url;}
   progress(value,message){const box=this.body.querySelector('.smart-progress');if(!box)return;box.hidden=false;const bar=box.querySelector('progress');if(Number.isFinite(value))bar.value=clamp(value,0,1);else bar.removeAttribute('value');box.querySelector('p').textContent=message;}
   async run(kind,work){
@@ -176,7 +191,7 @@ export class StudioTools {
   }
   captionControls(){
     const r=this.audioRange(),disabled=(this.captionScope==='selected'?!r:totalDuration()<=0)||this.captionPcUnavailable();
-    return '<section class="smart-card"><h3>자동 자막</h3><p class="note">말소리를 받아써 자동자막 트랙에 추가합니다. 기존 자막은 그대로 유지합니다.</p><div id="pcAsrSettings">'+this.pcAsrMarkup()+'</div><label class="field-label">인식 범위<select data-smart-input="caption-scope"><option value="selected" '+(this.captionScope==='selected'?'selected':'')+'>선택한 영상 / 오디오</option><option value="sequence" '+(this.captionScope==='sequence'?'selected':'')+'>전체 말소리 · 영상 + 보이스</option></select></label><p class="inspector-note">'+(this.captionScope==='selected'?(r?esc(r.item.name)+' · '+r.duration.toFixed(2)+'초':'타임라인에서 영상 또는 오디오를 선택하세요.'):'배경음악·효과음·음소거한 클립은 제외합니다. 일반 오디오로 등록한 말소리는 해당 클립을 선택해서 인식하세요.')+'</p>'+button('captions','자동 자막 만들기',disabled,true)+'<details class="smart-details"><summary>처리 방식</summary><label class="field-label">처리 위치<select data-smart-input="caption-engine">'+(sttAvailable()?'<option value="server" '+(this.captionEngine==='server'?'selected':'')+'>온라인 · 설치 없이</option>':'')+'<option value="pc" '+(this.captionEngine==='pc'?'selected':'')+'>이 PC · 고정밀</option><option value="local" '+(this.captionEngine==='local'?'selected':'')+'>브라우저 · 기기에서</option></select></label></details><p class="inspector-note">최대 3분 · 숫자·이름·소음이 있는 부분은 결과를 확인해 주세요.</p></section>';
+    return '<section class="smart-card"><h3>자동 자막</h3><p class="note">말소리를 받아써 자동자막 트랙에 추가합니다. 기존 자막은 그대로 유지합니다.</p><div id="pcAsrSettings">'+this.pcAsrMarkup()+'</div><label class="field-label">인식 범위<select data-smart-input="caption-scope"><option value="selected" '+(this.captionScope==='selected'?'selected':'')+'>선택한 영상 / 오디오</option><option value="sequence" '+(this.captionScope==='sequence'?'selected':'')+'>전체 말소리 · 영상 + 보이스</option></select></label><p class="inspector-note">'+(this.captionScope==='selected'?(r?esc(r.item.name)+' · '+r.duration.toFixed(2)+'초':'타임라인에서 영상 또는 오디오를 선택하세요.'):'배경음악·효과음·음소거한 클립은 제외합니다. 일반 오디오로 등록한 말소리는 해당 클립을 선택해서 인식하세요.')+'</p>'+button('captions','자동 자막 만들기',disabled,true)+'<details class="smart-details"><summary>처리 방식</summary><label class="field-label">처리 위치<select data-smart-input="caption-engine">'+(sttAvailable()?'<option value="server" '+(this.captionEngine==='server'?'selected':'')+'>온라인 · 설치 없이</option>':'')+'<option value="pc" '+(this.captionEngine==='pc'?'selected':'')+'>이 PC · 고정밀</option><option value="local" '+(this.captionEngine==='local'?'selected':'')+'>브라우저 · 기기에서</option></select></label><label class="field-label">인식 언어<select data-smart-input="caption-lang"><option value="ko" '+(this.captionLang==='ko'?'selected':'')+'>한국어</option><option value="en" '+(this.captionLang==='en'?'selected':'')+'>영어</option><option value="auto" '+(this.captionLang==='auto'?'selected':'')+'>자동 감지</option></select></label><p class="inspector-note">다른 언어로 말한 영상은 한국어로 잘못 받아쓸 수 있어요.</p></details><p class="inspector-note">최대 3분 · 숫자·이름·소음이 있는 부분은 결과를 확인해 주세요.</p></section>';
   }
   captionPcUnavailable(){
     return this.captionEngine==='pc'&&(!isPcAsrOrigin()||this.pcAsr.checking||!this.pcAsr.status?.available||this.pcAsr.status?.busy);
@@ -389,6 +404,8 @@ export class StudioTools {
     });}finally{await this.refreshPcVoice();}
   }
   async action(action,node){
+    if(action==='consent-yes'){this.settleConsent(true);return;}
+    if(action==='consent-no'){this.settleConsent(false);return;}
     if(action==='cancel'){this.close();return;}
     if(action==='stop-voice-reference'){this.referenceRecording?.stop();return;}
     if(this.referenceRecording)return;
@@ -478,6 +495,7 @@ export class StudioTools {
     if(key==='voice-engine'){this.voice.engine=input.value;this.hooks.renderLibrary();if(input.value==='pc'&&!this.pcVoice.status)this.refreshPcVoice();}
     if(key==='reference-file'){const file=input.files?.[0];input.value='';this.loadVoiceReference(file).catch(error=>this.showError(error));}
     if(key==='caption-engine'&&['local','pc','server'].includes(input.value)){this.captionEngine=input.value;this.captionEngineChosen=true;this.hooks.renderLibrary();if(input.value==='pc'&&!this.pcAsr.status)this.refreshPcAsr();}
+    if(key==='caption-lang'&&['ko','en','auto'].includes(input.value))this.captionLang=input.value;
     if(key==='caption-scope'){this.captionScope=input.value;this.hooks.renderLibrary();}
     if(key==='mosaic-index'){this.state.index=Number(input.value);this.renderMosaic();}
     if(key?.startsWith('cut-')&&this.state?.buffer){this.reanalyze();}
@@ -539,7 +557,7 @@ export class StudioTools {
    * 앞부분이 멀쩡한데 중간부터 놓친 경우 다시 처음부터 잡을 필요가 없습니다.
    */
   async track({merge=false}={}){
-    const s=this.state,e=s.effects[s.index];if(!e||s.clip.type!=='video')return;
+    const s=this.state;if(s?.kind!=='mosaic')return;const e=s.effects[s.index];if(!e||s.clip.type!=='video')return;
     if(merge&&!(e.mode==='tracked'&&e.keyframes?.length))throw new Error('이어 붙일 기존 추적 경로가 없습니다. 먼저 자동 추적을 한 번 실행해 주세요.');
     const previous=merge?e.keyframes.map(k=>({...k})):null;
     const options=this.trackingOptions('mosaic');
@@ -790,7 +808,9 @@ export class StudioTools {
     if(isPcAsrOrigin()&&(this.pcAsr.checking||!this.pcAsr.status))await this.refreshPcAsr();
     const engine=this.captionEngine||(sttAvailable()?'server':'local'),pc=engine==='pc',server=engine==='server';
     if(pc&&this.captionPcUnavailable())throw new Error('이 PC에서 지금 자막을 만들 수 없습니다. 잠시 뒤 다시 시도하거나 처리 방식을 직접 바꿔 주세요.');
-    if(server&&!confirm('선택한 구간의 소리만 자막 서버(Cloudflare)로 보내 자동 자막을 만듭니다. 영상 파일은 보내지 않습니다. 소리를 보내도 될까요?'))return;
+    if(server&&!await this.askConsent('소리를 보내도 될까요?',
+      '선택한 구간의 소리만 자막 서버(Cloudflare)로 보내 자동 자막을 만듭니다. 영상 파일은 보내지 않습니다.',
+      '보내고 자막 만들기')){this.close(false);this.hooks.toast('소리를 보내지 않았어요. 설치 없이 쓰려면 처리 방식을 브라우저로 바꿔 주세요.');return;}
     this.captionEngine=engine;this.captionEngineChosen=true;
     this.open('자동 자막 만들기','<p class="note">'+(server?'선택 구간의 소리를 온라인에서 인식합니다.':pc?'이 PC에서 말소리를 인식합니다.':'이 브라우저에서 말소리를 인식합니다.')+' 기존 자막은 그대로 유지합니다.</p>'+progressMarkup);
     const s={kind:'captions',before:captureDocument(),range,engine};this.state=s;
@@ -805,7 +825,7 @@ export class StudioTools {
       if(pc)result=await transcribePcAudio(pcm,{signal,onProgress:p=>this.progress(p,'자동 자막을 만드는 중…')});
       else if(server){
         this.progress(.25,'선택 구간의 소리를 자막 서버로 보내는 중…');
-        result=await transcribeRaw(buffer,{lang:'ko',signal});
+        result=await transcribeRaw(buffer,{lang:this.captionLang==='auto'?'':this.captionLang,signal});
         this.progress(.95,'결과를 정리하는 중…');
       }else result=await runLocalAI('asr',{audio:pcm},{signal,onProgress:p=>this.progress(p,'자동 자막을 만드는 중…')});
       if(signal.aborted||this.state!==s||!this.dialog.open)return;

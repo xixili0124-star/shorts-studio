@@ -150,7 +150,12 @@ export async function addAsset(file, options = {}) {
     return addDecodedAudioAsset(file, buffer, { ...options, id });
   } else {
     const base = await createClip(file, options.onStatus);
-    asset = { id, kind: base.type, file, base, duration: base.type === 'video' ? base.srcDuration : 3, thumb: base.thumb,
+    // 길이는 실제로 쓸 수 있는 구간으로 적는다. MPEG-TS 처럼 PTS 가 0 에서 시작하지 않으면
+    // srcDuration 에 앞쪽 빈 구간이 섞여 라이브러리에 부풀려 표시된다.
+    const usable = base.type === 'video'
+      ? Math.max(0.000001, (base.trimEnd ?? base.srcDuration) - (base.trimStart ?? 0))
+      : 3;
+    asset = { id, kind: base.type, file, base, duration: usable, thumb: base.thumb,
       libraryHidden: options.libraryHidden === true };
   }
   assets.set(id, asset);

@@ -131,6 +131,13 @@ async function viaDecoder(file, prevError) {
   const dur = await input.computeDuration();
   const sink = new CanvasSink(track);
 
+  // MPEG-TS 는 PTS 가 0 에서 시작하지 않는다. 실측한 1초짜리 파일이 1.65~2.65 초에 놓여 있었다.
+  // 0 부터 클립으로 잡으면 앞 1.65 초에는 그릴 프레임이 아예 없고, 길이도 2.65 초로 부풀어 보인다.
+  // 첫 프레임 시각을 클립의 시작으로 삼아 실제 프레임이 있는 구간만 쓴다.
+  let startTs = 0;
+  try { startTs = await track.getFirstTimestamp?.() ?? 0; } catch { startTs = 0; }
+  if (!Number.isFinite(startTs) || startTs < 0 || startTs >= dur) startTs = 0;
+
   const clip = {
     ...newClipDefaults('video'),
     id: uid(),
@@ -141,14 +148,14 @@ async function viaDecoder(file, prevError) {
     natW: track.displayWidth,
     natH: track.displayHeight,
     srcDuration: dur,
-    trimStart: 0,
+    trimStart: startTs,
     trimEnd: dur,
     muted: false,
     hasAudio: null,
   };
 
   try {
-    const first = await sink.getCanvas(Math.min(0.1, dur / 2));
+    const first = await sink.getCanvas(startTs + Math.min(0.1, (dur - startTs) / 2));
     if (first) clip.thumb = thumbFromSource(first.canvas, clip.natW, clip.natH);
   } catch { /* 썸네일은 없어도 그만 */ }
 

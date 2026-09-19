@@ -46,7 +46,9 @@ export default {
     try {
       const form = await request.formData();
       file = form.get('audio');
-      lang = String(form.get('lang') || 'ko').slice(0, 8);
+      // 빈 값이나 'auto' 는 Whisper 자동 감지에 맡긴다. 편집기에서 인식 언어를 고를 수 있다.
+      lang = String(form.get('lang') ?? 'ko').slice(0, 8);
+      if (lang === 'auto') lang = '';
       hint = String(form.get('hint') || '').slice(0, 400);
       debug = form.get('debug') === '1' || new URL(request.url).searchParams.get('debug') === '1';
     } catch {
@@ -66,7 +68,7 @@ export default {
       const bytes = new Uint8Array(await file.arrayBuffer());
       result = await env.AI.run(MODEL, {
         audio: toBase64(bytes),
-        language: lang,
+        ...(lang ? { language: lang } : {}),   // 언어를 빼면 모델이 알아서 감지한다
         task: 'transcribe',
         vad_filter: true,
         // 채널에서 자주 쓰는 단어를 미리 알려주면 그쪽으로 알아듣는다

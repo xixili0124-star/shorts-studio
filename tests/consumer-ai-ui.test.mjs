@@ -199,18 +199,31 @@ test('PC caption failures remain visible without secretly starting a browser mod
 test('online captions send only after explicit consent and identify the returned result correctly',async()=>{
   const saved={location:globalThis.location,fetch:globalThis.fetch,confirm:globalThis.confirm,Worker:globalThis.Worker};globalThis.location=unsupported;
   const samples=new Float32Array(16000).fill(.1),buffer={sampleRate:16000,length:samples.length,numberOfChannels:1,getChannelData:()=>samples};
-  let accepted=false,requests=0,confirmations=0,workerStarts=0;
-  globalThis.confirm=message=>{confirmations++;assert.match(message,/선택한 구간의 소리만.*Cloudflare/);assert.match(message,/영상 파일은 보내지 않습니다/);return accepted;};
+  let accepted=false,requests=0,confirmations=0,workerStarts=0,toasts=[];
+  // 네이티브 confirm 을 쓰면 인앱 브라우저에서 차단돼 아무 반응 없이 실패한다. 동의는 앱 대화상자로 받는다.
+  globalThis.confirm=()=>{throw new Error('must not use native confirm');};
   globalThis.fetch=async(url,options)=>{requests++;assert.match(url,/workers\.dev/);assert.equal(options.body.get('audio').type,'audio/wav');return new Response(JSON.stringify({segments:[{start:.1,end:.8,text:'안녕하세요.'}],text:'안녕하세요.'}),{status:200});};
   globalThis.Worker=class{constructor(){workerStarts++;throw new Error('must not start browser fallback');}};
   const owner=Object.assign(Object.create(StudioTools.prototype),{
-    captionScope:'selected',captionEngine:'server',dialog:{open:false},pcAsr:{status:null,checking:false},
+    captionScope:'selected',captionEngine:'server',captionLang:'ko',dialog:{open:false},pcAsr:{status:null,checking:false},
+    hooks:{toast:message=>toasts.push(message)},
     audioRange:()=>({type:'audio',id:'voice',start:2,duration:1,item:{name:'말소리',buffer,trimStart:0,trimEnd:1}}),
-    open(title,html){this.dialog.open=true;this.opened={title,html};},setBody(html){this.review=html;},progress(){},
+    open(title,html){
+      this.dialog.open=true;this.opened={title,html};
+      if(/소리를 보내도 될까요/.test(title)){
+        confirmations++;
+        assert.match(html,/선택한 구간의 소리만[\s\S]*Cloudflare/);
+        assert.match(html,/영상 파일은 보내지 않습니다/);
+        queueMicrotask(()=>this.settleConsent(accepted));   // 사용자가 버튼을 누른 것과 같다
+      }
+    },
+    close(){this.dialog.open=false;},
+    setBody(html){this.review=html;},progress(){},
     async run(kind,work){return work(new AbortController().signal);},
   });
   try{
     await owner.openCaptions();assert.equal(confirmations,1);assert.equal(requests,0);assert.equal(owner.dialog.open,false);assert.equal(owner.state,undefined);
+    assert.match(toasts.join(' '),/소리를 보내지 않았어요/);
     accepted=true;await owner.openCaptions();assert.equal(confirmations,2);assert.equal(requests,1);assert.equal(owner.state.engine,'server');
     assert.equal(owner.state.captions[0].start,2.1);assert.equal(owner.state.captions[0].generated,'server-whisper');
     assert.match(owner.review,/온라인에서 처리한 자막/);assert.doesNotMatch(owner.review,/브라우저에서 처리한 자막|Whisper|Tiny|large-v3|GPU|CUDA/);

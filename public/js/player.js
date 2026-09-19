@@ -93,31 +93,41 @@ export class Player {
 
   _sinkState(clip) {
     let state=this.sinkStates.get(clip.sink);
-    if(!state){state={frame:null,pending:false,queued:null};this.sinkStates.set(clip.sink,state);}
+    if(!state){state={frame:null,pending:false,queued:null,missing:null,updated:false};this.sinkStates.set(clip.sink,state);}
     return state;
   }
 
   _requestSinkFrame(clip, t) {
     const state=this._sinkState(clip);
     if (state.pending) { state.queued = t; return; }   // 한 번에 하나만
+    // 프레임이 없는 시각을 다시 요청하면 안 된다. 실패해도 finally 가 draw() 를 부르고,
+    // draw() 는 프레임이 없으니 같은 시각을 또 요청한다. 둘이 서로를 부르며 이벤트 루프를
+    // 굶겨서 탭이 통째로 멈춘다. MPEG-TS 처럼 PTS 가 0 에서 시작하지 않는 파일에서 실측했다.
+    if (state.missing != null && Math.abs(state.missing - t) < 1e-6) return;
     state.pending = true;
+    state.updated = false;
     clip.sink.getCanvas(t)
       .then(w => {
-        if (!w) return;
+        if (!w) { state.missing = t; return; }
+        state.missing = null;
         const current = project.clips.find(c => c.id === clip.id && c.sink === clip.sink);
         if (tracksVisualSubject(current)) {
           const canvas = document.createElement('canvas');canvas.width = w.canvas.width;canvas.height = w.canvas.height;
           canvas.getContext('2d').drawImage(w.canvas, 0, 0);
           state.frame = { t: w.timestamp, duration: w.duration, canvas, owned: true };
         } else state.frame = { t: w.timestamp, duration: w.duration, canvas: w.canvas };
+        state.updated = true;
       })
       .catch(() => { /* 디코딩 실패한 지점은 직전 프레임 유지 */ })
       .finally(() => {
         state.pending = false;
         const next = state.queued;
         state.queued = null;
+        const changed = state.updated;
+        state.updated = false;
+        // 새 프레임을 받았을 때만 다시 그린다. 못 받았는데 그리면 위의 재귀로 들어간다.
         if (next != null) this._requestSinkFrame(clip, next);
-        else if (!this.playing) this.draw();
+        else if (!this.playing && changed) this.draw();
       });
   }
 

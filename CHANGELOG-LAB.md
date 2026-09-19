@@ -6,6 +6,71 @@
 
 초기 작업 방식: 기준 스냅샷을 별도 폴더로 복사하고 `codex/studio-lab` 공유 브랜치와 검토용 Draft PR에서 작업했습니다. 원본 참조 clone은 별도로 보존합니다.
 
+## 2026-09-19 · 자막 서버를 아무나 못 부르게, 구조 문서를 현재 코드로
+
+**1. 자동자막 워커의 출처 검사가 사실상 열려 있었습니다.**
+
+`stt-worker/src/index.js` 의 관문이 이랬습니다.
+
+```js
+if (origin && !isAllowed(origin)) return json({ error: '허용되지 않은 출처입니다.' }, 403, cors);
+```
+
+`origin &&` 때문에 **Origin 헤더가 없으면 검사를 통째로 건너뜁니다.** Origin 은 브라우저가
+붙이는 것이라, `curl` 이나 스크립트는 애초에 안 붙입니다. 워커는 `workers_dev: true` 라
+주소가 공개돼 있고 레이트리밋도 없어서, 주소만 알면 누구나 한 번에 25MB 씩 이 계정의
+Workers AI Whisper 할당량을 쓸 수 있었습니다. 막는 줄 알았는데 안 막고 있었습니다.
+
+이제 Origin 이 없는 요청도 거절합니다. 워커를 부르는 곳은 `transcribe.js` 와 `tts.js`
+둘뿐이고 둘 다 교차 출처라 Origin 이 항상 붙으므로, 정상 경로는 영향이 없습니다.
+
+**2. 같은 함수에서 점 경계 검사가 빠져 있었습니다.**
+
+```js
+return host.endsWith(ALLOWED_SUFFIX.slice(1)) || host.endsWith(ALLOWED_SUFFIX);
+```
+
+`ALLOWED_SUFFIX` 가 `'.shorts-studio-75p.pages.dev'` 인데 `.slice(1)` 이 앞의 점을
+떼어냅니다. 그래서 `evilshorts-studio-75p.pages.dev` 처럼 **앞에 아무 글자나 붙인 주소가
+통과**했습니다. pages.dev 프로젝트 이름은 누구나 만들 수 있으니 실제로 등록 가능한 주소입니다.
+
+점을 붙인 채로 비교하고, `https` 도 함께 확인하도록 고쳤습니다.
+
+**3. `/tts` 는 출처 검사보다 앞에서 갈라지고 있었습니다.**
+
+라우팅 순서상 `/tts` 가 먼저 return 해버려서 그 경로만 검사를 통과했습니다. 지금은
+`PROVIDERS` 가 비어 있어 501 만 뱉으니 무해하지만, README 규칙대로 유료 TTS 키를 꽂는
+순간 무인증 공개 프록시가 됩니다. 출처 검사를 모든 경로 앞으로 올렸습니다.
+
+셋 다 같은 함수·같은 관문이라 한 번에 고쳤습니다. 11개 출처 사례(운영·미리보기·로컬 허용,
+점 경계 우회·http 다운그레이드·Origin 없음·깨진 값 차단)로 확인했습니다.
+
+**4. README 구조 절이 새 편집기를 통째로 빠뜨리고 있었습니다.**
+
+`CLAUDE.md` 가 AI 도구를 README 의 "개발자·AI 에이전트용" 절로 보내는데, 그 안의 `## 구조`
+는 **기존 편집기 11개 파일만** 설명하고 있었습니다. `studio-app.js`(1,142줄),
+`studio-tools.js`(835줄), `timeline.js`(687줄), `project-store.js`(532줄) 는 README
+전체에서 한 번도 안 나왔고, 파이썬 PC 확장 22개 파일 5,880줄도 구조 설명이 없었습니다.
+지금 주력이 새 편집기인데, 문서만 보고 들어오면 기존 편집기를 고치게 됩니다.
+
+65개 모듈 전부를 역할별로 묶어 다시 썼습니다. **두 편집기가 공유하는 핵심**(`state.js`
+`render.js` `player.js` `exporter.js` `audio.js` `media.js`)을 따로 떼어, 여기를 고치면
+양쪽이 다 바뀐다는 걸 먼저 보이게 했습니다. `project` 에 `timelineTracks` 도 추가했습니다.
+
+같은 절의 이 문장도 틀려서 고쳤습니다.
+
+> 외부 라이브러리는 `public/vendor/` 에 파일로 넣는다 (현재 mediabunny 하나뿐)
+
+실제로는 mediapipe 58MB, transformers 22MB, onnxruntime-web 12MB, supertonic 까지
+네 종이 더 있어 합계 92MB 입니다.
+
+**5. vendor 파일이 Pages 한도에 3 MiB 남기고 붙어 있습니다.**
+
+`efficientdet-lite2-f32-v1.tflite` 가 22.0 MiB, `ort-wasm-simd-threaded.jsep.wasm`
+가 20.6 MiB 입니다. Cloudflare Pages 는 파일 하나가 25 MiB 를 넘으면 배포를 거절합니다.
+PC ZIP 쪽에는 한도를 적어 뒀는데 vendor 쪽엔 없어서, 모델을 키우기 전에 크기부터 재라는
+경고를 구조 절에 넣었습니다. 지금 당장 깨지는 건 아닙니다.
+
 ## 2026-09-01 · 스쳐 지나가도 안 꺼지게, 끊긴 지점부터 이어 붙이기
 
 **1. 손이 스쳐 지나가면 모자이크가 꺼졌습니다.**

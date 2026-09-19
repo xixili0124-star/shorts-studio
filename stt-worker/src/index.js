@@ -35,9 +35,12 @@ export default {
 
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors });
 
+    // 출처 검사는 모든 경로보다 앞에 둔다. /tts 가 먼저 갈라지면 그 경로만 검사를 건너뛴다.
+    // Origin 이 없는 요청(브라우저가 아닌 클라이언트)도 막는다. 편집기는 교차 출처라 항상 붙인다.
+    if (!isAllowed(origin)) return json({ error: '허용되지 않은 출처입니다.' }, 403, cors);
+
     if (new URL(request.url).pathname === '/tts') return handleTts(request, env, cors);
     if (request.method !== 'POST') return json({ error: 'POST 로만 받습니다.' }, 405, cors);
-    if (origin && !isAllowed(origin)) return json({ error: '허용되지 않은 출처입니다.' }, 403, cors);
 
     let file, lang, debug, hint;
     try {
@@ -255,8 +258,10 @@ function toBase64(bytes) {
 function isAllowed(origin) {
   if (ALLOWED_ORIGINS.includes(origin)) return true;
   try {
-    const host = new URL(origin).hostname;
-    return host.endsWith(ALLOWED_SUFFIX.slice(1)) || host.endsWith(ALLOWED_SUFFIX);
+    const { protocol, hostname } = new URL(origin);
+    // 점을 포함한 채로 비교해야 한다. 점을 떼면 evilshorts-studio-75p.pages.dev 가 통과하고,
+    // pages.dev 프로젝트 이름은 누구나 만들 수 있다.
+    return protocol === 'https:' && hostname.endsWith(ALLOWED_SUFFIX);
   } catch {
     return false;
   }

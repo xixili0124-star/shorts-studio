@@ -403,32 +403,115 @@ cd stt-worker && npx wrangler deploy
 | 제약 | 이유 |
 |---|---|
 | **빌드 단계를 만들지 마라** | `npx serve public` 하나로 뜨는 게 이 프로젝트의 성질이다. 번들러·트랜스파일러를 도입하지 마라 |
-| **npm 의존성을 추가하지 마라** | 외부 라이브러리는 `public/vendor/` 에 파일로 넣는다 (현재 mediabunny 하나뿐) |
+| **npm 의존성을 추가하지 마라** | 외부 라이브러리는 `public/vendor/` 에 파일로 넣는다 (mediabunny · mediapipe · transformers · onnxruntime-web · supertonic, 합계 92MB) |
 | **파일을 서버로 보내지 마라** | 사용자 미디어가 로컬을 벗어나면 이 도구의 존재 이유가 없어진다. 예외는 자동 자막(오디오만, 사용자가 버튼을 눌렀을 때) |
 | **API 키를 클라이언트에 넣지 마라** | 정적 사이트라 다 보인다. 키가 필요하면 Worker 를 거친다 |
 | **주석은 한국어로 쓴다** | 기존 코드가 전부 한국어 주석이다. 섞지 마라 |
 
 ## 구조
 
+편집기가 **두 벌**이다. 기존 편집기(`index.html`)는 그대로 두고, 새 멀티트랙 편집기
+(`studio.html`)를 따로 올렸다. 둘은 `state.js` · `render.js` · `player.js` · `exporter.js`
+를 공유하고, UI 층만 다르다. **어느 쪽을 고치는지 먼저 확인하라.** 새 기능은 대개 새 편집기다.
+
 ```
 public/
-  index.html      전체 UI (탭 구조: 클립 / 텍스트 / 자막 / 오디오 / 쇼핑 / 템플릿 / 내보내기)
-  style.css
-  vendor/mediabunny.min.js   WebCodecs 래퍼. 건드리지 말 것 (MPL-2.0)
-  js/
-    main.js       1300줄. UI 배선 전부. 새 기능은 대개 여기에 붙는다
-    state.js      project 객체 = 단일 진실. 타임라인 계산도 여기
-    render.js     프레임 렌더러. 미리보기와 내보내기가 공유한다 (아래 참고)
-    player.js     미리보기 재생 (requestAnimationFrame)
-    exporter.js   내보내기 (WebCodecs, 실패 시 MediaRecorder 폴백)
-    audio.js      오디오 믹싱 + 자막 빈 구간 탐지
-    media.js      파일 -> 클립 (2단계 폴백 있음)
-    shopping.js   쇼핑 쇼츠 장면 구성 (⚠️ 아래 "미완성" 참고)
-    youtube.js    유튜브 업로드 (OAuth 팝업 + 재개 가능 업로드)
-    transcribe.js 자동 자막 클라이언트 (Worker 호출)
-    srt.js, util.js
-stt-worker/       자동 자막 서버 (Cloudflare Worker). Pages 와 별개로 수동 배포
+  index.html      기존 편집기 UI (탭: 클립 / 텍스트 / 자막 / 오디오 / 쇼핑 / 템플릿 / 내보내기)
+  studio.html     새 편집기 UI. 여기가 현재 주력이다
+  style.css       기존 / studio.css · mobile.css · desktop.css  새 편집기
+  vendor/         빌드 없이 쓰는 외부 파일. 건드리지 말 것 (라이선스는 CREDITS.md)
+    mediabunny.min.js          WebCodecs 래퍼 (MPL-2.0)
+    mediapipe/ transformers/ onnxruntime-web/ supertonic/   브라우저 AI (아래 "vendor 크기" 참고)
+  js/             65개 모듈. 아래는 역할별로 묶은 것이다
 ```
+
+### 두 편집기가 함께 쓰는 핵심 (여기를 고치면 양쪽이 다 바뀐다)
+
+| 파일 | 역할 |
+|---|---|
+| `state.js` | `project` 객체 = 단일 진실. 타임라인·트랙 계산도 여기 |
+| `render.js` | 프레임 렌더러. 미리보기와 내보내기가 공유한다 (아래 참고) |
+| `player.js` | 미리보기 재생 (requestAnimationFrame) |
+| `exporter.js` | 내보내기 (WebCodecs, 실패 시 MediaRecorder 폴백) |
+| `audio.js` | 오디오 믹싱 + 자막 빈 구간 탐지 |
+| `media.js` | 파일 -> 클립 (2단계 폴백 있음) |
+| `util.js` `srt.js` | 공용 유틸, SRT 입출력 |
+
+### 기존 편집기 (`index.html`)
+
+| 파일 | 역할 |
+|---|---|
+| `main.js` | 1,461줄. 기존 UI 배선 전부 |
+| `shopping.js` | 쇼핑 쇼츠 장면 구성 (⚠️ 아래 "미완성" 참고) |
+| `youtube.js` | 유튜브 업로드 (OAuth 팝업 + 재개 가능 업로드) |
+| `legacy-demo.js` | 기존 데모 프로젝트 식별 |
+
+### 새 편집기 (`studio.html`) — 진입점은 `studio-app.js`
+
+| 묶음 | 파일 | 역할 |
+|---|---|---|
+| 배선 | `studio-app.js` (1,142줄) | 진입점. UI 는 편집 명령을 부르기만 하고 상태는 안 만진다 |
+| | `studio-tools.js` (835줄) | 자동 편집 패널. 결과를 먼저 보여주고 적용할 때만 프로젝트를 바꾼다 |
+| | `mobile-studio.js` `desktop-studio.js` `desktop-layout.js` `layout.js` | 화면 폭별 레이아웃. 프로젝트·렌더러는 복제하지 않는다 |
+| | `inspector-controls.js` | 속성 패널의 공용 입력 위젯 |
+| 타임라인 | `timeline.js` (687줄) | 그리기·드래그. 드래그 중 DOM 을 유지하고 놓을 때 한 번만 적용 |
+| | `timeline-edits.js` | 배치·트림·분할·전환 편집 명령. UI 와 드래그 미리보기가 같이 쓴다 |
+| | `mobile-timeline-gestures.js` | 모바일 제스처. 한 손가락 = 시각 이동, 두 손가락 = 이동·확대 |
+| | `link-groups.js` | 영상 + 원음처럼 함께 움직이는 묶음 (⛓) |
+| | `batch-edits.js` | 다중 선택. ID 만 들고 있다가 미디어 준비 후 적용 |
+| | `media-insertion.js` | 영상과 원음을 한 번에 투입 |
+| 자원·저장 | `project-store.js` | 편집 데이터와 미디어 자원 분리, 되돌리기, `.shorts` 묶기 |
+| 화면 편집 | `monitor-editor.js` | 모니터 위 직접 조작. 손잡이·정렬선은 출력에 안 들어간다 |
+| | `keyframes.js` `keyframe-editor.js` | 키프레임. 키 시각은 클립 시작을 0 으로 하는 초 |
+| | `visual-transform.js` `safe-areas.js` | 공용 변형 좌표계, 플랫폼별 안전영역 |
+| 소재 | `presets.js` `graphic-templates.js` `text-effects.js` `transition-effects.js` | 그래픽·자막·전환 프리셋 |
+| | `font-catalog.js` (748줄) `font-picker.js` | OFL 폰트 64종 + 미리보기 |
+| | `sound-catalog.js` `sound-effects.js` | 효과음 37종 |
+| | `quick-format.js` `saved-quick-formats.js` | 빠른 서식 |
+| | `demo-media.js` | 데모 소재 |
+| 추적·가림 | `crop-tracking.js` `region-tracking.js` | 크롭 추적. 고른 대상만 따라간다 (자동 검출 아님) |
+| | `browser-tracking*.js` | 브라우저 검출기 (mediapipe) |
+| | `mosaic.js` `mosaic-worker.js` | 모자이크. 좌표를 원본 프레임 기준으로 저장 |
+| | `video-analysis.js` | 재생용 디코더와 분리된 분석 전용 프레임 공급자 |
+| 음성·자막 | `transcribe.js` | 서버 자동자막 클라이언트 (stt-worker 호출) |
+| | `local-ai.js` `ai-client.js` `asr-worker.js` `tts-worker.js` `tts.js` | 브라우저 내 AI. 사용자가 실행할 때만 Worker 를 만든다 |
+| | `silence.js` | 무음 판정. 볼륨·페이드·음소거는 판정에 안 쓴다 |
+| | `audio-gain.js` | 키프레임을 반영한 시점별 음량 (0~300%) |
+| | `model-download.js` | 브라우저 모델 내려받기 |
+| PC 연결 | `pc-connection.js` | 승인한 사이트만 `127.0.0.1:8792` 에 연결. 포트를 뒤지지 않는다 |
+| | `pc-asr.js` `pc-voice.js` `pc-tracking.js` `pc-help.js` | PC 엔진별 클라이언트 |
+
+### PC 확장 (파이썬 22개 파일, 5,880줄)
+
+브라우저가 못 하는 것(대형 모델 추론)만 같은 PC 의 루프백 서비스로 넘긴다.
+**포트는 `127.0.0.1:8792` 고정이고, 승인한 출처만 부를 수 있다.**
+
+| 파일 | 역할 |
+|---|---|
+| `pc_bridge.py` | 루프백 승인·인증 계층. `PUBLIC_ORIGINS` 허용 목록이 여기 있다 |
+| `pc_http.py` | 요청 라우팅과 CORS. 모든 PC API 의 관문 |
+| `pc_runtime.py` | 설치된 엔진 탐색. 이 실행기가 띄운 프로세스만 관리한다 |
+| `studio_server.py` | 로컬 정적 서버 (실험판) |
+| `pc_voice*.py` `vox_voice_engine.py` | VoxCPM2 내 목소리 TTS |
+| `pc_asr*.py` | Whisper large-v3-turbo 자동자막 |
+| `pc_tracking*.py` | SAM 2.1 Small 추적 |
+| `install_pc_support.py` `pc_installation.py` | 설치·경로 탐색 |
+| `build_pc_support_package.py` | 배포용 ZIP + 설치 CMD 생성 |
+
+```
+stt-worker/       자동 자막 서버 (Cloudflare Worker). Pages 와 별개로 수동 배포
+tests/            Node 16개 + Python 4개. 루트에 두면 Pages 가 빌드를 시도해서 여기 있다
+```
+
+### vendor 크기 — Pages 파일당 25 MiB 한도에 붙어 있다
+
+| 파일 | 크기 |
+|---|---|
+| `vendor/mediapipe/models/efficientdet-lite2-f32-v1.tflite` | 22.0 MiB |
+| `vendor/transformers/3.8.1/ort-wasm-simd-threaded.jsep.wasm` | 20.6 MiB |
+
+[Cloudflare Pages 는 파일 하나가 25 MiB 를 넘으면 배포를 거절한다](https://developers.cloudflare.com/pages/platform/limits/#file-size).
+여유가 3 MiB 뿐이다. **모델을 더 큰 것으로 바꾸기 전에 파일 크기를 먼저 재라.**
 
 ### 핵심 설계: 렌더러 하나를 공유한다
 
@@ -451,6 +534,7 @@ stt-worker/       자동 자막 서버 (Cloudflare Worker). Pages 와 별개로 
 project = {
   width, height, fps, quality,     // 출력 설정
   clips: [],        // 순서대로 이어붙는 영상/이미지
+  timelineTracks,   // 새 편집기의 멀티트랙. 구형 파일은 undefined 로 두고 보충한다
   overlays: [],     // 시간 구간을 가진 텍스트 (start, end)
   captions: [],     // 자막. overlays 와 구조는 비슷하나 스타일이 공통
   captionStyle: {}, // 자막 전체 공통 스타일

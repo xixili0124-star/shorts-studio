@@ -508,7 +508,13 @@ export class StudioTools {
   async openMosaic(){
     const range=this.videoRange();if(!range)throw new Error('타임라인에서 영상 또는 이미지를 선택해 주세요.');
     this.open('트래킹 모자이크','<p class="note">원본 프레임을 준비하고 있어요.</p>'+progressMarkup);
-    const clip=range.item,position=clip.type==='video'?clip.trimStart+clamp(this.hooks.player.time-range.start,0,range.duration-.001):0;
+    const clip=range.item;
+    // 재생 막대가 이 클립 밖에 있으면 clamp 가 마지막 프레임으로 보낸다. 끝 프레임에는
+    // 대상이 안 보이는 경우가 많아, 거기서 영역을 그리게 하면 처음부터 다시 잡아야 한다.
+    // 막대가 클립 안이면 그 자리를, 밖이면 클립 가운데를 연다.
+    const local=this.hooks.player.time-range.start;
+    const offset=local>0&&local<range.duration?local:range.duration/2;
+    const position=clip.type==='video'?clip.trimStart+clamp(offset,0,range.duration-.001):0;
     const state={kind:'mosaic',clip,range,before:captureDocument(),effects:structuredClone(clip.mosaics||[]),index:0,time:position,preview:true,edited:new Set()};
     if(!state.effects.length)state.effects.push(this.newMask());this.state=state;
     await this.run('mosaic-open',async signal=>{

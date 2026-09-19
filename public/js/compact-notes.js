@@ -2,7 +2,9 @@
 // 패널은 편집할 때마다 통째로 다시 그려지므로, 개별 요소에 리스너를 달지 않고
 // 문서 한 곳에서 위임으로 받습니다. 접힘 여부는 그릴 때마다 다시 재야 합니다.
 
-const HOSTS = ['libraryContent', 'inspectorContent'];
+// 패널뿐 아니라 대화상자 안에도 설명이 있다. 대화상자는 본문을 통째로 갈아 끼우므로
+// 함께 지켜봐야 ⌄ 표시가 붙는다.
+const HOSTS = ['libraryContent', 'inspectorContent', 'smartToolsDialog', 'helpDialog', 'exportDialog'];
 const SELECTOR = '.inspector-note, .library-hint';
 const STORAGE = 'studio.hints';
 
@@ -36,6 +38,9 @@ export function setupCompactNotes() {
     if (host) observer.observe(host, { childList: true, subtree: true });
   }
   window.addEventListener('resize', remeasure);
+  // 첫 측정이 너무 이르면 글꼴이 바뀌기 전 크기로 재게 된다. 글꼴이 준비된 뒤 다시 잰다.
+  document.fonts?.ready?.then(remeasure).catch(() => {});
+  setTimeout(remeasure, 1500);
 
   // 앱바 토글. 켜면 예전처럼 전부 펼쳐진 상태가 됩니다.
   const button = document.getElementById('toggleHints');

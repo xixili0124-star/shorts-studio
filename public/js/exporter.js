@@ -163,7 +163,16 @@ export async function exportVideo({ engine, onProgress = () => {}, signal, playe
             provider.last = next.value;
           }
           const sample = provider.last;
-          if (!sample) throw new Error(`${c.name}: 영상 프레임을 읽지 못했습니다.`);
+          if (!sample) {
+            // 클립 맨 앞 몇 프레임은 디코더가 아직 첫 샘플을 못 내줄 수 있다.
+            // MPEG-TS 처럼 첫 키프레임이 뒤에 있는 컨테이너가 그렇다. 여기서 바로 예외를
+            // 던지면 파일 전체를 못 쓰게 되므로, 첫 샘플이 나올 때까지는 이 클립만 건너뛴다.
+            // 2초가 지나도 하나도 못 받으면 그때 알린다.
+            provider.misses = (provider.misses || 0) + 1;
+            if (provider.misses > Math.ceil(fps * 2)) throw new Error(`${c.name}: 영상 프레임을 읽지 못했습니다.`);
+            continue;
+          }
+          provider.misses = 0;
           sources.set(c.id, { img: sample, w: sample.displayWidth, h: sample.displayHeight, sourceTime: sample.timestamp, draw: (context, ...args) => sample.draw(context, ...args) });
         }
         renderFrame(ctx, t, { layout, source: clip => sources.get(clip.id) });

@@ -39,8 +39,11 @@ export function setupCompactNotes() {
   }
   window.addEventListener('resize', remeasure);
   // 첫 측정이 너무 이르면 글꼴이 바뀌기 전 크기로 재게 된다. 글꼴이 준비된 뒤 다시 잰다.
-  document.fonts?.ready?.then(remeasure).catch(() => {});
-  setTimeout(remeasure, 1500);
+  // 숨겨진 탭에서는 requestAnimationFrame 이 아예 돌지 않으므로, 이 두 번은 직접 잰다.
+  // 그렇지 않으면 백그라운드에서 연 탭은 화면을 볼 때까지 ⌄ 가 붙지 않는다.
+  document.fonts?.ready?.then(() => markClampable()).catch(() => {});
+  setTimeout(() => markClampable(), 1500);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) markClampable(); });
 
   // 앱바 토글. 켜면 예전처럼 전부 펼쳐진 상태가 됩니다.
   const button = document.getElementById('toggleHints');
@@ -52,7 +55,7 @@ export function setupCompactNotes() {
       button.setAttribute('aria-label', on ? '설명 문구 접기' : '설명 문구 펼치기');
       button.title = on ? '설명 접기 · 화면을 간결하게' : '설명 펼치기 · 기능 설명 보기';
     }
-    if (!on) remeasure();
+    if (!on) markClampable();
   };
   let saved = false;
   try { saved = localStorage.getItem(STORAGE) === 'on'; } catch { saved = false; }
@@ -63,5 +66,5 @@ export function setupCompactNotes() {
     try { localStorage.setItem(STORAGE, next ? 'on' : 'off'); } catch { /* 저장 못 해도 이번 세션은 동작합니다 */ }
   });
 
-  remeasure();
+  markClampable();
 }

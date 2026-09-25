@@ -92,13 +92,14 @@ export function captureTemplate(name, doc = project) {
  * 짧으면 먼저 배속을 올려 맞춰 보고, 그래도 모자라면 그 컷만 짧게 둡니다. 없는 화면을
  * 만들어 내지는 않습니다.
  */
-export function planTemplate(template, sources) {
+export function planTemplate(template, sources, { pickStart } = {}) {
   const normalized = normalizeTemplate(template);
   if (!normalized) return { ok: false, reason: '템플릿을 읽지 못했습니다.' };
   const list = (sources || []).filter(s => record(s) && finite(s.duration, 0) > 0);
   if (!list.length) return { ok: false, reason: '템플릿에 넣을 영상을 먼저 라이브러리에 올려 주세요.' };
 
   let cursor = 0;
+  const used = new Map();   // 같은 소재를 여러 슬롯이 나눠 쓸 때 이미 쓴 자리를 기억합니다
   const slots = normalized.slots.map((slot, index) => {
     const source = list[index % list.length];
     const available = Number(source.duration);
@@ -113,7 +114,15 @@ export function planTemplate(template, sources) {
     }
     if (span > available) { span = available;shortened = true; }
     const duration = round(span / speed);
-    const trimStart = round(Math.max(0, (available - span) / 2));   // 가운데를 씁니다
+    // 기본은 가운데입니다. 고를 줄 아는 쪽이 있으면 맡깁니다.
+    const limit = Math.max(0, available - span);
+    const taken = used.get(source.assetId) || [];
+    let trimStart = round(Math.min(limit, Math.max(0, (available - span) / 2)));
+    if (typeof pickStart === 'function') {
+      const picked = pickStart(source, span, taken);
+      if (Number.isFinite(picked)) trimStart = round(clamp(picked, 0, limit));
+    }
+    used.set(source.assetId, [...taken, trimStart]);
     const entry = {
       index, assetId: source.assetId, name: source.name,
       start: round(cursor), duration,

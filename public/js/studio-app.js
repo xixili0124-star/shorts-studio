@@ -32,6 +32,7 @@ import {isLegacyDemoDraft,LEGACY_DEMO_ASSET_IDS} from './legacy-demo.js';
 import {setupCompactNotes} from './compact-notes.js';
 import {listTemplates,saveTemplate,deleteTemplate,renameTemplate,planTemplate} from './edit-templates.js';
 import {rhythmFromSamples,ANALYSIS_RATE} from './beat-detect.js';
+import {sampleHighlights,nextWindowStart} from './highlight.js';
 import {monoPcm} from './silence.js';
 
 const $=id=>document.getElementById(id);
@@ -485,6 +486,7 @@ function renderLibraryContent(){
           +'<p class="inspector-note">타격이 뚜렷한 곡에서 잘 됩니다. 찾은 박자가 두 배나 절반으로 보이면 컷 간격을 한 칸 옮겨 주세요.</p></section>';
       })()
       +'<div class="section-label">내 템플릿 <span>'+list.length+'</span></div>'
+      +'<label class="check-label"><input type="checkbox" id="templateSmartPick" checked>영상에서 볼 만한 구간 자동으로 고르기</label>'
       +(list.length?'<div class="template-list">'+list.map(t=>{
         const total=t.slots.reduce((a,b)=>a+b.duration,0);
         return '<div class="template-row"><div class="template-info"><strong>'+esc(t.name)+'</strong>'
@@ -1064,15 +1066,30 @@ async function applyEditTemplate(id){
   if(!template)return toast('템플릿을 찾지 못했어요.');
   const sources=libraryAssets().filter(asset=>asset.kind==='video')
     .map(asset=>({assetId:asset.id,duration:asset.duration,name:asset.file?.name||''}));
-  const plan=planTemplate(template,sources);
-  if(!plan.ok)return toast(plan.reason);
+  if(!sources.length)return toast('템플릿에 넣을 영상을 먼저 라이브러리에 올려 주세요.');
+  // 묻기 전에 분석하면 취소했을 때 몇 초를 헛되이 씁니다. 동의를 먼저 받습니다.
   if(project.clips.length){
     const ok=await smartTools.askConsent('타임라인을 템플릿으로 바꿀까요?',
-      '영상 트랙의 컷 '+project.clips.length+'개를 지우고 "'+template.name+'" 의 '+plan.slots.length+'컷으로 다시 만듭니다. 자막·그래픽·음악은 그대로 둡니다.',
+      '영상 트랙의 컷 '+project.clips.length+'개를 지우고 "'+template.name+'" 의 '+template.slots.length+'컷으로 다시 만듭니다. 자막·그래픽·음악은 그대로 둡니다.',
       '템플릿 적용','그대로 두기');
     smartTools.close(false);
     if(!ok)return toast('템플릿을 적용하지 않았어요.');
   }
+  // 소재마다 쓸 만한 구간을 미리 재 둡니다. 프레임을 못 읽는 소재는 예전처럼 가운데를 씁니다.
+  let pickStart;
+  if($('templateSmartPick')?.checked!==false){
+    toast('영상에서 쓸 구간을 고르는 중…');
+    const measured=new Map();
+    for(const source of sources){
+      const asset=assets.get(source.assetId);
+      if(!asset?.base?.file)continue;
+      try{measured.set(source.assetId,await sampleHighlights(asset.base));}
+      catch{/* 못 읽는 소재는 건너뜁니다 */}
+    }
+    if(measured.size)pickStart=(source,span,taken)=>nextWindowStart(measured.get(source.assetId)||[],span,source.duration,taken);
+  }
+  const plan=planTemplate(template,sources,{pickStart});
+  if(!plan.ok)return toast(plan.reason);
   const before=captureDocument();
   importing=true;
   try{

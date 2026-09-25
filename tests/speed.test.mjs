@@ -100,6 +100,42 @@ test('오디오 클립도 같은 규칙으로 배속이 걸린다',()=>{
   assert.equal(project.audio.tracks[0].trimEnd,4,'원본 구간은 그대로');
 });
 
+test('연결된 영상과 원음은 배속이 함께 걸린다',()=>{
+  reset();
+  project.clips=[{...video('a',0,4),linkId:'pair1'},video('b',0,4)];
+  project.audio.tracks=[{...audio('a-src',0,0,4),linkId:'pair1'},audio('bgm',4,0,4)];
+  migrateTimeline();
+  assert.equal(applyItemSpeed('clip','a',2),true);
+  const clip=project.clips.find(c=>c.id==='a'),原=project.audio.tracks.find(t=>t.id==='a-src');
+  assert.equal(clipSpeed(clip),2);
+  assert.equal(clipSpeed(原),2,'원음도 같이 빨라져야 소리가 안 어긋난다');
+  assert.equal(clipDuration(clip),2);
+  assert.equal(audioDuration(原),2);
+  // 두 트랙 모두 뒤 항목이 당겨진다
+  assert.equal(project.clips.find(c=>c.id==='b').start,2);
+  assert.equal(project.audio.tracks.find(t=>t.id==='bgm').start,2);
+});
+
+test('연결을 반대쪽에서 바꿔도 똑같이 함께 걸린다',()=>{
+  reset();
+  project.clips=[{...video('a',0,4),linkId:'pair1'}];
+  project.audio.tracks=[{...audio('a-src',0,0,4),linkId:'pair1'}];
+  migrateTimeline();
+  applyItemSpeed('audio','a-src',.5);
+  assert.equal(clipSpeed(project.clips[0]),.5);
+  assert.equal(clipDuration(project.clips[0]),8);
+});
+
+test('연결 전파를 끄면 고른 항목만 바뀐다',()=>{
+  reset();
+  project.clips=[{...video('a',0,4),linkId:'pair1'}];
+  project.audio.tracks=[{...audio('a-src',0,0,4),linkId:'pair1'}];
+  migrateTimeline();
+  applyItemSpeed('clip','a',2,{linked:false});
+  assert.equal(clipSpeed(project.clips[0]),2);
+  assert.equal(clipSpeed(project.audio.tracks[0]),1);
+});
+
 test('영상이 아닌 클립에는 배속을 주지 않는다',()=>{
   reset();
   project.clips=[{...newClipDefaults('image'),id:'i',type:'image',imgDuration:3}];

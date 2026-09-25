@@ -860,7 +860,7 @@ function applyProperty(input){
     item.crop={...item.crop,[key]:Math.max(0,Math.min(value/100,.98-(item.crop?.[other]||0)))};
   }else if(prop==='speed'){
     // 영상과 분리된 원음처럼 연결된 항목은 함께 바꿔야 소리가 어긋납니다.
-    for(const ref of expandLinked([{type,id:item.id}]))applyItemSpeed(ref.type,ref.id,Number(value));
+    applyItemSpeed(type,item.id,Number(value));   // 연결된 원음까지 함께 바꿉니다
   }else if(prop==='transitionType'||prop==='transitionDuration'){
     const pair=currentTransition();if(!pair)return;
     const effect=prop==='transitionType'?value:pair.type==='cut'&&value>0?'dissolve':pair.type;

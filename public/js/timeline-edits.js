@@ -1,4 +1,5 @@
 // UI와 드래그 미리보기가 함께 쓰는 편집 명령입니다. 다른 트랙은 명시적으로 선택하지 않으면 자르지 않습니다.
+import { expandLinked } from './link-groups.js';
 import { project, buildLayout, clipDuration, pinClipPositions, transitionPairs, syncAnchoredItems, trackIdFor, trackItems, migrateTimeline, timelineTracks, trackKind, isTrackLocked, audioDuration, clipSpeed, MIN_SPEED, MAX_SPEED } from './state.js';
 import { captureDocument, makeClip, makeAudio, assets, discardStagedInstance } from './project-store.js';
 import { complementRanges } from './silence.js';
@@ -282,16 +283,20 @@ export function currentGap(selection, doc = project) {
  * 길이가 변한 만큼 같은 트랙의 뒤 항목을 함께 밀거나 당깁니다. 그러지 않으면 빨라질 때
  * 빈 구멍이 남고 느려질 때 뒤 클립과 겹칩니다. 다른 트랙은 건드리지 않습니다.
  */
-export function applyItemSpeed(type, id, speed) {
+function speedTarget(type, id) {
   if (type !== 'clip' && type !== 'audio') throw new Error('영상 또는 오디오 클립에만 배속을 줄 수 있습니다.');
+  const range = itemRange(type, id);
+  if (!range) return null;
+  if (type === 'clip' && range.item.type !== 'video') throw new Error('영상 클립에만 배속을 줄 수 있습니다.');
+  if (isTrackLocked(range.trackId)) throw new Error(LOCKED_TRACK_REASON);
+  return range;
+}
+
+function shiftForSpeed(type, id, next) {
   const range = itemRange(type, id);
   if (!range) return false;
   const item = range.item;
-  if (type === 'clip' && item.type !== 'video') throw new Error('영상 클립에만 배속을 줄 수 있습니다.');
-  if (isTrackLocked(range.trackId)) throw new Error(LOCKED_TRACK_REASON);
-  const next = Math.min(MAX_SPEED, Math.max(MIN_SPEED, Number(speed) || 1));
   if (Math.abs(clipSpeed(item) - next) < 1e-9) return false;
-  migrateTimeline();
   pinClipPositions();
   const before = range.duration;
   item.speed = next;
@@ -302,9 +307,27 @@ export function applyItemSpeed(type, id, speed) {
       if (entry.id !== id && entry.start >= range.end - EPS) moveRange(entry, entry.start + delta);
     }
   }
-  normalizeTransitions();
-  syncAnchoredItems();
   return true;
+}
+
+export function applyItemSpeed(type, id, speed, { linked = true } = {}) {
+  // 직접 고른 항목은 엄격하게 봅니다. 아래에서 건너뛰는 것은 연결로 딸려온 짝뿐입니다.
+  if (type !== 'clip' && type !== 'audio') throw new Error('영상 또는 오디오 클립에만 배속을 줄 수 있습니다.');
+  const next = Math.min(MAX_SPEED, Math.max(MIN_SPEED, Number(speed) || 1));
+  // 영상과 분리된 원음은 함께 바꿔야 합니다. 한쪽만 빨라지면 소리가 어긋납니다.
+  const refs = linked ? expandLinked([{ type, id }], project) : [{ type, id }];
+  // 먼저 전부 확인합니다. 중간에 막히면 반만 적용된 채로 남습니다.
+  const targets = [];
+  for (const ref of refs) {
+    if (ref.type !== 'clip' && ref.type !== 'audio') continue;
+    if (speedTarget(ref.type, ref.id)) targets.push(ref);
+  }
+  if (!targets.length) return false;
+  migrateTimeline();
+  let changed = false;
+  for (const ref of targets) if (shiftForSpeed(ref.type, ref.id, next)) changed = true;
+  if (changed) { normalizeTransitions();syncAnchoredItems(); }
+  return changed;
 }
 
 export function closeTimelineGap(selection) {

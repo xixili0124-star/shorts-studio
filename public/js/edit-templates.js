@@ -157,8 +157,16 @@ function writeAll(list, storage) {
 
 export function listTemplates(storage) { return readAll(storage); }
 
-export function saveTemplate(name, { storage, doc } = {}) {
-  const template = captureTemplate(name, doc || project);
+/** 이미 만들어 둔 슬롯으로 템플릿을 꾸립니다. 음악에서 뽑은 리듬이 이 길로 들어옵니다. */
+export function templateFromSlots(name, slots) {
+  const cleaned = (Array.isArray(slots) ? slots : []).map(normalizeSlot).filter(Boolean).slice(0, MAX_SLOTS);
+  if (!cleaned.length) throw new Error('템플릿으로 만들 컷이 없습니다.');
+  return { version: VERSION, id: 'tpl-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8),
+    name: nameValue(name), slots: cleaned, createdAt: Date.now() };
+}
+
+export function saveTemplate(name, { storage, doc, slots } = {}) {
+  const template = slots ? templateFromSlots(name, slots) : captureTemplate(name, doc || project);
   const list = readAll(storage);
   if (list.length >= MAX_TEMPLATES) throw new Error('템플릿은 ' + MAX_TEMPLATES + '개까지 저장할 수 있습니다. 쓰지 않는 것을 먼저 지워 주세요.');
   const next = [template, ...list.filter(item => item.name !== template.name)];

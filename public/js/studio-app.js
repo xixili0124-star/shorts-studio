@@ -31,6 +31,8 @@ import {DEMO_MEDIA,createDemoMediaFile} from './demo-media.js';
 import {isLegacyDemoDraft,LEGACY_DEMO_ASSET_IDS} from './legacy-demo.js';
 import {setupCompactNotes} from './compact-notes.js';
 import {listTemplates,saveTemplate,deleteTemplate,renameTemplate,planTemplate} from './edit-templates.js';
+import {rhythmFromSamples,ANALYSIS_RATE} from './beat-detect.js';
+import {monoPcm} from './silence.js';
 
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -473,6 +475,15 @@ function renderLibraryContent(){
       +'<label class="field-label">템플릿 이름<input type="text" id="templateName" maxlength="40" placeholder="예: 시티 워크 1.1초" value=""></label>'
       +'<button class="button primary wide" data-action="save-template"'+(clips?'':' disabled')+'>'+(clips?'현재 컷 '+clips+'개를 템플릿으로':'타임라인에 영상을 먼저 올려 주세요')+'</button>'
       +'<p class="inspector-note">영상 파일은 담기지 않습니다. 컷 길이·배속·전환만 이 브라우저에 저장합니다.</p></section>'
+      +(()=>{
+        const music=[...assets.values()].filter(asset=>asset.kind==='audio'&&asset.buffer&&asset.libraryHidden!==true);
+        if(!music.length)return '<section class="smart-card"><h3>음악에서 리듬 만들기</h3><p class="note">음악을 라이브러리에 올리면 박자를 찾아 컷 리듬을 자동으로 만듭니다.</p></section>';
+        return '<section class="smart-card"><h3>음악에서 리듬 만들기</h3>'
+          +'<label class="field-label">음악<select id="rhythmSource">'+music.map(asset=>'<option value="'+esc(asset.id)+'">'+esc(asset.file?.name||'음악')+'</option>').join('')+'</select></label>'
+          +'<label class="field-label">컷 간격<select id="rhythmEvery"><option value="1">1박마다 · 빠르게</option><option value="2" selected>2박마다 · 기본</option><option value="4">4박마다 · 느리게</option><option value="0">박자 무시 · 타격마다</option></select></label>'
+          +'<button class="button secondary wide" data-action="rhythm-template">박자 찾아 템플릿 만들기</button>'
+          +'<p class="inspector-note">타격이 뚜렷한 곡에서 잘 됩니다. 찾은 박자가 두 배나 절반으로 보이면 컷 간격을 한 칸 옮겨 주세요.</p></section>';
+      })()
       +'<div class="section-label">내 템플릿 <span>'+list.length+'</span></div>'
       +(list.length?'<div class="template-list">'+list.map(t=>{
         const total=t.slots.reduce((a,b)=>a+b.duration,0);
@@ -1019,6 +1030,24 @@ function saveCurrentAsTemplate(){
     toast('"'+saved.name+'" 템플릿을 저장했어요. 컷 '+saved.slots.length+'개.');
   }catch(error){toast(error.message);}
 }
+/** 음악의 박자를 찾아 컷 리듬 템플릿으로 저장합니다. 소리는 어디로도 보내지 않습니다. */
+function makeRhythmTemplate(){
+  const asset=assets.get($('rhythmSource')?.value);
+  if(!asset?.buffer)return toast('먼저 음악을 라이브러리에 올려 주세요.');
+  const every=Number($('rhythmEvery')?.value??2);
+  const typed=$('templateName')?.value?.trim();
+  const name=typed||(asset.file?.name||'음악').replace(/\.[^.]+$/,'')+' 리듬';
+  try{
+    const result=rhythmFromSamples(monoPcm(asset.buffer,ANALYSIS_RATE),ANALYSIS_RATE,{every});
+    if(!result.slots.length)return toast('이 음악에서는 컷 자리를 찾지 못했어요. 타격이 뚜렷한 곡에서 잘 됩니다.');
+    const saved=saveTemplate(name,{slots:result.slots});
+    if($('templateName'))$('templateName').value='';
+    renderLibrary();
+    const tempo=result.bpm>0?Math.round(result.bpm)+' BPM':'박자를 못 찾아 타격 자리를 그대로';
+    const weak=result.bpm>0&&result.strength<1.6?' · 반복이 뚜렷하지 않아 결과를 확인해 주세요':'';
+    toast('"'+saved.name+'" 저장 · '+tempo+' · '+saved.slots.length+'컷'+weak);
+  }catch(error){toast(error.message);}
+}
 function removeTemplate(id){
   if(!id)return;
   try{ if(deleteTemplate(id)){renderLibrary();toast('템플릿을 지웠어요.');} }
@@ -1070,6 +1099,7 @@ function routeAction(action,node){
   if(exportCtrl||importing||smartTools.busy||monitor?.dragging||keyframeEditor?.dragging)return;
   if(action==='import')pickMedia();
   if(action==='save-template')saveCurrentAsTemplate();
+  if(action==='rhythm-template')makeRhythmTemplate();
   if(action==='delete-template')removeTemplate(node?.dataset.template);
   if(action==='apply-template')applyEditTemplate(node?.dataset.template).catch(error=>toast(error.message));
   if(action==='add-caption')addCaption();

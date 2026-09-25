@@ -330,6 +330,34 @@ export function applyItemSpeed(type, id, speed, { linked = true } = {}) {
   return changed;
 }
 
+/**
+ * 컷 경계 목록. 화면에 보이는 클립들의 시작과 끝을 모읍니다.
+ * 영상 트랙이 여러 겹이면 모든 트랙의 경계를 함께 봅니다. 편집자가 "다음 컷" 이라고
+ * 할 때 기대하는 자리는 어느 트랙이든 화면이 바뀌는 지점이기 때문입니다.
+ */
+export function clipBoundaries(doc = project) {
+  const marks = new Set([0]);
+  for (const entry of buildLayout(doc).entries) {
+    if (Number.isFinite(entry.start) && entry.start >= 0) marks.add(entry.start);
+    if (Number.isFinite(entry.end) && entry.end >= 0) marks.add(entry.end);
+  }
+  return [...marks].sort((a, b) => a - b);
+}
+
+/**
+ * 주어진 시각에서 한 칸 움직일 경계를 고릅니다. 더 갈 곳이 없으면 null 입니다.
+ * 경계 위에 딱 서 있을 때 제자리에 머물지 않도록 아주 짧은 여유를 둡니다.
+ */
+export function boundaryFrom(list, time, direction, epsilon = 1e-4) {
+  const marks = (list || []).filter(value => Number.isFinite(value));
+  if (direction < 0) {
+    for (let i = marks.length - 1; i >= 0; i--) if (marks[i] < time - epsilon) return marks[i];
+    return null;
+  }
+  for (const value of marks) if (value > time + epsilon) return value;
+  return null;
+}
+
 export function closeTimelineGap(selection) {
   const gap = currentGap(selection);
   if (!gap) return false;

@@ -455,3 +455,13 @@ body.resizing-timeline{cursor:ns-resize;user-select:none}
 .template-info small{font-size:11px;color:var(--faint)}
 .template-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
 .template-actions .button{padding:5px 12px;font-size:12px}
+
+/* 컷 경계로 건너뛰는 버튼. 프레임 이동(막대+삼각형 하나)과 구분되게 삼각형을 둘 둡니다. */
+.clip-symbol{position:relative;display:block;width:16px;height:12px}
+.clip-symbol:before,.clip-symbol:after,.clip-symbol i{content:'';position:absolute;top:50%;transform:translateY(-50%)}
+.clip-symbol.previous:before{left:0;width:1.5px;height:11px;background:currentColor}
+.clip-symbol.previous:after{left:3px;border-top:5px solid transparent;border-bottom:5px solid transparent;border-right:6px solid currentColor}
+.clip-symbol.previous i{left:9px;border-top:5px solid transparent;border-bottom:5px solid transparent;border-right:6px solid currentColor}
+.clip-symbol.next:before{right:0;width:1.5px;height:11px;background:currentColor}
+.clip-symbol.next:after{right:3px;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:6px solid currentColor}
+.clip-symbol.next i{right:9px;border-top:5px solid transparent;border-bottom:5px solid transparent;border-left:6px solid currentColor}

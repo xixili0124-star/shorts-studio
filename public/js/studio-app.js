@@ -8,7 +8,7 @@ import {uid,clamp,download} from './util.js';
 import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,onAssetReady,removeAssetFromLibrary,unusedLibraryAssetIds} from './project-store.js';
 import {Timeline} from './timeline.js';
 import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight,heightTargetFor} from './layout.js';
-import {frameTime,timelineCollection,itemRange,splitAvailability,placeVideoClip,planClipTrim,applyClipTrim,setTransition,deleteTimelineItem,planPlacement,placeTimelineItem,currentGap,planItemTrim,applyItemTrim,applyItemSpeed} from './timeline-edits.js';
+import {frameTime,timelineCollection,itemRange,splitAvailability,placeVideoClip,planClipTrim,applyClipTrim,setTransition,deleteTimelineItem,planPlacement,placeTimelineItem,currentGap,planItemTrim,applyItemTrim,applyItemSpeed,clipBoundaries,boundaryFrom} from './timeline-edits.js';
 import {GRAPHICS,CAPTIONS,TRANSITIONS} from './presets.js';
 import {transformOf,alignVisual} from './visual-transform.js';
 import {safeAreaConfig} from './safe-areas.js';
@@ -1000,6 +1000,15 @@ async function addSound(id,time=player.time,lane=timeline.preferredTrack('audio'
 }
 
 function pickMedia(){ $('fileInput').accept='video/*,image/*,audio/*,.mkv,.ts,.srt,.vtt';$('fileInput').click(); }
+/** 컷 경계로 한 칸 건너뜁니다. 프레임 단위 이동과 달리 화면이 바뀌는 자리로 갑니다. */
+function stepClip(direction){
+  if(exportCtrl||importing||smartTools.busy)return;
+  const target=boundaryFrom(clipBoundaries(),player.time,direction);
+  if(target===null)return;
+  player.pause();
+  player.seek(target,{allowBeyond:true});
+}
+
 // ── 편집 템플릿 ───────────────────────────────────────
 function saveCurrentAsTemplate(){
   const field=$('templateName');
@@ -1086,6 +1095,7 @@ function wire(){
   wireFontPickers($('libraryContent'));
   document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>{if(view===b.dataset.view&&window.innerWidth<=650)$('workbench').classList.toggle('show-library');else setView(b.dataset.view);});
   $('play').onclick=()=>player.toggle();$('prevFrame').onclick=()=>player.step(-1);$('nextFrame').onclick=()=>player.step(1);
+  $('prevClip').onclick=()=>stepClip(-1);$('nextClip').onclick=()=>stepClip(1);
   $('safeArea').onclick=()=>{const panel=$('safeAreaPanel');panel.hidden=!panel.hidden;$('safeArea').setAttribute('aria-expanded',String(!panel.hidden));if(!panel.hidden)renderSafePanel();};
   $('closeSafeArea').onclick=()=>{$('safeAreaPanel').hidden=true;$('safeArea').setAttribute('aria-expanded','false');};
   $('safePlatform').onchange=e=>{safeConfig=safeAreaConfig(e.target.value);safeEnabled=true;renderSafePanel();updateSafeArea();};
@@ -1182,6 +1192,8 @@ function wire(){
     else if(e.code==='Space'){if(document.activeElement?.tagName==='BUTTON')return;e.preventDefault();player.toggle();}
     else if(e.code==='ArrowLeft'){e.preventDefault();player.step(e.shiftKey?-10:-1);}
     else if(e.code==='ArrowRight'){e.preventDefault();player.step(e.shiftKey?10:1);}
+    else if(e.code==='ArrowUp'){e.preventDefault();stepClip(-1);}
+    else if(e.code==='ArrowDown'){e.preventDefault();stepClip(1);}
     else if(!mod&&e.key.toLowerCase()==='s')splitSelected().catch(e=>toast(e.message));
     else if(!mod&&e.key.toLowerCase()==='n')timeline.toggleSnap();
     else if(e.key==='Delete'||e.key==='Backspace'){e.preventDefault();deleteSelection(e.shiftKey);}

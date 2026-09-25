@@ -161,10 +161,10 @@ export class StudioTools {
    * 네이티브 confirm 은 인앱 브라우저와 미리보기 창에서 차단돼, 눌러도 아무 일도 일어나지 않는다.
    * 그때 사용자는 버튼이 고장난 줄 알게 되므로 여기서는 쓰지 않는다.
    */
-  askConsent(title,message,okLabel){
+  askConsent(title,message,okLabel,cancelLabel='취소'){
     this.open(title,'<p class="note">'+esc(message)+'</p>'
       +'<div class="smart-result-actions">'
-      +'<button class="button subtle" data-smart-action="consent-no">보내지 않기</button>'
+      +'<button class="button subtle" data-smart-action="consent-no">'+esc(cancelLabel)+'</button>'
       +button('consent-yes',okLabel,false,true)
       +'</div>');
     return new Promise(resolve=>{this.consentResolve=resolve;});
@@ -816,7 +816,7 @@ export class StudioTools {
     if(pc&&this.captionPcUnavailable())throw new Error('이 PC에서 지금 자막을 만들 수 없습니다. 잠시 뒤 다시 시도하거나 처리 방식을 직접 바꿔 주세요.');
     if(server&&!await this.askConsent('소리를 보내도 될까요?',
       '선택한 구간의 소리만 자막 서버(Cloudflare)로 보내 자동 자막을 만듭니다. 영상 파일은 보내지 않습니다.',
-      '보내고 자막 만들기')){this.close(false);this.hooks.toast('소리를 보내지 않았어요. 설치 없이 쓰려면 처리 방식을 브라우저로 바꿔 주세요.');return;}
+      '보내고 자막 만들기','보내지 않기')){this.close(false);this.hooks.toast('소리를 보내지 않았어요. 설치 없이 쓰려면 처리 방식을 브라우저로 바꿔 주세요.');return;}
     this.captionEngine=engine;this.captionEngineChosen=true;
     this.open('자동 자막 만들기','<p class="note">'+(server?'선택 구간의 소리를 온라인에서 인식합니다.':pc?'이 PC에서 말소리를 인식합니다.':'이 브라우저에서 말소리를 인식합니다.')+' 기존 자막은 그대로 유지합니다.</p>'+progressMarkup);
     const s={kind:'captions',before:captureDocument(),range,engine};this.state=s;

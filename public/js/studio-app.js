@@ -1031,7 +1031,7 @@ async function applyEditTemplate(id){
   if(project.clips.length){
     const ok=await smartTools.askConsent('타임라인을 템플릿으로 바꿀까요?',
       '영상 트랙의 컷 '+project.clips.length+'개를 지우고 "'+template.name+'" 의 '+plan.slots.length+'컷으로 다시 만듭니다. 자막·그래픽·음악은 그대로 둡니다.',
-      '템플릿 적용');
+      '템플릿 적용','그대로 두기');
     smartTools.close(false);
     if(!ok)return toast('템플릿을 적용하지 않았어요.');
   }

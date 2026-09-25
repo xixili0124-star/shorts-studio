@@ -445,3 +445,13 @@ body.resizing-timeline{cursor:ns-resize;user-select:none}
 /* height:100% 는 스테이지 안쪽 높이를 넘겨 아래가 잘렸습니다(337 상자에 299 캔버스, 안쪽은 274).
    고유 비율을 그대로 두고 양쪽 한계만 걸면 어떤 크기에서도 넘치지 않습니다. */
 .viewer-stage canvas{height:auto;max-height:100%;max-width:100%;width:auto}
+
+/* 편집 템플릿 목록 — 컷 리듬만 저장한 항목을 줄 단위로 보여 줍니다. */
+.template-list{margin:10px 0;display:flex;flex-direction:column;gap:6px}
+.template-row{display:flex;align-items:center;gap:8px;padding:9px 10px;border:1px solid var(--line);border-radius:7px;background:#17191a}
+.template-row:hover{border-color:#3a4038}
+.template-info{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
+.template-info strong{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.template-info small{font-size:11px;color:var(--faint)}
+.template-actions{display:flex;align-items:center;gap:4px;flex-shrink:0}
+.template-actions .button{padding:5px 12px;font-size:12px}

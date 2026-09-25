@@ -4,9 +4,9 @@ import {DesktopStudio,desktopGroupForView,desktopInspectorGroup,desktopInspector
 import {DesktopPreviewLayout,DesktopInspectorLayout,DESKTOP_PREVIEW_STORAGE_KEY,DESKTOP_INSPECTOR_STORAGE_KEY,desktopPreviewMetrics,desktopPreviewWidth,readDesktopPreviewSettings,desktopInspectorMetrics,desktopInspectorWidth,readDesktopInspectorSettings} from '../public/js/desktop-layout.js';
 
 test('기존 라이브러리 화면은 새 탐색 묶음으로 모두 연결되고 모르는 화면은 파일로 복귀한다',()=>{
-  const destinations={files:['media'],captions:['captions'],sound:['sounds','voice','silence'],design:['quick-format','graphics','transitions'],tools:['mosaic','crop-tracking']};
+  const destinations={files:['media'],captions:['captions'],sound:['sounds','voice','silence'],design:['quick-format','templates','graphics','transitions'],tools:['mosaic','crop-tracking']};
   const routes=Object.entries(destinations).flatMap(([group,views])=>views.map(view=>({view,group})));
-  assert.equal(new Set(routes.map(route=>route.view)).size,10);
+  assert.equal(new Set(routes.map(route=>route.view)).size,11);
   for(const {view,group} of routes)assert.equal(desktopGroupForView(view),group,view);
   for(const unknown of [undefined,null,'','future-tool'])assert.equal(desktopGroupForView(unknown),'files');
 });

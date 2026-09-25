@@ -2,8 +2,8 @@ import {DesktopPreviewLayout,DesktopInspectorLayout} from './desktop-layout.js';
 
 // PC는 작업의 목적별로 도구를 보여줍니다. 편집 데이터와 기존 입력 노드는 공유합니다.
 const $=id=>document.getElementById(id);
-const groups={files:{label:'파일',view:'media',icon:'folder'},captions:{label:'자막',view:'captions',icon:'text'},sound:{label:'소리',view:'sounds',icon:'sound'},design:{label:'디자인',view:'quick-format',icon:'design'},tools:{label:'트래킹',view:'mosaic',icon:'tools'}};
-const subviews={files:[],captions:[['styles','자막'],['create','자동자막'],['list','자막 목록']],sound:[['sounds','효과음'],['voice','AI TTS'],['silence','무음 컷']],design:[['quick-format','퀵포맷'],['graphics','그래픽'],['transitions','장면 전환']],tools:[['mosaic','모자이크'],['crop-tracking','크롭']]};
+const groups={files:{label:'라이브러리',view:'media',icon:'folder'},captions:{label:'자막',view:'captions',icon:'text'},sound:{label:'소리',view:'sounds',icon:'sound'},design:{label:'디자인',view:'quick-format',icon:'design'},tools:{label:'트래킹',view:'mosaic',icon:'tools'}};
+const subviews={files:[],captions:[['styles','자막'],['create','자동자막'],['list','자막 목록']],sound:[['sounds','효과음'],['voice','AI TTS'],['silence','무음 컷']],design:[['quick-format','퀵포맷'],['graphics','그래픽'],['transitions','전환']],tools:[['mosaic','모자이크'],['crop-tracking','크롭']]};
 const groupLabels={basic:'기본',style:'꾸미기',motion:'움직임',details:'세부'};
 const icons={folder:'M3 7V5h6l2 2h10v12H3Z',text:'M4 5h16M12 5v14M8 19h8',sound:'M4 10v4m4-7v10m4-14v18m4-14v10m4-7v4',design:'m12 3 2.8 6.2L21 12l-6.2 2.8L12 21l-2.8-6.2L3 12l6.2-2.8Z',tools:'M4 7h16M4 17h16M8 4v6m8 4v6',close:'m6 6 12 12M6 18 18 6',more:'M5 12h.01M12 12h.01M19 12h.01',down:'m7 10 5 5 5-5',add:'M12 5v14M5 12h14',export:'M12 16V3m-4 4 4-4 4 4M5 13v7h14v-7',split:'M12 3v18M3 6h5v12H3m18-12h-5v12h5',copy:'M8 8h12v12H8ZM4 16V4h12',trash:'M4 6h16M9 6V3h6v3M6 6l1 15h10l1-15M10 10v7m4-7v7',undo:'M8 4 3 9l5 5M3 9h10a6 6 0 0 1 6 6v3',redo:'m16 4 5 5-5 5m5-5H11a6 6 0 0 0-6 6v3',arrow:'M4 12h16m-6-6 6 6-6 6',help:'M9.5 8a2.5 2.5 0 1 1 4 2c-1.5 1-1.5 1.5-1.5 3M12 17h.01',save:'M5 3h12l3 3v15H4V3Zm3 0v6h8V3M8 21v-7h8v7'};
 const icon=name=>`<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="${icons[name]||icons.tools}"/></svg>`;
@@ -12,7 +12,7 @@ const sectionTitle=node=>[...(node.querySelector('h3')?.childNodes||[])].filter(
 
 export function desktopGroupForView(view){return ({media:'files',captions:'captions',sounds:'sound',voice:'sound',silence:'sound','quick-format':'design',graphics:'design',transitions:'design',mosaic:'tools','crop-tracking':'tools'})[view]||'files';}
 export function desktopInspectorGroup(title,type){
- if(['내용','글자 스타일','변형','배치','원본 맞춤','오디오','원본 오디오','화면 설정 대상'].includes(title))return 'basic';
+ if(['내용','글자 스타일','변형','배치','원본 맞춤','오디오','원본 오디오','화면 설정 대상','속도'].includes(title))return 'basic';
  if(['테두리','텍스트 박스','그림자'].includes(title))return 'style';
  if(['키프레임','이미지 모션','효과','클립 페이드','다음 장면과 전환','장면 전환'].includes(title))return 'motion';
  return 'details';

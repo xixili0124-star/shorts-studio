@@ -1,5 +1,5 @@
 // 편집 데이터와 미디어 자원을 분리합니다. 되돌리기는 DOM/File을 복제하지 않습니다.
-import { project, newClipDefaults, syncAnchoredItems, buildLayout, pinClipPositions, timelineTracks, trackIdFor, migrateTimeline, MAX_TRACKS_PER_KIND, TRACK_ROLES, TRACK_SWITCHES, SWITCH_KINDS } from './state.js';
+import { project, newClipDefaults, syncAnchoredItems, buildLayout, pinClipPositions, timelineTracks, trackIdFor, migrateTimeline, MAX_TRACKS_PER_KIND, TRACK_ROLES, TRACK_SWITCHES, SWITCH_KINDS, clipSpeed } from './state.js';
 import { createClip, disposeClip } from './media.js';
 import { decodeAudioFile } from './audio.js';
 import { uid } from './util.js';
@@ -415,7 +415,7 @@ export function validateDocument(doc, records) {
     }
   }
   for(const item of [...doc.clips,...doc.overlays,...doc.captions,...doc.tracks]){
-    const duration=item.type==='image'?item.imgDuration:item.trimEnd!==undefined?item.trimEnd-item.trimStart:item.end-item.start;
+    const duration=item.type==='image'?item.imgDuration:item.trimEnd!==undefined?(item.trimEnd-item.trimStart)/clipSpeed(item):item.end-item.start;
     if(!validateKeyframes(item.keyframes,duration))throw new Error('키프레임 정보가 올바르지 않습니다.');
   }
   if(records.some(r=>!r || !safeId(r.id) || (r.libraryHidden !== undefined && typeof r.libraryHidden !== 'boolean'))

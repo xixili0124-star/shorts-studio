@@ -1,6 +1,6 @@
 // 오디오 믹싱 — 클립 원본 소리 + 배경음악을 하나의 AudioBuffer 로 합친다.
 import { Input, BlobSource, ALL_FORMATS, AudioBufferSink } from '../vendor/mediabunny.min.js';
-import { project, clipDuration, totalDuration, buildLayout, clipFadeGain, isTrackMuted, isTrackHidden, trackIdFor } from './state.js';
+import { project, clipDuration, totalDuration, buildLayout, clipFadeGain, isTrackMuted, isTrackHidden, trackIdFor, clipSpeed } from './state.js';
 import { automateVolume, hasAudibleVolume } from './audio-gain.js';
 
 const RATE = 48000;
@@ -147,22 +147,29 @@ export async function mixTimeline({ onProgress, signal, includeBgm = true, inclu
     const e = buildLayout().entries.find(e => e.clip.id === clip.id);
     const crossfade = ctx.createGain();
     applyFade(crossfade.gain, 1, at, dur, e?.overlapIn || 0, e?.overlapOut || 0);
+    node.playbackRate.value = clipSpeed(clip);
     node.connect(gain).connect(envelope).connect(crossfade).connect(master);
-    node.start(at, 0, Math.min(dur, buf.duration));
+    // dur 은 타임라인 길이라 버퍼 기준으로 되돌려 준다.
+    node.start(at, 0, Math.min(dur * clipSpeed(clip), buf.duration));
   }
 
   // 통합 소재함의 독립 오디오. 자동자막에는 사용자 선택 시 보이스만 포함합니다.
   for (const track of tracks) {
     if (signal?.aborted) throw new DOMException('취소됨', 'AbortError');
     if (!track.buffer) { if (strictSources) throw new Error((track.name || '오디오') + ': 소리를 읽지 못해 자막 인식을 중단했습니다.');continue; }
-    const duration = Math.min(track.trimEnd - track.trimStart, total - track.start);
+    const speed = clipSpeed(track);
+    // start(when, offset, duration) 의 duration 은 버퍼 기준입니다. 배속이 걸리면
+    // 출력에서 차지하는 시간은 duration / speed 가 됩니다.
+    const duration = Math.min(track.trimEnd - track.trimStart, Math.max(0, total - track.start) * speed);
     if (!(duration > 0)) continue;
     const node = ctx.createBufferSource();
     node.buffer = track.buffer;
+    node.playbackRate.value = speed;
+    const onTimeline = duration / speed;   // 타임라인에서 차지하는 길이
     const gain = ctx.createGain();
-    automateVolume(gain.gain,track,track.start,duration);
+    automateVolume(gain.gain,track,track.start,onTimeline);
     const envelope=ctx.createGain();
-    applyFade(envelope.gain,1,track.start,duration,track.fadeIn,track.fadeOut,track.fadeEnvelope);
+    applyFade(envelope.gain,1,track.start,onTimeline,track.fadeIn,track.fadeOut,track.fadeEnvelope);
     node.connect(gain).connect(envelope).connect(master);
     node.start(track.start, track.trimStart, duration);
   }

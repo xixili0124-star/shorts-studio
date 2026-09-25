@@ -3,7 +3,7 @@
 //   미리보기 → <video> 엘리먼트 / 내보내기 → 디코딩된 VideoSample
 import {
   project, layersAt, buildLayout, trackIdFor, timelineTracks, clipFadeGain, FONTS, ACCENT,
-  videoBand, splitAccent, legacyEditorMode, activeCaption,
+  videoBand, splitAccent, legacyEditorMode, activeCaption, sourceTime, localTime, clipDuration,
 } from './state.js';
 import { withVisualTransform, visualCorners } from './visual-transform.js';
 import { safeAreaConfig, safeAreaRect } from './safe-areas.js';
@@ -47,10 +47,10 @@ export function renderFrame(ctx, t, opts = {}) {
   const paintMedia=(target,at)=>{
     let source=opts.source?.(at.clip,at.local);
     if(!source?.img||source.w<=0||source.h<=0)return;
-    source=redactSource(ctx,source,at.clip,at.clip.trimStart+at.local);
+    source=redactSource(ctx,source,at.clip,sourceTime(at.clip,at.local));
     // 추적 좌표는 비동기 디코더가 실제 보여 주는 프레임과 같은 시각을 사용합니다.
     const sourceAt=at.clip.cropTracking?.enabled!==false&&at.clip.cropTracking&&Number.isFinite(source.sourceTime)
-      ?{...at,local:Math.max(0,Math.min(at.duration,source.sourceTime-at.clip.trimStart))}:at;
+      ?{...at,local:Math.max(0,Math.min(at.duration,localTime(at.clip,source.sourceTime)))}:at;
     paintTransformed(target,'clip',at.clip,dest=>{
       if(band&&at.trackId===visualTracks[0]?.id){
         dest.save();dest.beginPath();dest.rect(band.x,band.y,band.w,band.h);dest.clip();
@@ -119,7 +119,7 @@ export function measureVisual(ctx,type,item,W,H,t=0,timing=null) {
     const isBase=trackIdFor('clip',item)===timelineTracks().find(track=>track.kind==='visual')?.id;
     const band=isBase?videoBand(W,H):null,bw=band?.w||W,bh=band?.h||H;
     const local=timing?.geometryLocal??timing?.local??(t-(buildLayout().entries.find(e=>e.id===item.id)?.start||0));
-    const duration=item.motionDuration||(item.type==='image'?item.imgDuration:item.trimEnd-item.trimStart);
+    const duration=item.motionDuration||(item.type==='image'?item.imgDuration:clipDuration(item));
     const basic=clipGeometry(bw,bh,item.natW||W,item.natH||H,item,(local+(item.motionOffset||0))/Math.max(.001,duration));
     const g=cropTrackingGeometry(item,local,basic,bw,bh);
     return {x:g.dx+(band?.x||0),y:g.dy+(band?.y||0),w:g.dw,h:g.dh};

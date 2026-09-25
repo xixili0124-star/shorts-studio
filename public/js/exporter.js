@@ -1,7 +1,7 @@
 // 내보내기 — WebCodecs(mediabunny)로 프레임을 직접 인코딩한다.
 // 브라우저가 WebCodecs 인코딩을 못 하면 MediaRecorder 실시간 녹화로 자동 폴백.
 import * as MB from '../vendor/mediabunny.min.js';
-import { project, buildLayout, layersAt, totalDuration } from './state.js';
+import { project, buildLayout, layersAt, totalDuration, sourceTime } from './state.js';
 import { renderFrame, loadFonts } from './render.js';
 import { mixTimeline, sliceBuffer } from './audio.js';
 import { clamp } from './util.js';
@@ -205,7 +205,7 @@ async function videoProvider(at, fps) {
     const limit = Math.max(0, (clip.srcDuration || Infinity) - 1 / (fps * 2));
     const stamps = [];
     for (let n = Math.ceil(at.start * fps - 1e-8); n / fps < at.end - 1e-8; n++) {
-      stamps.push(clamp(clip.trimStart + n / fps - at.start, 0, limit));
+      stamps.push(clamp(sourceTime(clip, n / fps - at.start), 0, limit));
     }
     const sink = new MB.VideoSampleSink(track);
     return { input, iterator: sink.samplesAtTimestamps(stamps)[Symbol.asyncIterator](), last: null, end: at.end };

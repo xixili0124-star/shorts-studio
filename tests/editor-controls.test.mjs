@@ -19,7 +19,7 @@ class Param {
   linearRampToValueAtTime(value,time){this.events.push(['linear',value,time]);}
 }
 class AudioNode {
-  constructor(){this.gain=new Param();this.connections=[];this.disconnected=0;}
+  constructor(){this.gain=new Param();this.playbackRate=new Param();this.connections=[];this.disconnected=0;}
   connect(target){this.connections.push(target);return target;}
   disconnect(){this.connections=[];this.disconnected++;}
 }

@@ -50,7 +50,7 @@ function decodedWav(bytes) {
 }
 class AudioContextFake { async decodeAudioData(bytes) { return decodedWav(bytes); } close() {} }
 class Param { setValueAtTime() {} linearRampToValueAtTime() {} }
-class NodeFake { constructor() { this.gain = new Param(); } connect(node) { return node; } start(...args) { this.args = args; } }
+class NodeFake { constructor() { this.gain = new Param(); this.playbackRate = new Param(); } connect(node) { return node; } start(...args) { this.args = args; } }
 class OfflineContextFake {
   constructor(channels, length, rate) { Object.assign(this, { channels, length, rate, destination: {}, sources: [] }); }
   createGain() { return new NodeFake(); }

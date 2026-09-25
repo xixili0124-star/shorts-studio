@@ -128,6 +128,7 @@ export function newClipDefaults(type) {
     bitmap: null,         // ImageBitmap (image)
     natW: 0, natH: 0,
     srcDuration: 0,       // 원본 길이(초) — video
+    speed: 1,             // 배속. 1 이 원래 속도, 2 는 두 배 빠르게, 0.5 는 절반 속도
     trimStart: 0,
     trimEnd: 0,
     imgDuration: 3,       // image 전용
@@ -147,11 +148,29 @@ export function newClipDefaults(type) {
 }
 
 // ── 타임라인 계산 ───────────────────────────────────────
+export const MIN_SPEED = 0.25, MAX_SPEED = 4;
+
+/**
+ * 배속. 1 이 원래 속도이고, 2 는 두 배 빠르게, 0.5 는 절반 속도로 늘어집니다.
+ * 속도를 바꿔도 쓰는 원본 구간(trimStart~trimEnd)은 그대로이고 타임라인에서 차지하는
+ * 길이만 달라집니다. 캡컷·VN 과 같은 방식입니다.
+ */
+export function clipSpeed(item) {
+  const value = Number(item?.speed);
+  return Number.isFinite(value) && value > 0 ? Math.min(MAX_SPEED, Math.max(MIN_SPEED, value)) : 1;
+}
+
 export function clipDuration(c) {
   if (!c) return 0;
   return c.type === 'video'
-    ? Math.max(0.000001, c.trimEnd - c.trimStart)
+    ? Math.max(0.000001, (c.trimEnd - c.trimStart) / clipSpeed(c))
     : Math.max(0.000001, c.imgDuration);
+}
+
+/** 독립 오디오 클립이 타임라인에서 차지하는 길이. 배속을 반영합니다. */
+export function audioDuration(track) {
+  if (!track) return 0;
+  return Math.max(0, (track.trimEnd - track.trimStart) / clipSpeed(track));
 }
 
 export function totalDuration() {
@@ -325,7 +344,7 @@ export function buildLayout(doc = project) {
     ['audio', doc.tracks || doc.audio?.tracks]]) {
     for (const [index, item] of (list || []).entries()) {
       const start = Number(item.start) || 0;
-      const duration = type === 'audio' ? Math.max(0, item.trimEnd - item.trimStart) : Math.max(0, item.end - start);
+      const duration = type === 'audio' ? audioDuration(item) : Math.max(0, item.end - start);
       items.push({ item, type, id: item.id, trackId: trackIdFor(type, item, doc), index, start, end: start + duration, duration });
     }
   }
@@ -420,9 +439,14 @@ export function syncAnchoredItems() {
 // 구형 진입점 호환용. 새 편집기는 자동 연결을 만들지 않습니다.
 export function anchorItem(item) { delete item.anchor; }
 
-/** 클립 내부 시각 -> 원본 파일 안의 시각 */
+/** 클립 내부 시각 -> 원본 파일 안의 시각. 배속을 반영합니다. */
 export function sourceTime(clip, local) {
-  return clip.type === 'video' ? clip.trimStart + local : 0;
+  return clip.type === 'video' ? clip.trimStart + local * clipSpeed(clip) : 0;
+}
+
+/** 원본 파일 안의 시각 -> 클립 내부 시각. sourceTime 의 역방향입니다. */
+export function localTime(clip, source) {
+  return clip?.type === 'video' ? (source - clip.trimStart) / clipSpeed(clip) : 0;
 }
 
 export function activeOverlays(t) {

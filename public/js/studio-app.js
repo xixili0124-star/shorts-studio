@@ -1,5 +1,5 @@
 // UI는 편집 명령을 호출하고, 상태·자원·시간표·렌더러는 각각의 모듈이 담당합니다.
-import {project,FONTS,clipDuration,buildLayout,totalDuration,newOverlay,syncAnchoredItems,pinClipPositions,transitionPairs,timelineTracks,trackIdFor,trackLabel,trackKind,migrateTimeline,addTimelineTrack,removeTimelineTrack,setTrackSwitch,TRACK_ROLES,MAX_TRACKS_PER_KIND} from './state.js';
+import {project,FONTS,clipDuration,buildLayout,totalDuration,newOverlay,syncAnchoredItems,pinClipPositions,transitionPairs,timelineTracks,trackIdFor,trackLabel,trackKind,migrateTimeline,addTimelineTrack,removeTimelineTrack,setTrackSwitch,TRACK_ROLES,MAX_TRACKS_PER_KIND,audioDuration,clipSpeed,MIN_SPEED,MAX_SPEED} from './state.js';
 import {Player} from './player.js';
 import {loadFonts,measureVisual,renderCaptionPreview,renderGraphicPreview} from './render.js';
 import {detectEngine,exportVideo} from './exporter.js';
@@ -8,7 +8,7 @@ import {uid,clamp,download} from './util.js';
 import {assets,addAsset,makeClip,makeAudio,captureDocument,restoreDocument,History,setDocumentName,documentName,packProject,unpackProject,saveDraft,loadDraft,onAssetReady,removeAssetFromLibrary,unusedLibraryAssetIds} from './project-store.js';
 import {Timeline} from './timeline.js';
 import {MIN_TIMELINE,maxTimelineHeight,clampTimelineHeight,readStoredHeight,heightTargetFor} from './layout.js';
-import {frameTime,timelineCollection,itemRange,splitAvailability,placeVideoClip,planClipTrim,applyClipTrim,setTransition,deleteTimelineItem,planPlacement,placeTimelineItem,currentGap,planItemTrim,applyItemTrim} from './timeline-edits.js';
+import {frameTime,timelineCollection,itemRange,splitAvailability,placeVideoClip,planClipTrim,applyClipTrim,setTransition,deleteTimelineItem,planPlacement,placeTimelineItem,currentGap,planItemTrim,applyItemTrim,applyItemSpeed} from './timeline-edits.js';
 import {GRAPHICS,CAPTIONS,TRANSITIONS} from './presets.js';
 import {transformOf,alignVisual} from './visual-transform.js';
 import {safeAreaConfig} from './safe-areas.js';
@@ -539,6 +539,14 @@ function renderCaptionList(){const list=$('captionList');if(!list)return;list.in
 const range=(label,prop,value,min,max,step=1,suffix='')=>`<label class="property-row"><span>${label}</span><input type="range" data-prop="${prop}" min="${min}" max="${max}" step="${step}" value="${esc(value)}" aria-label="${label}"><output>${Number(value).toFixed(step<1?1:0)}${suffix}</output></label>`;
 const number=(label,prop,value,min=0,max=86400,step=.1)=>`<label class="property-row"><span>${label}</span><input type="number" data-prop="${prop}" value="${Number(value||0).toFixed(2)}" min="${min}" max="${max}" step="${step}"><span>초</span></label>`;
 const selectField=(label,prop,value,options)=>`<label class="property-row"><span>${label}</span><select data-prop="${prop}">${options.map(([v,n])=>`<option value="${esc(v)}" ${v===value?'selected':''}>${n}</option>`).join('')}</select></label>`;
+// 배속 · 저속. 캡컷처럼 고르기 쉬운 값만 둡니다. 템플릿이 넣은 중간값은 목록에 덧붙입니다.
+const SPEED_OPTIONS=[['0.25','0.25배 · 아주 느리게'],['0.5','0.5배 · 느리게'],['0.75','0.75배'],['1','1배 · 원래 속도'],['1.5','1.5배'],['2','2배 · 빠르게'],['3','3배'],['4','4배 · 아주 빠르게']];
+const speedField=(item,duration)=>{
+  const current=String(clipSpeed(item));
+  const options=SPEED_OPTIONS.some(([v])=>v===current)?SPEED_OPTIONS:[[current,current+'배'],...SPEED_OPTIONS];
+  return selectField('속도','speed',current,options)
+    +'<p class="inspector-note">원본에서 쓰는 구간은 그대로 두고 타임라인 길이만 달라집니다. 지금 '+duration.toFixed(2)+'초 · 같은 트랙의 뒤 클립만 함께 움직입니다.</p>';
+};
 const section=(title,body,sub='')=>`<section class="property-section"><h3>${title}<span>${sub}</span></h3>${body}</section>`;
 
 function settingsControls(){
@@ -627,6 +635,7 @@ function renderInspectorContent(){
     const clipRange=itemRange('clip',item.id);
     html+=section('타임라인 위치',number('위치','start',clipRange.start)+'<p class="inspector-note">빈 구간에 놓을 수 있습니다. 다른 영상 위에 놓으면 두 클립의 자리를 교환합니다. 다른 클립은 이동하지 않습니다.</p>');
     html+=section('클립 구간',item.type==='image'?number('길이','imgDuration',item.imgDuration,1/project.fps,600,1/project.fps):number('원본 시작','trimStart',item.trimStart,0,item.trimEnd-1/project.fps)+number('원본 끝','trimEnd',item.trimEnd,item.trimStart+1/project.fps,item.srcDuration),item.type==='video'?'원본 기준':'DURATION');
+    if(item.type==='video')html+=section('속도',speedField(item,clipDuration(item)));
     if(item.type==='image')html+=section('이미지 모션',selectField('움직임','ken',item.ken,[['none','없음'],['in','천천히 확대'],['out','천천히 축소'],['left','왼쪽으로 팬'],['right','오른쪽으로 팬']]));
     if(item.type==='video')html+=section('원본 오디오',item.audioSeparated?'<p class="inspector-note">원음은 별도 오디오 클립으로 분리됐습니다. 타임라인의 원음 클립을 선택해 볼륨·페이드·음소거를 조절하세요.</p>':range('볼륨','volume',(item.volume??1)*100,0,300,1,'%')+`<label class="property-row"><input type="checkbox" data-prop="muted" ${item.muted?'checked':''}>음소거</label>${item.decoderOnly?'<p class="note warning">디코더 모드: 미리보기 소리는 지원하지 않으며 내보내기에만 포함됩니다.</p>':''}`);
     const pair=currentTransition({id:item.id});
@@ -635,6 +644,7 @@ function renderInspectorContent(){
     html+=section('클립 페이드',number('인','fadeIn',item.fadeIn,0,2)+number('아웃','fadeOut',item.fadeOut,0,2));
   }else if(type==='audio'){
     html+=section('트랙 위치',selectField('용도','role',item.role||item.lane,[['music','배경음악'],['voice','말소리 · 자막 인식 대상'],['effect','효과음']])+number('위치','start',item.start)+number('시작','trimStart',item.trimStart,0,item.trimEnd-.03)+number('끝','trimEnd',item.trimEnd,item.trimStart+.03,assets.get(item.assetId)?.duration||86400));
+    html+=section('속도',speedField(item,audioDuration(item)));
     html+=section('오디오',range('볼륨','volume',(item.volume??1)*100,0,300,1,'%')+number('페이드 인','fadeIn',item.fadeIn,0,10)+number('페이드 아웃','fadeOut',item.fadeOut,0,10)+`<label class="property-row"><input type="checkbox" data-prop="muted" ${item.muted?'checked':''}>음소거</label><p class="inspector-note">영상 뒤에 있는 오디오도 끝까지 내보냅니다. 영상이 없는 구간은 검은 화면입니다.${item.aiGenerated?' 게시할 때 AI 생성 음성임을 알려주세요.':''}</p>`);
   }else{
     html+=section('내용',`<textarea data-prop="text" rows="3" maxlength="3000" aria-label="${type==='caption'?'자막':'그래픽'} 내용">${esc(item.text)}</textarea>${item.subtitle!==undefined?`<label class="field-label">보조 문구<input type="text" data-prop="subtitle" value="${esc(item.subtitle)}" maxlength="150" aria-label="보조 문구"></label>`:''}`);
@@ -689,7 +699,7 @@ async function placeAssetImpl(id,time=null,lane=null,dropPlan=null){
     const track=makeAudio(id,{start:at,role:asset.aiGenerated?'voice':id.startsWith('builtin-sfx-')?'effect':'music',
       ...(id.startsWith('builtin-sfx-')?{fadeIn:0,fadeOut:0,volume:.65}:{})});
     const target=targetTrack(role,lane,true);
-    result=placeTimelineItem('audio',track,dropPlan?.placement||planPlacement(at,track.trimEnd-track.trimStart,target));
+    result=placeTimelineItem('audio',track,dropPlan?.placement||planPlacement(at,audioDuration(track),target));
   }else{
     result=await insertMediaAsset(id,{time:at,trackId:targetTrack(role,lane)||undefined,placement:dropPlan?.placement,onStatus:message=>toast(message)});
   }
@@ -848,6 +858,9 @@ function applyProperty(input){
   }else if(prop.startsWith('crop.')){
     const key=prop.slice(5),other={left:'right',right:'left',top:'bottom',bottom:'top'}[key];
     item.crop={...item.crop,[key]:Math.max(0,Math.min(value/100,.98-(item.crop?.[other]||0)))};
+  }else if(prop==='speed'){
+    // 영상과 분리된 원음처럼 연결된 항목은 함께 바꿔야 소리가 어긋납니다.
+    for(const ref of expandLinked([{type,id:item.id}]))applyItemSpeed(ref.type,ref.id,Number(value));
   }else if(prop==='transitionType'||prop==='transitionDuration'){
     const pair=currentTransition();if(!pair)return;
     const effect=prop==='transitionType'?value:pair.type==='cut'&&value>0?'dissolve':pair.type;

@@ -1,5 +1,5 @@
 // 미리보기 재생기 — <video> 엘리먼트를 타임라인에 맞춰 몰고 다니면서 캔버스에 그린다.
-import { project, layersAt, totalDuration, clipFadeGain, isTrackAudible, inlineClipAudible, trackIdFor } from './state.js';
+import { project, layersAt, totalDuration, clipFadeGain, isTrackAudible, inlineClipAudible, trackIdFor, sourceTime, audioDuration, clipSpeed } from './state.js';
 import { renderFrame } from './render.js';
 import { clamp } from './util.js';
 import { PreviewAudioGain, volumeAt } from './audio-gain.js';
@@ -42,7 +42,7 @@ export class Player {
     if (clip.type === 'image') {
       return clip.bitmap ? { img: clip.bitmap, w: clip.natW, h: clip.natH } : null;
     }
-    if (clip.decoderOnly) return this._sinkSource(clip, clip.trimStart + local);
+    if (clip.decoderOnly) return this._sinkSource(clip, sourceTime(clip, local));
     const el = clip.el;
     if (!el || el.readyState < 2 || !el.videoWidth) return null;
     if (el.requestVideoFrameCallback && !this.watchedVideos.has(el)) {
@@ -232,7 +232,10 @@ export class Player {
         if (!c.el.paused) c.el.pause();
         continue;
       }
-      const want = c.trimStart + at.local;
+      const want = sourceTime(c, at.local);
+      // 배속은 <video> 의 재생 속도로 그대로 넘깁니다. 소리 높낮이는 브라우저가 보정합니다.
+      const speed = clipSpeed(c);
+      if (c.el.playbackRate !== speed) c.el.playbackRate = speed;
       // 분리된 원음은 별도 오디오 클립만 재생합니다. 영상 음소거를 풀어도 중복되지 않습니다.
       // 원음 분리를 건너뛴 클립의 소리는 오디오 트랙이 아니라 솔로 여부만 따릅니다.
       const inline = !c.audioSeparated && inlineClipAudible();
@@ -306,10 +309,12 @@ export class Player {
       const el = track.el;
       if (!el) continue;
       this.trackElements.set(track.id, el);
-      const duration = track.trimEnd - track.trimStart;
+      const duration = audioDuration(track);
       const local = this.time - track.start;
       if (local < 0 || local >= duration || track.muted || !isTrackAudible(trackIdFor('audio', track))) { el.pause(); continue; }
-      const desired = track.trimStart + local;
+      const speed = clipSpeed(track);
+      if (el.playbackRate !== speed) el.playbackRate = speed;
+      const desired = track.trimStart + local * speed;
       if (Math.abs(el.currentTime - desired) > (this.playing ? .2 : .02)) el.currentTime = desired;
       el.muted = this.previewMuted || !!track.muted;
       this.previewGain.set(el,volumeAt(track,local)*clipFadeGain(track,local,duration));

@@ -1,5 +1,5 @@
 // UI와 드래그 미리보기가 함께 쓰는 편집 명령입니다. 다른 트랙은 명시적으로 선택하지 않으면 자르지 않습니다.
-import { project, buildLayout, clipDuration, pinClipPositions, transitionPairs, syncAnchoredItems, trackIdFor, trackItems, migrateTimeline, timelineTracks, trackKind, isTrackLocked } from './state.js';
+import { project, buildLayout, clipDuration, pinClipPositions, transitionPairs, syncAnchoredItems, trackIdFor, trackItems, migrateTimeline, timelineTracks, trackKind, isTrackLocked, audioDuration, clipSpeed, MIN_SPEED, MAX_SPEED } from './state.js';
 import { captureDocument, makeClip, makeAudio, assets, discardStagedInstance } from './project-store.js';
 import { complementRanges } from './silence.js';
 import { TRANSITIONS } from './presets.js';
@@ -36,7 +36,7 @@ export function itemRange(type, id, doc = project) {
     const entry = buildLayout(doc).entries.find(entry => entry.clip.id === id);
     return { ...entry, item, type, id };
   }
-  const duration = type === 'audio' ? item.trimEnd - item.trimStart : item.end - item.start;
+  const duration = type === 'audio' ? audioDuration(item) : item.end - item.start;
   return { item, type, id, trackId: trackIdFor(type, item, doc), start: item.start, end: item.start + duration, duration };
 }
 
@@ -275,6 +275,38 @@ export function currentGap(selection, doc = project) {
   if (selection?.type !== 'gap') return null;
   return trackGaps(selection.trackId, doc).find(gap => Math.abs(gap.start - selection.start) < EPS && Math.abs(gap.end - selection.end) < EPS) || null;
 }
+/**
+ * 배속을 바꿉니다. 쓰는 원본 구간(trimStart~trimEnd)은 그대로 두고 타임라인에서
+ * 차지하는 길이만 달라집니다. 캡컷·VN 과 같은 방식입니다.
+ *
+ * 길이가 변한 만큼 같은 트랙의 뒤 항목을 함께 밀거나 당깁니다. 그러지 않으면 빨라질 때
+ * 빈 구멍이 남고 느려질 때 뒤 클립과 겹칩니다. 다른 트랙은 건드리지 않습니다.
+ */
+export function applyItemSpeed(type, id, speed) {
+  if (type !== 'clip' && type !== 'audio') throw new Error('영상 또는 오디오 클립에만 배속을 줄 수 있습니다.');
+  const range = itemRange(type, id);
+  if (!range) return false;
+  const item = range.item;
+  if (type === 'clip' && item.type !== 'video') throw new Error('영상 클립에만 배속을 줄 수 있습니다.');
+  if (isTrackLocked(range.trackId)) throw new Error(LOCKED_TRACK_REASON);
+  const next = Math.min(MAX_SPEED, Math.max(MIN_SPEED, Number(speed) || 1));
+  if (Math.abs(clipSpeed(item) - next) < 1e-9) return false;
+  migrateTimeline();
+  pinClipPositions();
+  const before = range.duration;
+  item.speed = next;
+  const after = type === 'clip' ? clipDuration(item) : audioDuration(item);
+  const delta = after - before;
+  if (Math.abs(delta) > EPS) {
+    for (const entry of trackItems(range.trackId)) {
+      if (entry.id !== id && entry.start >= range.end - EPS) moveRange(entry, entry.start + delta);
+    }
+  }
+  normalizeTransitions();
+  syncAnchoredItems();
+  return true;
+}
+
 export function closeTimelineGap(selection) {
   const gap = currentGap(selection);
   if (!gap) return false;

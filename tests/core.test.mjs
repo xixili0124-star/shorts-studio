@@ -658,7 +658,7 @@ test('offline mixer schedules audio after video end and allocates the full seque
   globalThis.OfflineAudioContext=class{
     constructor(_channels,n){length=n;this.destination={};}
     createGain(){return {gain:{value:1,setValueAtTime(){},linearRampToValueAtTime(){}},connect(target){return target;}};}
-    createBufferSource(){return {connect(target){return target;},start(...args){starts.push(args);}};}
+    createBufferSource(){return {playbackRate:{value:1},connect(target){return target;},start(...args){starts.push(args);}};}
     startRendering(){return Promise.resolve({length});}
   };
   try{await mixTimeline();assert.equal(length,12*48000);assert.deepEqual(starts,[[7,0,5]]);}finally{globalThis.OfflineAudioContext=previous;}
@@ -670,7 +670,7 @@ test('offline narration preserves its own gain and coexists with explicitly sele
   globalThis.OfflineAudioContext=class{
     constructor(_channels,length){allocated=length;this.destination={};}
     createGain(){return {gain:{value:1,setValueAtTime(value){this.value=value;},linearRampToValueAtTime(value){this.value=value;}},connect(target){return target;}};}
-    createBufferSource(){return {connect(target){this.gain=target.gain;return target;},start(...args){sources.push({buffer:this.buffer,gain:this.gain.value,args});}};}
+    createBufferSource(){return {playbackRate:{value:1},connect(target){this.gain=target.gain;return target;},start(...args){sources.push({buffer:this.buffer,gain:this.gain.value,args});}};}
     startRendering(){return Promise.resolve({length:allocated});}
   };
   const capture=async options=>{sources.length=0;return mixTimeline(options);};
@@ -928,7 +928,7 @@ test('voice transcription follows purpose after movement between numbered audio 
   globalThis.OfflineAudioContext=class{
     constructor(){this.destination={};}
     createGain(){return {gain:{value:1,setValueAtTime(){},linearRampToValueAtTime(){}},connect(target){return target;}};}
-    createBufferSource(){return {connect(target){return target;},start(...args){starts.push(args);}};}
+    createBufferSource(){return {playbackRate:{value:1},connect(target){return target;},start(...args){starts.push(args);}};}
     startRendering(){return Promise.resolve({});}
   };
   try{await mixTimeline({includeBgm:false,includeVoice:true});assert.deepEqual(starts,[[6,0,2]]);}
